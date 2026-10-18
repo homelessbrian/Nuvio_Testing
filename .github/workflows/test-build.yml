@@ -1,6 +1,6 @@
 name: Build Test APK
 
-# Nuvio_Testing (private): builds "Nuvio + IPTV Test" from this repo's dev branch.
+# Nuvio_Testing: builds "Nuvio + IPTV Test" from this repo's dev branch.
 # Run it by hand from the Actions tab. Nothing is released; the APK stays in this private repo
 # (and, if connected, your Google Drive) and is deleted after a day.
 on:
@@ -8,6 +8,11 @@ on:
 
 permissions:
   contents: read
+
+# A new run stops one still going (no waiting for an old build you no longer want).
+concurrency:
+  group: test-build
+  cancel-in-progress: true
 
 jobs:
   build:
@@ -110,25 +115,11 @@ jobs:
           done
           grep -h "app_name" app/src/full/res/values/livetv_app_name.xml
 
-      # Private repos build on a smaller machine (7 GB) than public ones (16 GB). The build needs
-      # about 6 GB, so the machine ran out partway through. Extra swap gives it room; one task at
-      # a time and skipping the release lint check (not needed for a test build) keep it lower.
-      - name: Make room
-        run: |
-          sudo swapoff -a || true
-          sudo fallocate -l 10G /swapfile2 && sudo chmod 600 /swapfile2 && sudo mkswap /swapfile2 && sudo swapon /swapfile2 || true
-          free -h
-          sed -i 's/^org.gradle.jvmargs=.*/org.gradle.jvmargs=-Xmx6g -XX:MaxMetaspaceSize=1g -XX:+UseParallelGC -Dfile.encoding=UTF-8/' gradle.properties
-          {
-            echo "kotlin.compiler.execution.strategy=in-process"
-            echo "org.gradle.parallel=false"
-            echo "org.gradle.workers.max=1"
-          } >> gradle.properties
-
       - name: Build APK
         run: |
           chmod +x gradlew
-          ./gradlew :app:assembleFullRelease --stacktrace -PlivetvTestBuild=true \
+          # The release lint check is skipped: it's slow and not needed for a test build.
+          ./gradlew :app:assembleFullRelease --parallel --build-cache -PlivetvTestBuild=true \
             -x lintVitalAnalyzeFullRelease -x lintVitalReportFullRelease -x lintVitalFullRelease
 
       - name: Collect APKs
