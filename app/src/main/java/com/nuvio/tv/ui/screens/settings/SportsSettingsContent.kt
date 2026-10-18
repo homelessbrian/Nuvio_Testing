@@ -128,6 +128,12 @@ fun SportsSettingsContent(
                         { update { it.copy(scoreOnInfoBar = !it.scoreOnInfoBar) } }
                     )
                     SettingsToggleRow(
+                        "Only Games on My Channels",
+                        "Leaves out games none of your channels show. Games of teams you follow always show",
+                        s.onlyOnMyChannels,
+                        { update { it.copy(onlyOnMyChannels = !it.onlyOnMyChannels) } }
+                    )
+                    SettingsToggleRow(
                         "Best Channel First",
                         "Puts 4K and FHD channels at the top of each game's list, then the rest",
                         s.bestChannelFirst,

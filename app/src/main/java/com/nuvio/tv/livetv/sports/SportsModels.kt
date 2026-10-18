@@ -155,6 +155,8 @@ data class SportsSettings(
     /** Minutes before the start (0 = at the start). */
     val remindMinutes: Int = 15,
     val scoringAlerts: Boolean = false,
+    /** Leave out games none of your channels show (games of teams you follow always show). */
+    val onlyOnMyChannels: Boolean = true,
     /** Leagues taken off the Sports page. */
     val hiddenLeagues: Set<String> = emptySet(),
     /** A network as ESPN names it (lowercase) -> the channel you picked for it. */
@@ -173,6 +175,7 @@ data class SportsSettings(
         .put("remindMyTeams", remindMyTeams)
         .put("remindMinutes", remindMinutes)
         .put("scoringAlerts", scoringAlerts)
+        .put("onlyOnMyChannels", onlyOnMyChannels)
         .put("hiddenLeagues", JSONArray(hiddenLeagues.toList()))
         .put("networkChannels", JSONObject(networkChannels as Map<*, *>))
         .put("eventChannels", JSONObject(eventChannels as Map<*, *>))
@@ -194,6 +197,7 @@ data class SportsSettings(
                     remindMyTeams = o.optBoolean("remindMyTeams", d.remindMyTeams),
                     remindMinutes = o.optInt("remindMinutes", d.remindMinutes),
                     scoringAlerts = o.optBoolean("scoringAlerts", d.scoringAlerts),
+                    onlyOnMyChannels = o.optBoolean("onlyOnMyChannels", d.onlyOnMyChannels),
                     hiddenLeagues = o.optJSONArray("hiddenLeagues").strings().toSet(),
                     networkChannels = o.optJSONObject("networkChannels").stringMap(),
                     eventChannels = o.optJSONObject("eventChannels").stringMap(),

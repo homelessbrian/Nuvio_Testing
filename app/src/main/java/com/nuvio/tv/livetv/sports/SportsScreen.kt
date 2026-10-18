@@ -194,10 +194,14 @@ fun SportsScreen(
     val dayStart = viewModel.repo.dayStart(day)
     val dayEnd = viewModel.repo.dayStart(day + 1)
     val active = remember(settings, follows) { viewModel.repo.activeLeagues(settings, follows).map { it.id }.toSet() + SportsMatcher.OTHER_ID }
-    val dayEvents = remember(events, dayStart, active) {
+    // "Only games on my channels": once channels have been looked for, games on now or coming up
+    // that none of them show are left out (results, your teams' games and names you follow stay).
+    val filterToChannels = settings.onlyOnMyChannels && hasChannels && matches.isNotEmpty()
+    val dayEvents = remember(events, dayStart, active, filterToChannels, matches, follows) {
         events.filter { ev ->
             ev.leagueId in active && (if (ev.hasTime) ev.startMs in dayStart until dayEnd
-            else ev.startMs < dayEnd && (ev.endMs ?: (ev.startMs + 1)) >= dayStart)
+            else ev.startMs < dayEnd && (ev.endMs ?: (ev.startMs + 1)) >= dayStart) &&
+                (!filterToChannels || ev.state == GameState.POST || isMine(ev, follows) || matches[ev.id]?.isNotEmpty() == true)
         }
     }
     val effectiveChip = chip ?: if (follows.isEmpty) CHIP_ALL else CHIP_MINE
@@ -215,20 +219,24 @@ fun SportsScreen(
     }
     val leagueOrder = remember(settings) { SportsCatalog.ordered(settings).map { it.id } }
     fun rank(ev: SportsEvent) = leagueOrder.indexOf(ev.leagueId).let { if (it < 0) 999 else it }
-    val live = shown.filter { it.state == GameState.LIVE }
+    // Golf, tennis, a race weekend: "in progress" all week in the feed. On Now only while one
+    // of your channels is showing it; otherwise listed under This Week.
+    fun airingNow(ev: SportsEvent): Boolean = matches[ev.id]?.any { m -> m.program?.let { now >= it.startMs && now < it.stopMs } == true } == true
+    val weekLong = shown.filter { !it.hasTime && it.state == GameState.LIVE && !airingNow(it) }
+    val live = shown.filter { it.state == GameState.LIVE && it !in weekLong }
         .sortedWith(compareByDescending<SportsEvent> { isMine(it, follows) }.thenByDescending { matches[it.id]?.isNotEmpty() == true }.thenBy { rank(it) }.thenBy { it.startMs })
     val upcoming = shown.filter { it.state == GameState.PRE || it.state == GameState.OFF }
         .sortedWith(compareBy<SportsEvent> { if (it.hasTime) it.startMs else Long.MIN_VALUE }.thenByDescending { isMine(it, follows) }.thenBy { rank(it) })
     val slots = upcoming.groupBy { if (it.hasTime) it.startMs / 60_000 else -1L }.toList()
     val finished = shown.filter { it.state == GameState.POST }
         .sortedWith(compareByDescending<SportsEvent> { it.startMs }.thenBy { rank(it) })
-    val liveCount = dayEvents.count { it.state == GameState.LIVE }
+    val liveCount = dayEvents.count { it.state == GameState.LIVE && (it.hasTime || airingNow(it)) }
 
     val colors = NuvioTheme.colors
     val firstContent = remember { FocusRequester() }
     val firstChip = remember { FocusRequester() }
     var focusedOnce by remember { mutableStateOf(false) }
-    val hasContent = live.isNotEmpty() || upcoming.isNotEmpty() || finished.isNotEmpty()
+    val hasContent = live.isNotEmpty() || upcoming.isNotEmpty() || finished.isNotEmpty() || weekLong.isNotEmpty()
     LaunchedEffect(hasContent, day, effectiveChip) {
         delay(120)
         if (!focusedOnce) {
@@ -366,6 +374,24 @@ fun SportsScreen(
                                     }
                                 }
                             }
+                        }
+                    }
+                }
+                if (weekLong.isNotEmpty()) {
+                    item(key = "week_label") { SectionLabel("THIS WEEK") }
+                    val weekFirst = firstMod()
+                    itemsIndexed(weekLong, key = { _, e -> "week_" + e.id }) { i, ev ->
+                        Row(Modifier.fillMaxWidth().padding(start = 92.dp)) {
+                            EventRow(
+                                ev = ev,
+                                matches = matches[ev.id].orEmpty(),
+                                follows = follows,
+                                reminded = false,
+                                hideScores = settings.hideScores,
+                                modifier = (if (i == 0) weekFirst else Modifier).focusRequester(requesterFor(ev.id)),
+                                onClick = { openId = ev.id },
+                                onLongClick = { menuFor = ev }
+                            )
                         }
                     }
                 }

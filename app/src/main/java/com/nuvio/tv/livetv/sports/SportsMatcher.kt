@@ -47,7 +47,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
 
         val wanted = input.events.filter { ev ->
             ev.state != GameState.OFF && ev.hasTime &&
-                ev.startMs in (input.now - 8 * HOUR)..(input.now + 40 * HOUR)
+                ev.startMs in (input.now - 8 * HOUR)..(input.now + 56 * HOUR)
         }
         var byGuide = 0; var byName = 0; var byNetwork = 0
 
