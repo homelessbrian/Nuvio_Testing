@@ -1,6 +1,6 @@
 <div align="center">
 
-# Nuvio + IPTV
+# Nuvio + IPTV!
 
 **Everything in Nuvio, plus everything IPTV: a TiviMate-style Live TV guide, catch-up, recordings, and your provider's movies and series, all in one app for Google TV, Android TV and Fire TV.**
 
