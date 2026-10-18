@@ -28,7 +28,10 @@ internal class SportsFeeds {
         .build()
 
     private fun get(url: String): String {
-        val req = Request.Builder().url(url).header("Accept", "application/json").build()
+        val req = Request.Builder().url(url)
+            .header("Accept", "application/json")
+            .header("User-Agent", "Mozilla/5.0 (Linux; Android 12; TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120 Safari/537.36")
+            .build()
         http.newCall(req).execute().use { r ->
             if (!r.isSuccessful) throw java.io.IOException("HTTP ${r.code}")
             return r.body?.string() ?: throw java.io.IOException("empty answer")
@@ -40,6 +43,14 @@ internal class SportsFeeds {
     /** Raw scoreboard for [league] over the days [fromDay]..[toDay] ("yyyyMMdd", US Eastern days). */
     fun scoreboardRaw(league: League, fromDay: String, toDay: String): String =
         get("$ESPN${league.espnPath}/scoreboard?dates=$fromDay-$toDay&limit=1000${league.espnQuery}")
+
+    /** One day only (for leagues whose feed won't take a range of days). */
+    fun scoreboardDayRaw(league: League, day: String): String =
+        get("$ESPN${league.espnPath}/scoreboard?dates=$day&limit=1000${league.espnQuery}")
+
+    /** The feed's own pick of days (no date asked for): the last resort. */
+    fun scoreboardDefaultRaw(league: League): String =
+        get("$ESPN${league.espnPath}/scoreboard?limit=1000${league.espnQuery}")
 
     fun teamsRaw(league: League): String = get("$ESPN${league.espnPath}/teams?limit=1000")
 

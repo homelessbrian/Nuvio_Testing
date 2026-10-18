@@ -197,19 +197,22 @@ class SportsRepository @Inject constructor(
         _loading.value = true
         try {
             val (from, to) = espnRange(now)
+            val days = espnDays(now)
             val gate = Semaphore(4)
             val failed = ArrayList<String>()
+            val reasons = LinkedHashSet<String>()
             coroutineScopeFetch(due) { l ->
                 gate.withPermit {
-                    val r = runCatching { feeds.scoreboardRaw(l, from, to) }
-                    r.onSuccess { raw ->
-                        val parsed = runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrElse { emptyList() }
+                    val r = runCatching { fetchScoreboard(l, from, to, days) }
+                    r.onSuccess { raws ->
+                        val parsed = raws.flatMap { raw -> runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrElse { emptyList() } }
+                            .distinctBy { it.id }
                         val before = leagueData.value[l.id]?.events
                         leagueData.update { it + (l.id to LeagueData(parsed, System.currentTimeMillis(), null)) }
-                        runCatching { File(dir, "sb_${safe(l.id)}.json").writeText("${System.currentTimeMillis()}\n$raw") }
+                        runCatching { File(dir, "sb_${safe(l.id)}.json").writeText("${System.currentTimeMillis()}\n" + raws.joinToString(RAW_SEP)) }
                         if (before != null) noticeScoring(l, before, parsed)
                     }.onFailure { e ->
-                        synchronized(failed) { failed += l.name }
+                        synchronized(failed) { failed += l.name; reasons += describe(e) }
                         leagueData.update { m ->
                             val old = m[l.id]
                             m + (l.id to LeagueData(old?.events.orEmpty(), old?.fetchedAt ?: (System.currentTimeMillis() - 4 * MINUTE), e.message))
@@ -217,12 +220,54 @@ class SportsRepository @Inject constructor(
                     }
                 }
             }
-            _problem.value = if (failed.size >= due.size && due.isNotEmpty()) "Couldn't reach the scores service. Showing what was saved." else null
+            val why = reasons.take(2).joinToString(", ")
+            _problem.value = if (failed.size >= due.size && due.isNotEmpty()) "Couldn't reach the scores service ($why). Showing what was saved." else null
+            if (failed.isNotEmpty()) {
+                val line = "Sports: couldn't get scores for ${failed.take(6).joinToString(", ")}${if (failed.size > 6) " and ${failed.size - 6} more" else ""} ($why)"
+                if (line != lastFailLine) { lastFailLine = line; LiveTvLoadReport.add(line) }
+            } else lastFailLine = null
             _updatedAt.value = System.currentTimeMillis()
             rebuildLiveScores()
         } finally {
             _loading.value = false
         }
+    }
+
+    private var lastFailLine: String? = null
+
+    /** Leagues whose feed wouldn't take a range of days (asked one day at a time from then on). */
+    private val dayByDay: MutableSet<String> = java.util.Collections.synchronizedSet(HashSet())
+
+    /**
+     * A league's games for the three days around today: one request for the whole range; if the
+     * feed won't take that, one request per day; failing that, whatever day the feed picks.
+     */
+    private fun fetchScoreboard(l: League, from: String, to: String, days: List<String>): List<String> {
+        var firstError: Throwable? = null
+        if (l.id !in dayByDay) {
+            val r = runCatching { feeds.scoreboardRaw(l, from, to) }
+            r.getOrNull()?.let { return listOf(it) }
+            firstError = r.exceptionOrNull()
+        }
+        val singles = days.mapNotNull { d ->
+            runCatching { feeds.scoreboardDayRaw(l, d) }.onFailure { if (firstError == null) firstError = it }.getOrNull()
+        }
+        if (singles.isNotEmpty()) {
+            if (l.id !in dayByDay) {
+                dayByDay += l.id
+                LiveTvLoadReport.add("Sports: ${l.name} doesn't take a range of days (${firstError?.let { describe(it) }}); asking one day at a time")
+            }
+            return singles
+        }
+        runCatching { feeds.scoreboardDefaultRaw(l) }.getOrNull()?.let { return listOf(it) }
+        throw firstError ?: java.io.IOException("no answer")
+    }
+
+    private fun describe(e: Throwable): String = when (e) {
+        is java.net.UnknownHostException -> "no internet or the address can't be found"
+        is java.net.SocketTimeoutException -> "timed out"
+        is javax.net.ssl.SSLException -> "secure connection failed: ${e.message?.take(60)}"
+        else -> e.message?.take(80)?.ifBlank { null } ?: e.javaClass.simpleName
     }
 
     private suspend fun coroutineScopeFetch(list: List<League>, block: suspend (League) -> Unit) {
@@ -255,7 +300,9 @@ class SportsRepository @Inject constructor(
                 val at = text.substring(0, nl).toLong()
                 if (now - at > 2 * DAY) return@runCatching
                 // Saved a while ago: counts as old, so it's checked again when wanted.
-                m[l.id] = LeagueData(SportsFeeds.parseScoreboard(l, text.substring(nl + 1)), at, null)
+                m[l.id] = LeagueData(
+                    text.substring(nl + 1).split(RAW_SEP).flatMap { SportsFeeds.parseScoreboard(l, it) }.distinctBy { it.id }, at, null
+                )
             }
         }
         val fx = HashMap<String, LeagueData>()
@@ -503,6 +550,12 @@ class SportsRepository @Inject constructor(
         return f.format(java.util.Date(now - DAY)) to f.format(java.util.Date(now + DAY))
     }
 
+    /** The ESPN (US Eastern) dates for yesterday, today and tomorrow. */
+    private fun espnDays(now: Long): List<String> {
+        val f = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
+        return listOf(now - DAY, now, now + DAY).map { f.format(java.util.Date(it)) }
+    }
+
     private fun safe(id: String) = id.replace(Regex("[^a-zA-Z0-9]+"), "_")
 
     companion object {
@@ -510,6 +563,8 @@ class SportsRepository @Inject constructor(
         private const val MINUTE = 60_000L
         private const val HOUR = 60 * MINUTE
         private const val DAY = 24 * HOUR
+        /** Between saved answers when a league was asked one day at a time. */
+        private const val RAW_SEP = "\n\u0001\n"
     }
 }
 
