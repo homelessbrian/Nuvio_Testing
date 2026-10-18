@@ -76,6 +76,20 @@ object SportsLaunch {
     /** A replay from the start, for Live TV to start when it opens. */
     data class Catchup(val channelKey: String, val program: com.nuvio.tv.livetv.model.EpgProgram)
 
+    /** Live TV was opened from the Sports page (Back goes back there), and on which game. */
+    @Volatile private var returnTo: String? = null
+    @Volatile private var focusEvent: String? = null
+    @Volatile private var returnSetAt = 0L
+    fun openedFromSports(eventId: String) { returnTo = eventId; focusEvent = eventId; returnSetAt = System.currentTimeMillis() }
+    fun takeReturnToSports(): Boolean = (returnTo != null).also { returnTo = null }
+    fun clearReturn() { returnTo = null; focusEvent = null }
+    /** Live TV closed some other way: Back there no longer goes to Sports. */
+    fun dropReturn() {
+        // Not while Live TV is still opening (its screens are swapped in once on the way).
+        if (System.currentTimeMillis() - returnSetAt > 5_000) returnTo = null
+    }
+    fun takeFocusEvent(): String? = focusEvent.also { focusEvent = null }
+
     @Volatile private var catchup: Catchup? = null
     fun catchup(c: Catchup) { catchup = c }
     fun takeCatchup(): Catchup? = catchup.also { catchup = null }
@@ -124,6 +138,8 @@ fun SportsScreen(
         onDispose { viewModel.repo.setViewing(false) }
     }
     LaunchedEffect(Unit) {
+        // Back from watching a game: the highlight goes back on it.
+        SportsLaunch.takeFocusEvent()?.let { if (openId == null) returnTo = it }
         SportsLaunch.takeOpenEvent()?.let { openId = it }
         if (SportsLaunch.takeOpenPicker() || viewModel.isFirstVisit()) picker = true
     }
@@ -133,6 +149,7 @@ fun SportsScreen(
             LiveTvNotice.show("No channel found for ${ev.title}. Use Fix Channel to pick one.")
             return
         }
+        SportsLaunch.openedFromSports(ev.id)
         if (ev.state == GameState.POST) {
             if (viewModel.watchFromStart(ev, m)) onOpenLive()
             else LiveTvNotice.show("${ev.title} has finished, and ${m.channel.name} can't replay it")
@@ -142,6 +159,7 @@ fun SportsScreen(
         onOpenLive()
     }
     fun fromStart(ev: SportsEvent, m: ChannelMatch) {
+        SportsLaunch.openedFromSports(ev.id)
         if (viewModel.watchFromStart(ev, m)) onOpenLive()
         else LiveTvNotice.show("${m.channel.name} can't replay this from the start")
     }

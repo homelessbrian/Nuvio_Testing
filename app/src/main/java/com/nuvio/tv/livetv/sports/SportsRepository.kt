@@ -401,12 +401,17 @@ class SportsRepository @Inject constructor(
     private fun rebuildLiveScores() {
         val evs = events.value.associateBy { it.id }
         val out = HashMap<String, SportsEvent>()
+        val cards = HashMap<String, SportsEvent>()
         for ((id, list) in _matches.value) {
             val ev = evs[id] ?: continue
-            if (ev.state != GameState.LIVE || !ev.hasScore) continue
-            list.filter { it.sure }.forEach { m -> out.putIfAbsent(m.channel.key, ev) }
+            if (ev.state != GameState.LIVE) continue
+            list.filter { it.sure }.forEach { m ->
+                cards.putIfAbsent(m.channel.key, ev)
+                if (ev.hasScore) out.putIfAbsent(m.channel.key, ev)
+            }
         }
         SportsLive.byChannel.value = out
+        SportsLive.cardByChannel.value = cards
     }
 
     /** A team you follow scored: tell the app (Scoring Alerts). */
@@ -574,6 +579,8 @@ data class SportsAlert(val event: SportsEvent, val team: TeamInfo, val league: L
 /** Sports data the rest of the app shows: scores on Live TV's info bar, scoring alerts. */
 object SportsLive {
     val byChannel = MutableStateFlow<Map<String, SportsEvent>>(emptyMap())
+    /** Channel key -> the live game on it (with or without a score), for the card on the info panel. */
+    val cardByChannel = MutableStateFlow<Map<String, SportsEvent>>(emptyMap())
     val alerts = MutableStateFlow<SportsAlert?>(null)
     fun alert(a: SportsAlert) { alerts.value = a }
 }

@@ -677,6 +677,19 @@ fun LiveTvPlayerScreen(
                 )
             }
         }
+        // Sports: the game card in the top right corner while the full panel is up (OK).
+        AnimatedVisibility(
+            visible = panelFull && current != null && playback.catchupTitle == null && !listVisible,
+            enter = slideInHorizontally { it } + fadeIn(),
+            exit = slideOutHorizontally { it } + fadeOut(),
+            modifier = Modifier.align(Alignment.TopEnd)
+        ) {
+            com.nuvio.tv.livetv.sports.SportsCornerCard(
+                channelKey = current?.key,
+                use24h = settings.use24HourClock,
+                modifier = Modifier.padding(top = 28.dp, end = 36.dp)
+            )
+        }
         AnimatedVisibility(
             visible = (bannerVisible || panelFull || pausedNow) && current != null && (browseKey == null || panelFull),
             enter = slideInVertically { it } + fadeIn(),

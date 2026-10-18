@@ -13,6 +13,7 @@ import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
@@ -27,6 +28,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.graphics.Color
@@ -258,4 +260,84 @@ fun SportsScoreTag(channelKey: String?) {
         (ev.status?.let { " · $it" } ?: "")
     Spacer(Modifier.width(6.dp))
     LiveTag(text, Color(0xFF0B0C10).copy(alpha = 0.6f), Color.White, Modifier.border(1.dp, teamColor(sides[0].team).copy(alpha = 0.8f), RoundedCornerShape(5.dp)))
+}
+
+/**
+ * The game card in the top right corner while the full info panel is up (OK while watching):
+ * the teams in their colors, the score and clock (or "No live score"), and the time bar.
+ * Nothing when the channel isn't showing a game we're sure about. The corner clock is hidden
+ * while the panel is up (the panel shows the time), so the two never overlap.
+ */
+@Composable
+fun SportsCornerCard(channelKey: String?, use24h: Boolean, modifier: Modifier = Modifier) {
+    if (channelKey == null) return
+    val context = LocalContext.current
+    val repo = remember {
+        runCatching { EntryPointAccessors.fromApplication(context.applicationContext, SportsEntryPoint::class.java).sportsRepository() }.getOrNull()
+    } ?: return
+    val settings by repo.settings.collectAsState()
+    val cards by SportsLive.cardByChannel.collectAsState()
+    if (!settings.showInSidebar || !settings.scoreOnInfoBar) return
+    val ev = cards[channelKey] ?: return
+    val league = SportsCatalog.league(ev.leagueId) ?: return
+    val sides = ev.ordered(league.sport)
+    val now = System.currentTimeMillis()
+    val shape = RoundedCornerShape(14.dp)
+    val left = if (sides.size == 2) teamColor(sides[0].team) else leagueColor(league)
+    val right = if (sides.size == 2) teamColor(sides[1].team) else leagueColor(league)
+    Column(
+        modifier
+            .width(290.dp)
+            .clip(shape)
+            .splitBackground(left, right)
+            .border(1.dp, Color.White.copy(alpha = 0.18f), shape)
+            .padding(horizontal = 12.dp, vertical = 10.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            LeagueTag(league)
+            Spacer(Modifier.weight(1f))
+            LiveDot()
+            Spacer(Modifier.width(4.dp))
+            LiveText(cornerStatus(ev, use24h, settings.hideScores), color = Color.White, size = 11.sp, weight = FontWeight.ExtraBold)
+        }
+        Spacer(Modifier.height(8.dp))
+        if (sides.size == 2) {
+            val showScore = ev.hasScore && !settings.hideScores
+            val lead = if (showScore) sides.maxByOrNull { it.score?.toDoubleOrNull() ?: 0.0 } else null
+            val tied = showScore && sides[0].score == sides[1].score
+            sides.forEachIndexed { i, side ->
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
+                    TeamBadge(side.team, 24.dp)
+                    Spacer(Modifier.width(8.dp))
+                    LiveText(side.team.name, color = Color.White, size = 13.sp, weight = FontWeight.Black)
+                    Spacer(Modifier.weight(1f))
+                    when {
+                        showScore -> LiveText(
+                            side.score.orEmpty(), size = 20.sp, weight = FontWeight.Black,
+                            color = if (tied || side == lead) Color.White else Color.White.copy(alpha = 0.5f)
+                        )
+                        i == 0 -> LiveText(
+                            if (settings.hideScores) "SCORE HIDDEN" else "NO LIVE SCORE",
+                            color = Color.White.copy(alpha = 0.55f), size = 8.sp, weight = FontWeight.ExtraBold
+                        )
+                    }
+                }
+            }
+        } else {
+            LiveText(ev.title, color = Color.White, size = 14.sp, weight = FontWeight.Black, maxLines = 2)
+        }
+        ev.situation?.takeIf { !settings.hideScores }?.let {
+            LiveText(it, color = Color.White.copy(alpha = 0.75f), size = 10.sp)
+        }
+        Spacer(Modifier.height(6.dp))
+        Box(
+            Modifier
+                .fillMaxWidth()
+                .height(3.dp)
+                .clip(RoundedCornerShape(2.dp))
+                .background(Color.White.copy(alpha = 0.2f))
+        ) {
+            Box(Modifier.fillMaxWidth(progressOf(ev, now)).height(3.dp).background(Color.White))
+        }
+    }
 }

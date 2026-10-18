@@ -143,6 +143,8 @@ fun LiveTvGuideScreen(
     onOpenSettings: () -> Unit,
     onFindInNuvio: () -> Unit = {},
     onOpenNuvioSearch: () -> Unit = onFindInNuvio,
+    /** Full screen was opened from the Sports page: Back goes back there. */
+    onReturnToSports: () -> Unit = {},
     viewModel: LiveTvViewModel = hiltViewModel()
 ) {
     // Full screen happens right here, TiviMate style: the same video view grows from the
@@ -153,6 +155,10 @@ fun LiveTvGuideScreen(
     // when you come back, so you return to the channel you had selected.
     var savedSpot by remember { mutableStateOf<Pair<String, String?>?>(null) }
     var exitFullscreenTick by remember { mutableIntStateOf(0) }
+    // Full screen asked for from elsewhere and about to open: the guide mustn't take the
+    // highlight meanwhile (it used to land on the hidden group list behind the video, so OK and
+    // Back did nothing until pressed several times).
+    var fullscreenComing by remember { mutableStateOf(false) }
     fun goFullscreen() {
         fullscreen = true
     }
@@ -342,6 +348,7 @@ fun LiveTvGuideScreen(
     // Coming back from full screen: stay on the channel.
     LaunchedEffect(Unit) {
         delay(150)
+        if (fullscreenComing || fullscreen) return@LaunchedEffect
         val returning = viewModel.consumeReturningFromFullscreen()
         val toGroups = returning && viewModel.consumeGroupsOnReturn()
         if (returning && !toGroups) {
@@ -397,6 +404,7 @@ fun LiveTvGuideScreen(
             // Try a few times: the group's tile has to be on screen before it can take focus.
             for (attempt in 0 until 4) {
                 repeat(3) { androidx.compose.runtime.withFrameNanos { } }
+                if (fullscreenComing || fullscreen) break
                 if (runCatching { groupsFocus.requestFocus() }.isSuccess) break
                 runCatching { groupsListState.scrollToItem((idx - 3).coerceAtLeast(0)) }
             }
@@ -471,12 +479,18 @@ fun LiveTvGuideScreen(
         runCatching { gridFocus.requestFocus() }
     }
     LaunchedEffect(fullscreen) { LiveTvFullscreen.active.value = fullscreen }
-    androidx.compose.runtime.DisposableEffect(Unit) { onDispose { LiveTvFullscreen.active.value = false } }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            LiveTvFullscreen.active.value = false
+            com.nuvio.tv.livetv.sports.SportsLaunch.dropReturn()
+        }
+    }
     // Full screen asked for from elsewhere (home screen row, reminders, search…).
     val fullscreenRequests by LiveTvFullscreen.requests.collectAsStateWithLifecycle()
     LaunchedEffect(fullscreenRequests) {
         if (!LiveTvFullscreen.pending) return@LaunchedEffect
         LiveTvFullscreen.pending = false
+        fullscreenComing = true
         // Sports: a replay asked for while the guide was already open.
         com.nuvio.tv.livetv.sports.SportsLaunch.takeCatchup()?.let { c ->
             viewModel.channelByKey(c.channelKey)?.let { ch -> viewModel.playCatchup(ch, c.program) }
@@ -1857,9 +1871,18 @@ fun LiveTvGuideScreen(
         // ---------------------------------------------------------------- full screen
         if (fullscreen) {
             LiveTvPlayerScreen(
-                onBack = { fullscreen = false; exitFullscreenTick++ },
-                onFindInNuvio = { fullscreen = false; exitFullscreenTick++; onFindInNuvio() },
-                onBackToGroups = { fullscreen = false; savedSpot = null; exitFullscreenTick++; focusGroups() },
+                onBack = {
+                    fullscreenComing = false
+                    if (com.nuvio.tv.livetv.sports.SportsLaunch.takeReturnToSports()) {
+                        // Opened from the Sports page: back to the game you picked there.
+                        fullscreen = false
+                        onReturnToSports()
+                    } else {
+                        fullscreen = false; exitFullscreenTick++
+                    }
+                },
+                onFindInNuvio = { com.nuvio.tv.livetv.sports.SportsLaunch.clearReturn(); fullscreenComing = false; fullscreen = false; exitFullscreenTick++; onFindInNuvio() },
+                onBackToGroups = { com.nuvio.tv.livetv.sports.SportsLaunch.clearReturn(); fullscreenComing = false; fullscreen = false; savedSpot = null; exitFullscreenTick++; focusGroups() },
                 embedded = true,
                 viewModel = viewModel
             )

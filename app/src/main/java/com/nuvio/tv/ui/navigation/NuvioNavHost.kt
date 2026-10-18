@@ -1372,6 +1372,13 @@ private fun PlaybackNavHost(
                 onFindInNuvio = {
                     // Back from search returns to the guide.
                     navController.navigate(Screen.Search.route) { launchSingleTop = true }
+                },
+                onReturnToSports = {
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             )
         }
