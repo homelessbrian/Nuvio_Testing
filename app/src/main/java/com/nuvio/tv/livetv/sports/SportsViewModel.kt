@@ -1,0 +1,85 @@
+package com.nuvio.tv.livetv.sports
+
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.viewModelScope
+import com.nuvio.tv.livetv.data.LiveTvPreferences
+import com.nuvio.tv.livetv.data.LiveTvRepository
+import com.nuvio.tv.livetv.model.EpgProgram
+import com.nuvio.tv.livetv.player.LiveTvPlaybackController
+import dagger.hilt.android.lifecycle.HiltViewModel
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.map
+import kotlinx.coroutines.flow.stateIn
+import kotlinx.coroutines.launch
+import javax.inject.Inject
+
+@HiltViewModel
+class SportsViewModel @Inject constructor(
+    val repo: SportsRepository,
+    private val playback: LiveTvPlaybackController,
+    private val livePrefs: LiveTvPreferences,
+    liveRepo: LiveTvRepository
+) : ViewModel() {
+    val settings = repo.settings
+    val follows = repo.follows
+    val events = repo.events
+    val matches = repo.matches
+    val loading = repo.loading
+    val matching = repo.matching
+    val problem = repo.problem
+
+    val use24h: StateFlow<Boolean> = livePrefs.settings.map { it.use24HourClock }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
+    /** Live TV has channels at all (otherwise the page explains channels need a playlist). */
+    val hasChannels: StateFlow<Boolean> = liveRepo.channels.map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.Eagerly, true)
+
+    private val _now = MutableStateFlow(System.currentTimeMillis())
+    val now: StateFlow<Long> = _now
+
+    init {
+        repo.start()
+        viewModelScope.launch {
+            while (true) {
+                delay(15_000)
+                _now.value = System.currentTimeMillis()
+            }
+        }
+    }
+
+    /** Tunes Live TV to the channel (the screen then opens it full screen). */
+    fun watch(m: ChannelMatch) {
+        playback.play(m.channel)
+    }
+
+    /**
+     * From the start (catch-up): handed to Live TV, which starts it when it opens. False when
+     * the channel can't replay it.
+     */
+    fun watchFromStart(ev: SportsEvent, m: ChannelMatch): Boolean {
+        if (!m.catchup) return false
+        val league = SportsCatalog.league(ev.leagueId)
+        val program = m.program?.takeIf { it.startMs <= ev.startMs + 30 * 60_000L }
+            ?: EpgProgram(
+                startMs = ev.startMs,
+                stopMs = ev.endMs ?: (ev.startMs + (league?.minutes ?: 180) * 60_000L),
+                title = ev.title
+            )
+        SportsLaunch.catchup(SportsLaunch.Catchup(m.channel.key, program))
+        return true
+    }
+
+    /** Nothing followed yet and Pick Your Teams never seen: it opens by itself. */
+    suspend fun isFirstVisit(): Boolean {
+        val f = SportsFollows.fromJson(livePrefs.sportsMineJson.first())
+        return !f.setUp && f.isEmpty
+    }
+
+    suspend fun teams(league: League): List<TeamInfo> = repo.teams(league)
+    suspend fun plays(ev: SportsEvent): List<ScoringPlay> = repo.scoringPlays(ev)
+}

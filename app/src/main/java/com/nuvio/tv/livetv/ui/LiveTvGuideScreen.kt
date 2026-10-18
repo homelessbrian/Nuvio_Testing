@@ -477,6 +477,10 @@ fun LiveTvGuideScreen(
     LaunchedEffect(fullscreenRequests) {
         if (!LiveTvFullscreen.pending) return@LaunchedEffect
         LiveTvFullscreen.pending = false
+        // Sports: a replay asked for while the guide was already open.
+        com.nuvio.tv.livetv.sports.SportsLaunch.takeCatchup()?.let { c ->
+            viewModel.channelByKey(c.channelKey)?.let { ch -> viewModel.playCatchup(ch, c.program) }
+        }
         delay(150)
         fullscreen = true
     }
@@ -505,6 +509,14 @@ fun LiveTvGuideScreen(
     //  2. Otherwise, if something is already playing, highlight it.
     //  3. Otherwise "Resume last channel in preview" starts the last channel in the preview.
     LaunchedEffect(Unit) {
+        // Sports: "Watch from the start" on a game (a replay through the channel's catch-up).
+        com.nuvio.tv.livetv.sports.SportsLaunch.takeCatchup()?.let { c ->
+            val ch = viewModel.channelByKey(c.channelKey)
+            if (ch != null && viewModel.playCatchup(ch, c.program)) {
+                goFullscreen()
+                return@LaunchedEffect
+            }
+        }
         if (viewModel.playbackState.value.channelKey == null) viewModel.autoPlayCandidate()?.let { ch ->
             viewModel.preview(ch)
             goFullscreen()

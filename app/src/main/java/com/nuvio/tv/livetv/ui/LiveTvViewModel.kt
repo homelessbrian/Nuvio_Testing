@@ -48,6 +48,8 @@ class LiveTvSession @Inject constructor() {
     val collapsedPlaylists = MutableStateFlow<Set<String>>(emptySet())
     /** Sleep timer: when playback stops (null = off). Kept while the app is open. */
     val sleepAtMs = MutableStateFlow<Long?>(null)
+    /** The "closed while starting" note has been shown (once per app launch). */
+    var crashNoticeShown = false
 }
 
 data class LiveTvUiState(
@@ -1270,7 +1272,21 @@ class LiveTvViewModel @Inject constructor(
         val channels = withTimeoutOrNull(15_000) {
             displayChannels.first { list -> list.any { it.key == key } }
         } ?: return null
+        if (skipCrashed(key)) return null
         return channels.firstOrNull { it.key == key }
+    }
+
+    /**
+     * The app closed while [key] was starting last time: don't start it by itself again (a
+     * channel that freezes the app would otherwise close it every time Live TV opens).
+     */
+    private fun skipCrashed(key: String): Boolean {
+        if (playback.crashedWhileStarting != key || session.crashNoticeShown) return false
+        session.crashNoticeShown = true
+        val name = displayChannels.value.firstOrNull { it.key == key }?.name ?: "the last channel"
+        com.nuvio.tv.livetv.record.LiveTvNotice.show("Live TV closed while $name was starting last time, so it wasn't started again. Pick it to try again.")
+        com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Start-up: the app closed while $name was starting last time; not starting it by itself")
+        return true
     }
 
     /** The last watched channel, once per app launch, when "auto-play last channel" is on. */
@@ -1282,6 +1298,7 @@ class LiveTvViewModel @Inject constructor(
         val channels = withTimeoutOrNull(15_000) {
             repository.channels.first { it.isNotEmpty() }
         } ?: return null
+        if (skipCrashed(key)) return null
         return channels.firstOrNull { it.key == key }
             ?.let { c -> displayChannels.value.firstOrNull { it.key == c.key } ?: c }
     }

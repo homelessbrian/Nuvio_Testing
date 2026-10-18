@@ -184,6 +184,10 @@ class LiveTvPreferences @Inject constructor(
         val epgOverrides = stringPreferencesKey("epg_overrides")
         /** Channel key → PictureShape name, for channels set away from Auto. */
         val pictureShapes = stringPreferencesKey("picture_shapes")
+        /** Sports: settings and channel fixes (shared by every profile), as JSON. */
+        val sports = stringPreferencesKey("sports")
+        /** Sports: the teams, leagues and names you follow, and game reminders (per profile), as JSON. */
+        val sportsMine = stringPreferencesKey("sports_mine")
     }
 
     // ---------- Nuvio profiles ----------
@@ -198,7 +202,7 @@ class LiveTvPreferences @Inject constructor(
     private val personalStringKeys: List<Preferences.Key<String>> = listOf(
         Keys.favorites, Keys.recent, Keys.lastChannel, Keys.previousChannel, Keys.lastGroup,
         Keys.groupOrder, Keys.customGroups, Keys.channelOrder, Keys.channelCopies, Keys.reminders,
-        Keys.vodGroupOrder, Keys.vodSorts
+        Keys.vodGroupOrder, Keys.vodSorts, Keys.sportsMine
     )
     private val personalSetKeys: List<Preferences.Key<Set<String>>> = listOf(
         Keys.hiddenChannels, Keys.hiddenGroups, Keys.vodHiddenCategories
@@ -631,6 +635,28 @@ class LiveTvPreferences @Inject constructor(
 
     /** Picture shape chosen per channel (channels left on Auto aren't listed). */
     val pictureShapes: Flow<Map<String, String>> = store.data.map { decodeStringMap(it[Keys.pictureShapes]) }
+
+    // ---------- Sports ----------
+    // Kept with Live TV's settings so Google Drive sync carries them to your other TVs too.
+
+    /** Sports settings and channel fixes (JSON, read by the Sports page). */
+    val sportsSettingsJson: Flow<String?> = store.data.map { it[Keys.sports] }.distinctUntilChanged()
+
+    /** What this profile follows in Sports (JSON). */
+    val sportsMineJson: Flow<String?> =
+        kotlinx.coroutines.flow.combine(store.data, profileManager.activeProfileId) { p, id -> profileView(p, id)[Keys.sportsMine] }
+            .distinctUntilChanged()
+
+    suspend fun editSportsSettings(transform: (String?) -> String) {
+        store.edit { p -> p[Keys.sports] = transform(p[Keys.sports]) }
+    }
+
+    suspend fun editSportsMine(transform: (String?) -> String) {
+        store.edit { p ->
+            val id = currentProfile
+            p[my(Keys.sportsMine, id)] = transform(profileView(p, id)[Keys.sportsMine])
+        }
+    }
 
     suspend fun setPictureShape(key: String, shape: com.nuvio.tv.livetv.player.PictureShape) {
         store.edit { p ->

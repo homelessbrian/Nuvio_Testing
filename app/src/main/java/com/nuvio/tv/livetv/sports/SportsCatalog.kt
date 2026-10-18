@@ -1,0 +1,268 @@
+package com.nuvio.tv.livetv.sports
+
+import java.text.Normalizer
+import java.util.Locale
+
+/**
+ * Every league and sport the Sports page knows. ESPN's free feed covers most of them (scores,
+ * logos, team colors, US networks); sports it doesn't cover are found in your own TV guide.
+ */
+object SportsCatalog {
+
+    private val US = setOf("US")
+    private val UK = setOf("UK", "IE")
+    private val NA = setOf("US", "CA")
+    private val EVERYWHERE = League.ALL_REGIONS
+
+    val leagues: List<League> = listOf(
+        // ---- American football
+        League("football/nfl", Sport.AMERICAN_FOOTBALL, "NFL", "NFL", "football/nfl", guideWords = listOf("NFL"),
+            regions = EVERYWHERE, minutes = 195, color = 0xFF013369),
+        League("football/college-football", Sport.AMERICAN_FOOTBALL, "College Football", "NCAAF", "football/college-football",
+            guideWords = listOf("College Football", "NCAA Football", "NCAAF", "CFB"), regions = NA, minutes = 210,
+            schoolNames = true, espnQuery = "&groups=80", color = 0xFF1E3A5F),
+        // ---- Basketball
+        League("basketball/nba", Sport.BASKETBALL, "NBA", "NBA", "basketball/nba", guideWords = listOf("NBA"),
+            regions = EVERYWHERE, minutes = 150, color = 0xFF1D428A),
+        League("basketball/wnba", Sport.BASKETBALL, "WNBA", "WNBA", "basketball/wnba", guideWords = listOf("WNBA"),
+            regions = NA, minutes = 120, color = 0xFFC8102E),
+        League("basketball/mens-college-basketball", Sport.BASKETBALL, "Men's College Basketball", "NCAAM",
+            "basketball/mens-college-basketball", guideWords = listOf("College Basketball", "NCAA Basketball", "NCAAM"),
+            regions = US, minutes = 125, schoolNames = true, espnQuery = "&groups=50", color = 0xFF2B4C7E),
+        League("basketball/womens-college-basketball", Sport.BASKETBALL, "Women's College Basketball", "NCAAW",
+            "basketball/womens-college-basketball", guideWords = listOf("Women's College Basketball", "NCAAW"),
+            regions = US, minutes = 125, schoolNames = true, espnQuery = "&groups=50", color = 0xFF5B3A8C),
+        // ---- Hockey and baseball
+        League("hockey/nhl", Sport.HOCKEY, "NHL", "NHL", "hockey/nhl", guideWords = listOf("NHL"),
+            regions = setOf("US", "CA", "OTHER"), minutes = 160, color = 0xFF111111),
+        League("baseball/mlb", Sport.BASEBALL, "MLB", "MLB", "baseball/mlb", guideWords = listOf("MLB", "Baseball"),
+            regions = setOf("US", "CA", "OTHER"), minutes = 185, color = 0xFF002D72),
+        // ---- Football (soccer)
+        League("soccer/eng.1", Sport.FOOTBALL, "Premier League", "EPL", "soccer/eng.1", guideWords = listOf("Premier League", "EPL"),
+            regions = EVERYWHERE, minutes = 115, color = 0xFF3D195B),
+        League("soccer/eng.2", Sport.FOOTBALL, "Championship", "EFL", "soccer/eng.2", guideWords = listOf("Championship", "EFL"),
+            regions = UK, minutes = 115, color = 0xFF1C2C5B),
+        League("soccer/eng.3", Sport.FOOTBALL, "League One", "L1", "soccer/eng.3", guideWords = listOf("League One", "EFL"),
+            regions = UK, minutes = 115, color = 0xFF1C2C5B),
+        League("soccer/eng.4", Sport.FOOTBALL, "League Two", "L2", "soccer/eng.4", guideWords = listOf("League Two", "EFL"),
+            regions = UK, minutes = 115, color = 0xFF1C2C5B),
+        League("soccer/eng.fa", Sport.FOOTBALL, "FA Cup", "FA CUP", "soccer/eng.fa", guideWords = listOf("FA Cup"),
+            regions = UK, minutes = 125, color = 0xFF7A0019),
+        League("soccer/eng.league_cup", Sport.FOOTBALL, "Carabao Cup", "EFL CUP", "soccer/eng.league_cup",
+            guideWords = listOf("Carabao Cup", "EFL Cup", "League Cup"), regions = UK, minutes = 125, color = 0xFF00563F),
+        League("soccer/sco.1", Sport.FOOTBALL, "Scottish Premiership", "SPFL", "soccer/sco.1",
+            guideWords = listOf("Scottish Premiership", "SPFL"), regions = UK, minutes = 115, color = 0xFF2B2D7A),
+        League("soccer/eng.w.1", Sport.FOOTBALL, "Women's Super League", "WSL", "soccer/eng.w.1",
+            guideWords = listOf("Women's Super League", "WSL"), regions = UK, minutes = 115, color = 0xFF2C1E5A),
+        League("soccer/uefa.champions", Sport.FOOTBALL, "Champions League", "UCL", "soccer/uefa.champions",
+            guideWords = listOf("Champions League", "UCL"), regions = EVERYWHERE, minutes = 120, color = 0xFF0B1E5B),
+        League("soccer/uefa.europa", Sport.FOOTBALL, "Europa League", "UEL", "soccer/uefa.europa",
+            guideWords = listOf("Europa League", "UEL"), regions = setOf("UK", "IE", "US", "OTHER"), minutes = 120, color = 0xFFF26522),
+        League("soccer/uefa.europa.conf", Sport.FOOTBALL, "Conference League", "UECL", "soccer/uefa.europa.conf",
+            guideWords = listOf("Conference League", "UECL"), regions = UK, minutes = 120, color = 0xFF00A859),
+        League("soccer/esp.1", Sport.FOOTBALL, "LaLiga", "LALIGA", "soccer/esp.1", guideWords = listOf("LaLiga", "La Liga"),
+            regions = EVERYWHERE, minutes = 115, color = 0xFFEE3524),
+        League("soccer/ita.1", Sport.FOOTBALL, "Serie A", "SERIE A", "soccer/ita.1", guideWords = listOf("Serie A"),
+            regions = setOf("UK", "IE", "US", "AU", "OTHER"), minutes = 115, color = 0xFF024494),
+        League("soccer/ger.1", Sport.FOOTBALL, "Bundesliga", "BUNDES", "soccer/ger.1", guideWords = listOf("Bundesliga"),
+            regions = setOf("UK", "IE", "US", "AU", "OTHER"), minutes = 115, color = 0xFFD20515),
+        League("soccer/fra.1", Sport.FOOTBALL, "Ligue 1", "LIGUE 1", "soccer/fra.1", guideWords = listOf("Ligue 1"),
+            regions = setOf("UK", "IE", "OTHER"), minutes = 115, color = 0xFF091C3E),
+        League("soccer/usa.1", Sport.FOOTBALL, "MLS", "MLS", "soccer/usa.1", guideWords = listOf("MLS"),
+            regions = NA, minutes = 115, color = 0xFF001F5B),
+        League("soccer/usa.nwsl", Sport.FOOTBALL, "NWSL", "NWSL", "soccer/usa.nwsl", guideWords = listOf("NWSL"),
+            regions = US, minutes = 115, color = 0xFF0A2240),
+        League("soccer/mex.1", Sport.FOOTBALL, "Liga MX", "LIGA MX", "soccer/mex.1", guideWords = listOf("Liga MX"),
+            regions = US, minutes = 115, color = 0xFF1A7F3C),
+        // ---- Fighting
+        League("mma/ufc", Sport.FIGHTING, "UFC", "UFC", "mma/ufc", LeagueKind.EVENT, guideWords = listOf("UFC"),
+            regions = EVERYWHERE, minutes = 300, color = 0xFFD20A0A),
+        League("guide/boxing", Sport.FIGHTING, "Boxing", "BOXING", guideWords = listOf("Boxing"), regions = EVERYWHERE,
+            guideOnly = true, fixtureSlug = "boxing", kind = LeagueKind.EVENT, color = 0xFF7A1F1F),
+        League("guide/wrestling", Sport.FIGHTING, "Wrestling", "WWE", guideWords = listOf("WWE", "AEW", "Wrestling"),
+            regions = setOf("US", "CA", "UK", "OTHER"), guideOnly = true, kind = LeagueKind.EVENT, color = 0xFF3A3A3A),
+        // ---- Racing
+        League("racing/f1", Sport.RACING, "Formula 1", "F1", "racing/f1", LeagueKind.EVENT,
+            guideWords = listOf("Formula 1", "F1", "Grand Prix"), regions = EVERYWHERE, minutes = 120, color = 0xFFE10600),
+        League("racing/nascar-premier", Sport.RACING, "NASCAR Cup", "NASCAR", "racing/nascar-premier", LeagueKind.EVENT,
+            guideWords = listOf("NASCAR"), regions = US, minutes = 210, color = 0xFF007AC2),
+        League("racing/irl", Sport.RACING, "IndyCar", "INDY", "racing/irl", LeagueKind.EVENT, guideWords = listOf("IndyCar"),
+            regions = US, minutes = 180, color = 0xFF1E1E1E),
+        League("guide/motogp", Sport.RACING, "MotoGP", "MOTOGP", guideWords = listOf("MotoGP"), regions = setOf("UK", "IE", "AU", "OTHER"),
+            guideOnly = true, fixtureSlug = "motogp", kind = LeagueKind.EVENT, color = 0xFF231F20),
+        // ---- Golf and tennis
+        League("golf/pga", Sport.GOLF, "PGA Tour", "PGA", "golf/pga", LeagueKind.EVENT, guideWords = listOf("PGA Tour", "Golf"),
+            regions = EVERYWHERE, minutes = 360, color = 0xFF003865),
+        League("golf/eur", Sport.GOLF, "DP World Tour", "DPWT", "golf/eur", LeagueKind.EVENT, guideWords = listOf("DP World Tour", "Golf"),
+            regions = setOf("UK", "IE", "OTHER"), minutes = 360, color = 0xFF0A1F44),
+        League("golf/lpga", Sport.GOLF, "LPGA Tour", "LPGA", "golf/lpga", LeagueKind.EVENT, guideWords = listOf("LPGA"),
+            regions = US, minutes = 300, color = 0xFF00205B),
+        League("tennis/atp", Sport.TENNIS, "ATP Tour", "ATP", "tennis/atp", LeagueKind.EVENT, guideWords = listOf("ATP", "Tennis"),
+            regions = EVERYWHERE, minutes = 600, color = 0xFF003A70),
+        League("tennis/wta", Sport.TENNIS, "WTA Tour", "WTA", "tennis/wta", LeagueKind.EVENT, guideWords = listOf("WTA", "Tennis"),
+            regions = EVERYWHERE, minutes = 600, color = 0xFF6A1B9A),
+        // ---- Found in your guide (ESPN doesn't cover these)
+        League("guide/rugby-union", Sport.RUGBY, "Rugby Union", "RUGBY",
+            guideWords = listOf("Rugby Union", "Six Nations", "Premiership Rugby", "Gallagher Premiership", "URC", "Champions Cup", "Rugby World Cup", "Autumn Nations"),
+            regions = setOf("UK", "IE", "AU", "OTHER"), guideOnly = true, fixtureSlug = "rugby-union", kind = LeagueKind.EVENT, color = 0xFF0B4F2E),
+        League("guide/rugby-league", Sport.RUGBY, "Rugby League", "RL",
+            guideWords = listOf("Rugby League", "Super League", "NRL", "Challenge Cup", "State of Origin"),
+            regions = setOf("UK", "AU", "OTHER"), guideOnly = true, fixtureSlug = "rugby-league", kind = LeagueKind.EVENT, color = 0xFF1D3C8F),
+        League("guide/cricket", Sport.CRICKET, "Cricket", "CRICKET",
+            guideWords = listOf("Cricket", "Test Match", "The Ashes", "IPL", "T20", "The Hundred", "ODI"),
+            regions = setOf("UK", "IE", "AU", "OTHER"), guideOnly = true, fixtureSlug = "cricket", kind = LeagueKind.EVENT, color = 0xFF0E5A3A),
+        League("guide/darts", Sport.DARTS, "Darts", "DARTS", guideWords = listOf("Darts"),
+            regions = setOf("UK", "IE", "AU", "OTHER"), guideOnly = true, fixtureSlug = "darts", kind = LeagueKind.EVENT, color = 0xFF0F3D2E),
+        League("guide/snooker", Sport.SNOOKER, "Snooker", "SNOOKER", guideWords = listOf("Snooker"),
+            regions = setOf("UK", "IE", "OTHER"), guideOnly = true, fixtureSlug = "snooker", kind = LeagueKind.EVENT, color = 0xFF145A32),
+        League("guide/horse-racing", Sport.OTHER, "Horse Racing", "RACING",
+            guideWords = listOf("Horse Racing", "ITV Racing", "Racing TV", "Live Racing"),
+            regions = setOf("UK", "IE", "AU", "OTHER"), guideOnly = true, fixtureSlug = "horse-racing", kind = LeagueKind.EVENT, color = 0xFF5D4037),
+        League("guide/cycling", Sport.OTHER, "Cycling", "CYCLING", guideWords = listOf("Cycling", "Tour de France", "Giro", "Vuelta"),
+            regions = setOf("UK", "IE", "OTHER"), guideOnly = true, fixtureSlug = "cycling", kind = LeagueKind.EVENT, color = 0xFFF2C200)
+    )
+
+    private val byId = leagues.associateBy { it.id }
+    fun league(id: String): League? = byId[id]
+
+    /** The TV's country, as a Sports region. */
+    fun deviceRegion(): String = when (Locale.getDefault().country.uppercase()) {
+        "US", "PR" -> "US"
+        "GB", "UK" -> "UK"
+        "IE" -> "IE"
+        "CA" -> "CA"
+        "AU", "NZ" -> "AU"
+        else -> "OTHER"
+    }
+
+    fun regionOf(s: SportsSettings): String = s.region.ifBlank { deviceRegion() }
+
+    val regions: List<Pair<String, String>> = listOf(
+        "US" to "United States",
+        "UK" to "United Kingdom",
+        "IE" to "Ireland",
+        "CA" to "Canada",
+        "AU" to "Australia & New Zealand",
+        "OTHER" to "Somewhere else"
+    )
+
+    fun regionName(code: String): String = regions.firstOrNull { it.first == code }?.second ?: code
+
+    /**
+     * Shown on the Sports page: the region's leagues, minus ones you took off, plus ones from
+     * elsewhere you added ("+id" in [SportsSettings.hiddenLeagues]).
+     */
+    fun shown(league: League, s: SportsSettings): Boolean {
+        if ("+${league.id}" in s.hiddenLeagues) return true
+        if (league.id in s.hiddenLeagues) return false
+        return regionOf(s) in league.regions
+    }
+
+    /** Leagues in the order the region cares about them. */
+    fun ordered(s: SportsSettings): List<League> {
+        val region = regionOf(s)
+        val first: List<Sport> = when (region) {
+            "UK", "IE" -> listOf(Sport.FOOTBALL, Sport.RUGBY, Sport.CRICKET, Sport.DARTS, Sport.SNOOKER, Sport.RACING, Sport.FIGHTING, Sport.GOLF, Sport.TENNIS)
+            "AU" -> listOf(Sport.RUGBY, Sport.CRICKET, Sport.FOOTBALL, Sport.BASKETBALL)
+            "CA" -> listOf(Sport.HOCKEY, Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL)
+            else -> listOf(Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL, Sport.HOCKEY, Sport.FOOTBALL)
+        }
+        return leagues.sortedBy { l -> first.indexOf(l.sport).let { if (it < 0) 100 + l.sport.ordinal else it } }
+    }
+
+    /** The sports in the region's order. */
+    fun sportsOrder(s: SportsSettings): List<Sport> = ordered(s).map { it.sport }.distinct()
+
+    // ------------------------------------------------------------------ names, for the guide
+
+    /**
+     * Lowercase with accents, punctuation and "&" sorted out, padded with spaces so whole words
+     * can be looked for with [hasWord].
+     */
+    fun norm(s: String): String {
+        val plain = Normalizer.normalize(s, Normalizer.Form.NFD).replace(MARKS, "")
+        return " " + plain.lowercase(Locale.ROOT).replace("&", " and ").replace(NOT_WORD, " ").trim().replace(SPACES, " ") + " "
+    }
+
+    /** [term] (already normalized, no padding) as whole words in [normText] (from [norm]). */
+    fun hasWord(normText: String, term: String): Boolean = term.isNotBlank() && normText.contains(" $term ")
+
+    private val MARKS = Regex("\\p{M}+")
+    private val NOT_WORD = Regex("[^a-z0-9]+")
+    private val SPACES = Regex(" +")
+
+    /** Words that make a show a replay or a highlights show rather than the game itself. */
+    val NOT_LIVE_WORDS = listOf(
+        "highlights", "replay", "classic", "classics", "rewind", "recap", "review", "reaction",
+        "condensed", "mini match", "extended", "best of", "in 60", "in 90", "encore", "re air", "reair",
+        "magazine", "preview show", "goals", "match of the day", "motd", "uncut", "repeat"
+    )
+
+    /** Other names guides use for teams (and the start of names that need them). */
+    private val ALIASES: Map<String, List<String>> = mapOf(
+        "manchester united" to listOf("man utd", "man united", "man u"),
+        "manchester city" to listOf("man city"),
+        "tottenham hotspur" to listOf("tottenham", "spurs"),
+        "wolverhampton wanderers" to listOf("wolves", "wolverhampton"),
+        "brighton and hove albion" to listOf("brighton"),
+        "west ham united" to listOf("west ham"),
+        "newcastle united" to listOf("newcastle"),
+        "nottingham forest" to listOf("nottm forest", "nottingham f"),
+        "leicester city" to listOf("leicester"),
+        "leeds united" to listOf("leeds"),
+        "sheffield united" to listOf("sheff utd", "sheffield utd"),
+        "sheffield wednesday" to listOf("sheff wed", "sheffield wed"),
+        "queens park rangers" to listOf("qpr"),
+        "west bromwich albion" to listOf("west brom", "wba"),
+        "afc bournemouth" to listOf("bournemouth"),
+        "ipswich town" to listOf("ipswich"),
+        "luton town" to listOf("luton"),
+        "aston villa" to listOf("villa"),
+        "crystal palace" to listOf("palace"),
+        "paris saint germain" to listOf("psg", "paris sg", "paris st germain"),
+        "internazionale" to listOf("inter milan", "internazionale milano"),
+                "bayern munich" to listOf("bayern", "fc bayern", "bayern munchen"),
+        "borussia dortmund" to listOf("dortmund", "bvb"),
+        "bayer leverkusen" to listOf("leverkusen"),
+        "atletico madrid" to listOf("atletico", "atleti"),
+        "barcelona" to listOf("barca", "fc barcelona"),
+        "celtic" to listOf("celtic fc"),
+        "rangers" to listOf("rangers fc"),
+        "inter miami cf" to listOf("inter miami"),
+        "la galaxy" to listOf("galaxy"),
+        "los angeles fc" to listOf("lafc"),
+        "new york red bulls" to listOf("red bulls", "ny red bulls"),
+        "new york city fc" to listOf("nycfc", "nyc fc")
+    )
+
+    /** "FC", "AFC" and similar on the end or start of names: guides often leave them off. */
+    private val CLUB_BITS = Regex("""^(fc|afc|cf|sc|ac|ss|ssc|as|rc|cd|ca|sv|vfb|vfl|tsg|1 fc) | (fc|afc|cf|sc)$""")
+
+    /**
+     * How a guide might name [team]: strong names (enough on their own, with the other team) and
+     * weak ones (a city: Detroit plays four sports). College teams go by their school.
+     */
+    fun teamNames(team: TeamInfo, league: League): Pair<List<String>, List<String>> {
+        val strong = LinkedHashSet<String>()
+        val weak = LinkedHashSet<String>()
+        fun n(s: String?) = s?.let { norm(it).trim() }?.takeIf { it.length >= 3 }
+        val full = n(team.fullName)
+        full?.let { strong += it; strong += it.replace(CLUB_BITS, "").trim() }
+        val nick = n(team.name)
+        val loc = n(team.location)
+        if (league.schoolNames) {
+            loc?.let { strong += it }
+            nick?.let { if (loc == null || nick != loc) weak += it }
+        } else if (league.sport == Sport.FOOTBALL) {
+            nick?.let { strong += it; strong += it.replace(CLUB_BITS, "").trim() }
+            loc?.let { if (loc != nick) weak += it }
+        } else {
+            nick?.let { if (it != loc) strong += it }
+            loc?.let { weak += it }
+        }
+        listOfNotNull(full, nick).forEach { k -> ALIASES[k]?.let { strong += it } }
+        strong.removeAll { it.length < 3 }
+        weak.removeAll(strong)
+        return strong.toList() to weak.toList()
+    }
+}

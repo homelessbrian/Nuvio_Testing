@@ -78,6 +78,8 @@ fun NuvioNavHost(
     com.nuvio.tv.livetv.reminders.LiveTvReminderHost(navController)
     // Live TV fork: "Loading channels… / Importing movies…" pill while things download.
     com.nuvio.tv.livetv.ui.LiveTvLoadingHost(navController)
+    // Live TV fork: Sports reminders and scoring alerts, on top of whatever screen you're on.
+    com.nuvio.tv.livetv.sports.SportsHost(navController)
 }
 
 @Composable
@@ -1396,6 +1398,13 @@ private fun PlaybackNavHost(
             )
         }
 
+        composable(Screen.Sports.route) {
+            // Live TV fork: the Sports page (scores, schedules, which of your channels show each game).
+            com.nuvio.tv.livetv.sports.SportsScreen(
+                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) }
+            )
+        }
+
         composable(Screen.OnDemand.route) {
             // Live TV fork: On Demand in Nuvio's own home layout (Classic, Grid or Modern, as set
             // for Home), with every layout option taken from Home itself.
@@ -1468,6 +1477,13 @@ private fun PlaybackNavHost(
             SettingsScreen(
                 showBuiltInHeader = !hideBuiltInHeaders,
                 onNavigateToLiveTv = { navController.navigate(Screen.LiveTvSettings.route) },
+                onNavigateToSportsTeams = {
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openPicker()
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                    }
+                },
                 onNavigateToAddons = { navController.navigate(Screen.AddonManager.route) },
                 onNavigateToPlugins = { navController.navigate(Screen.Plugins.route) },
                 onNavigateToAuthQrSignIn = { navController.navigate(Screen.AuthQrSignIn.route) },
