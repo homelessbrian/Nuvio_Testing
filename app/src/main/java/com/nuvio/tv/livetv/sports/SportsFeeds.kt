@@ -194,6 +194,7 @@ internal class SportsFeeds {
         private fun wrestlingLeague(key: String?): String = when (key) {
             "wwe" -> "guide/wwe"
             "aew" -> "guide/aew"
+            "boxing" -> "guide/boxing"
             else -> "guide/wrestling"
         }
 
@@ -403,7 +404,9 @@ internal class SportsFeeds {
             val start = parseIso(ev.str("date")) ?: return null
             val end = parseIso(ev.str("endDate"))
             val comp = ev.optJSONArray("competitions")?.optJSONObject(0)
-            val st = comp?.optJSONObject("status") ?: ev.optJSONObject("status")
+            // An event with several sessions (practice, qualifying, the race): the event's own status.
+            val st = if (league.kind == LeagueKind.EVENT) ev.optJSONObject("status") ?: comp?.optJSONObject("status")
+            else comp?.optJSONObject("status") ?: ev.optJSONObject("status")
             val type = st?.optJSONObject("type")
             val stateRaw = type?.str("state")
             val name = type?.str("name").orEmpty()
@@ -450,7 +453,8 @@ internal class SportsFeeds {
                     broadcasts = broadcasts.toList(),
                     espnId = espnId,
                     endMs = end,
-                    note = if (multiDay && end != null) "Until " + SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(java.util.Date(end)) else null
+                    note = if (multiDay && end != null) "Until " + SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(java.util.Date(end)) else null,
+                    standings = if (state == GameState.PRE) emptyList() else runCatching { standingsOf(ev) }.getOrDefault(emptyList())
                 )
             }
 
@@ -515,6 +519,41 @@ internal class SportsFeeds {
                 progress = progress,
                 espnId = espnId
             )
+        }
+
+        /**
+         * A race's finishing order (or the running order while it's on), a golf leaderboard: from
+         * the race itself when the event has practice and qualifying too, otherwise the session
+         * with the most drivers or players.
+         */
+        private fun standingsOf(ev: JSONObject): List<Standing> {
+            val comps = ev.optJSONArray("competitions") ?: return emptyList()
+            val all = (0 until comps.length()).mapNotNull { comps.optJSONObject(it) }
+                .filter { (it.optJSONArray("competitors")?.length() ?: 0) >= 3 }
+            if (all.isEmpty()) return emptyList()
+            fun isRace(c: JSONObject): Boolean {
+                val t = c.optJSONObject("type")
+                val words = listOfNotNull(t?.str("abbreviation"), t?.str("text"), t?.str("name")).joinToString(" ").lowercase(Locale.ROOT)
+                return Regex("""\brace\b""").containsMatchIn(words) || words.trim() == "r"
+            }
+            val started = all.filter { c -> c.optJSONObject("status")?.optJSONObject("type")?.str("state") in setOf("in", "post") }
+            val pick = started.lastOrNull { isRace(it) } ?: all.lastOrNull { isRace(it) && it in started }
+                ?: started.maxByOrNull { it.optJSONArray("competitors")?.length() ?: 0 } ?: return emptyList()
+            val list = pick.optJSONArray("competitors") ?: return emptyList()
+            val rows = (0 until list.length()).mapNotNull { i ->
+                val co = list.optJSONObject(i) ?: return@mapNotNull null
+                val name = co.optJSONObject("athlete")?.let { it.str("displayName") ?: it.str("shortName") ?: it.str("fullName") }
+                    ?: co.optJSONObject("team")?.let { it.str("displayName") ?: it.str("name") }
+                    ?: return@mapNotNull null
+                val order = co.optInt("order", 0).takeIf { it > 0 } ?: (i + 1)
+                val score = when (val sc = co.opt("score")) {
+                    is JSONObject -> sc.str("displayValue")
+                    is String -> sc.takeIf { it.isNotBlank() }
+                    else -> null
+                }?.takeIf { it != "0" && it != "-" }
+                order to Standing(order.toString(), name, score)
+            }
+            return rows.sortedBy { it.first }.map { it.second }.take(20)
         }
 
         /** How far through the game the clock is (0..1), from the period and the clock. */

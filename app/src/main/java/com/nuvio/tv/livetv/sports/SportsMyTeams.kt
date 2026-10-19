@@ -101,12 +101,14 @@ private fun splitSubtitle(ev: SportsEvent): Pair<String?, String?> {
 // ------------------------------------------------------------------ the page
 
 /** Where a highlighted row sits in the list: its heading just below the top, so two rows show whole. */
-private val ROW_TOP_INSET = 36.dp
+private val ROW_TOP_INSET = 33.dp
 
 @OptIn(ExperimentalFoundationApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 internal fun MyTeamsRows(
     page: MyTeamsPage,
+    /** The sport picked on the top bar (null: everything you follow). */
+    sport: Sport?,
     follows: SportsFollows,
     settings: SportsSettings,
     matches: Map<String, List<ChannelMatch>>,
@@ -179,7 +181,8 @@ internal fun MyTeamsRows(
         }
     }
 
-    Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 28.dp, top = 20.dp)) {
+    // Stops above the hint line at the bottom, so it never sits over a row.
+    Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 28.dp, top = 20.dp, bottom = 24.dp)) {
         header()
         Spacer(Modifier.height(10.dp))
         Row(Modifier.fillMaxWidth().height(168.dp)) {
@@ -206,11 +209,15 @@ internal fun MyTeamsRows(
                     verticalArrangement = Arrangement.Center
                 ) {
                     LiveText(
-                        if (follows.isEmpty) "Follow your teams to see their games here." else "Nothing coming up for your teams yet.",
+                        when {
+                            follows.isEmpty -> "Follow teams and leagues to see their games here."
+                            sport != null -> "Nothing coming up in ${sport.label} yet."
+                            else -> "Nothing coming up yet."
+                        },
                         size = 18.sp, weight = FontWeight.Bold
                     )
                     Spacer(Modifier.height(10.dp))
-                    SportsAction("✎  Pick Your Teams", modifier = Modifier.focusRequester(heroReq), onClick = onPick)
+                    SportsAction("✎  Follow Teams & Leagues", modifier = Modifier.focusRequester(heroReq), onClick = onPick)
                 }
             }
             if (videoOn) {
@@ -250,7 +257,7 @@ internal fun MyTeamsRows(
                                         }
                                         .focusGroup(),
                                     horizontalArrangement = Arrangement.spacedBy(10.dp),
-                                    contentPadding = PaddingValues(start = 6.dp, end = 640.dp, top = 4.dp, bottom = 8.dp)
+                                    contentPadding = PaddingValues(start = 6.dp, end = 640.dp, top = 3.dp, bottom = 6.dp)
                                 ) {
                                     itemsIndexed(row.events, key = { _, ev -> ev.id }) { i, ev ->
                                         val key = keyAt(i)
@@ -283,7 +290,7 @@ internal fun MyTeamsRows(
 /** A row's heading: the team's badge (or the league's mark), its name, and how many games. */
 @Composable
 private fun RowHeader(row: SportsRow, follows: SportsFollows) {
-    Row(Modifier.fillMaxWidth().padding(top = 8.dp, bottom = 2.dp, start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+    Row(Modifier.fillMaxWidth().height(30.dp).padding(top = 6.dp, bottom = 2.dp, start = 4.dp, end = 4.dp), verticalAlignment = Alignment.CenterVertically) {
         when (row.kind) {
             SportsRow.Kind.UPCOMING -> Box(Modifier.size(10.dp).clip(RoundedCornerShape(5.dp)).background(SportsLook.Live))
             SportsRow.Kind.TEAM -> row.team?.let { t ->
@@ -298,7 +305,7 @@ private fun RowHeader(row: SportsRow, follows: SportsFollows) {
         val ahead = row.events.count { it.state != GameState.POST }
         LiveText(
             when (row.kind) {
-                SportsRow.Kind.UPCOMING -> "Your teams, soonest first"
+                SportsRow.Kind.UPCOMING -> "Everything you follow, soonest first"
                 SportsRow.Kind.LEAGUE -> if (ahead == 1) "1 game ahead" else "$ahead games ahead"
                 else -> if (ahead == 1) "1 game ahead" else "$ahead games ahead"
             },
@@ -338,7 +345,7 @@ internal fun RowCard(
     Column(
         modifier
             .width(222.dp)
-            .height(104.dp)
+            .height(96.dp)
             .sportsFrame(focused, playing || premium, if (playing) accent else Color(0xFFFFCE54), radius = 12.dp)
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(

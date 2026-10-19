@@ -91,7 +91,7 @@ class SportsRepository @Inject constructor(
     /** Every game and event on the page's days (yesterday to a week ahead). */
     val events: StateFlow<List<SportsEvent>> = combine(leagueData, weekData, fixtureData, guideData, tsdbData) { l, w, f, g, t ->
         val guide = g.values.flatten()
-        val from = dayStart(-2)
+        val from = dayStart(-DAYS_BACK - 1)
         val to = dayStart(DAYS_AHEAD + 2)
         val tsdb = t.values.flatMap { it.events }.filter { it.startMs in from until to }
         // A scheduled event (sporting-events.org, the wrestling schedule) gives way to the same
@@ -208,6 +208,7 @@ class SportsRepository @Inject constructor(
                 val force = forceExtras.also { forceExtras = false }
                 runCatching { updateWeek(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Sports week update failed", it) }
                 runCatching { updateAhead(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Sports weeks-ahead update failed", it) }
+                runCatching { updatePast(System.currentTimeMillis()) }.onFailure { Log.w(TAG, "Sports past days update failed", it) }
                 runCatching { updateTsdb(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Non-league update failed", it) }
                 runCatching { updateSchedules(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Team schedules update failed", it) }
             }
@@ -359,6 +360,40 @@ class SportsRepository @Inject constructor(
                 runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList())
             }
             aheadData.update { it + (l.id to LeagueData(parsed, at, null)) }
+        }
+    }
+
+    @Volatile private var pastWanted = 0L
+
+    /** A day before yesterday is on screen: get the week back (once, then every couple of hours while looked at). */
+    fun wantPast() {
+        val now = System.currentTimeMillis()
+        if (now - pastWanted > 60_000L) {
+            pastWanted = now
+            kick.value++
+        }
+    }
+
+    /** The week before yesterday, for the page's past days: only when someone has looked at one. */
+    private suspend fun updatePast(now: Long) {
+        if (now - pastWanted > 30 * MINUTE) return
+        val due = activeLeagues().filter { l ->
+            l.espnPath != null && now - (weekData.value["p|" + l.id]?.fetchedAt ?: 0L) > 2 * HOUR
+        }
+        if (due.isEmpty()) return
+        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
+        val from = fmt.format(java.util.Date(now - DAYS_BACK * DAY))
+        val to = fmt.format(java.util.Date(now - 2 * DAY))
+        val singleDays = (2..DAYS_BACK).map { d -> fmt.format(java.util.Date(now - d * DAY)) }
+        val gate = Semaphore(3)
+        coroutineScopeFetch(due) { l ->
+            gate.withPermit {
+                val raws: List<String> = (if (l.id !in dayByDay) runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()?.let { listOf(it) } else null)
+                    ?: singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
+                val at = System.currentTimeMillis()
+                val parsed = raws.flatMap { raw -> runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList()) }.distinctBy { it.id }
+                weekData.update { it + ("p|" + l.id to LeagueData(parsed, if (raws.isEmpty()) at - HOUR else at, null)) }
+            }
         }
     }
 
@@ -540,7 +575,8 @@ class SportsRepository @Inject constructor(
             fixtureData.update { it + (l.id to LeagueData(list, System.currentTimeMillis(), null)) }
         }
         // Wrestling's schedule (from TheSportsDB, through a file a GitHub job keeps up to date).
-        val wrestling = activeLeagues(s).filter { it.sport == Sport.WRESTLING }.map { it.id }.toSet()
+        // (Boxing's fight cards come in the same file.)
+        val wrestling = activeLeagues(s).filter { it.sport == Sport.WRESTLING || it.id == "guide/boxing" }.map { it.id }.toSet()
         if (wrestling.isNotEmpty()) {
             val file = File(dir, "fx_wrestling.json")
             val raw = runCatching { feeds.wrestlingRaw() }.onSuccess { runCatching { file.writeText(it) } }.getOrNull()
@@ -867,11 +903,12 @@ class SportsRepository @Inject constructor(
      * "This is the right channel" for [ev]. With [forNetworks], also for every game the same
      * network has from now on (FOX on your FOX 4K channel, say).
      */
-    fun pickChannel(ev: SportsEvent, channelKey: String, forNetworks: Boolean) = updateSettings { s ->
+    fun pickChannel(ev: SportsEvent, channelKey: String, forNetworks: Boolean, forTeam: TeamInfo? = null) = updateSettings { s ->
         val keep = s.eventChannels.filterValues { v -> (v.substringAfter('|').toLongOrNull() ?: 0L) > System.currentTimeMillis() - 3 * DAY }
         s.copy(
             eventChannels = keep + (ev.id to "$channelKey|${ev.startMs}"),
             networkChannels = if (forNetworks) s.networkChannels + ev.broadcasts.associate { SportsMatcher.networkKey(it) to channelKey } else s.networkChannels,
+            teamChannels = if (forTeam != null) s.teamChannels + (teamChannelKey(ev.leagueId, forTeam.id) to channelKey) else s.teamChannels,
             blocked = s.blocked - "${ev.id}|$channelKey"
         )
     }
@@ -881,11 +918,12 @@ class SportsRepository @Inject constructor(
         s.copy(
             blocked = (s.blocked + "${ev.id}|$channelKey").toList().takeLast(400).toSet(),
             eventChannels = s.eventChannels.filterNot { (id, v) -> id == ev.id && v.substringBefore('|') == channelKey },
-            networkChannels = s.networkChannels.filterNot { (n, key) -> key == channelKey && ev.broadcasts.any { SportsMatcher.networkKey(it) == n } }
+            networkChannels = s.networkChannels.filterNot { (n, key) -> key == channelKey && ev.broadcasts.any { SportsMatcher.networkKey(it) == n } },
+            teamChannels = s.teamChannels.filterNot { (t, key) -> key == channelKey && ev.sides.any { teamChannelKey(ev.leagueId, it.team.id) == t } }
         )
     }
 
-    fun clearFixes() = updateSettings { it.copy(networkChannels = emptyMap(), eventChannels = emptyMap(), blocked = emptySet()) }
+    fun clearFixes() = updateSettings { it.copy(networkChannels = emptyMap(), eventChannels = emptyMap(), blocked = emptySet(), teamChannels = emptyMap()) }
 
     /** The channel to tune for a reminder or "watch now": the best match, if any. */
     fun bestChannel(eventId: String): ChannelMatch? = _matches.value[eventId]?.firstOrNull()
@@ -923,8 +961,9 @@ class SportsRepository @Inject constructor(
         private const val MINUTE = 60_000L
         private const val HOUR = 60 * MINUTE
         private const val DAY = 24 * HOUR
-        /** The page's days run from yesterday to this many days ahead. */
+        /** The page's days run from this many days back to [DAYS_AHEAD] ahead. */
         const val DAYS_AHEAD = 7
+        const val DAYS_BACK = 7
         /** Between saved answers when a league was asked one day at a time. */
         private const val RAW_SEP = "\n\u0001\n"
     }

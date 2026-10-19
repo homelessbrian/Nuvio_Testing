@@ -127,9 +127,9 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                 SportsAction("‹  Sports", onClick = onClose)
                 Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
-                    LiveText("Pick Your Teams", size = 26.sp, weight = FontWeight.Black)
+                    LiveText("Follow Teams & Leagues", size = 26.sp, weight = FontWeight.Black)
                     LiveText(
-                        "Their games show first in Sports, with a reminder before they start.",
+                        "Teams: their games, reminders and scoring alerts. Leagues: their schedule on My Sports.",
                         color = colors.TextSecondary, size = 13.sp
                     )
                 }
@@ -147,7 +147,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                 LazyColumn(Modifier.width(196.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     items(sports, key = { it.name }) { s ->
                         val count = follows.teams.count { SportsCatalog.league(it.leagueId)?.sport == s } +
-                            follows.leagues.count { SportsCatalog.league(it)?.sport == s }
+                            follows.pins.count { SportsCatalog.league(it)?.sport == s }
                         SportRow(
                             sport = s,
                             selected = s.name == sport && query.isBlank(),
@@ -182,7 +182,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                                     .steadyRowKeys(leagueRowState, i, leagues.size) { j -> leagueReq(leagues[j].id) },
                                 league = l,
                                 selected = l.id == league?.id,
-                                followed = l.id in follows.leagues,
+                                followed = l.id in follows.pins,
                                 teamsFollowed = follows.teams.count { it.leagueId == l.id },
                                 inRegion = SportsCatalog.shown(l, settings),
                                 onFocused = { leagueId = l.id },
@@ -192,20 +192,14 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                     }
                     Spacer(Modifier.height(10.dp))
                     if (league != null) {
-                        val all = league.id in follows.leagues
-                        val pinned = league.id in follows.pins
+                        val followed = league.id in follows.pins
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                            // Its own row under My Teams (this week's games), without making every
-                            // game one of "yours".
+                            // Following a league: its row on My Sports. A league with teams is
+                            // there to browse; an event sport's events (UFC, F1…) count as yours.
                             SportsPill(
-                                if (pinned) "✓  Shown on My Teams" else "＋  Show on My Teams",
-                                selected = pinned,
+                                if (followed) "★  Following ${league.name}" else "☆  Follow ${league.name}",
+                                selected = followed,
                                 onClick = { viewModel.repo.togglePin(league.id) }
-                            )
-                            SportsPill(
-                                if (all) "★  Every game is under My Teams" else "☆  Put every game under My Teams",
-                                selected = all,
-                                onClick = { viewModel.repo.toggleLeague(league.id) }
                             )
                             if (league.guideOnly || league.kind == LeagueKind.EVENT) {
                                 SportsPill("＋  Follow a Name…", onClick = { askWord = true })
@@ -213,18 +207,19 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                         }
                         Spacer(Modifier.height(10.dp))
                         when {
-                            league.sport == Sport.WRESTLING -> LiveText(
-                                "${league.name}'s schedule (weekly shows and big events, with times and venues) comes from TheSportsDB, updated every day. " +
-                                    "Your own TV guide is checked too, to find the channel it's on. Follow it to see every show under My Teams.",
+                            league.sport == Sport.WRESTLING || league.id == "guide/boxing" -> LiveText(
+                                "${league.name}'s schedule (" + (if (league.id == "guide/boxing") "fight cards" else "weekly shows and big events") +
+                                    ", with times and venues) comes from TheSportsDB, updated every day. " +
+                                    "Your own TV guide is checked too, to find the channel it's on. Follow it to see every show on My Sports.",
                                 color = colors.TextSecondary, size = 13.sp, maxLines = 4
                             )
                             league.guideOnly -> LiveText(
                                 "${league.name} comes from your own TV guide: live shows with \"${league.guideWords.first()}\" in the title. " +
-                                    "Follow it to see them under My Teams. Follow a name (a player, a team) to catch shows that mention it.",
+                                    "Follow it to see them on My Sports. Follow a name (a player, a team) to catch shows that mention it.",
                                 color = colors.TextSecondary, size = 13.sp, maxLines = 4
                             )
                             league.kind == LeagueKind.EVENT -> LiveText(
-                                "${league.name} is listed by event (each race, card or tournament). Follow it to see every one under My Teams, " +
+                                "${league.name} is listed by event (each race, card or tournament). Follow it to see every one on My Sports, " +
                                     "or follow a name to catch shows that mention a driver or fighter.",
                                 color = colors.TextSecondary, size = 13.sp, maxLines = 4
                             )
@@ -280,9 +275,9 @@ private fun FollowingBar(follows: SportsFollows, viewModel: SportsViewModel, fir
                 viewModel.repo.updateFollows { f -> f.copy(teams = f.teams.filterNot { it.key == t.key }) }
             })
         }
-        follows.leagues.forEach { id ->
+        follows.pins.forEach { id ->
             val l = SportsCatalog.league(id)
-            add(FollowEntry("l$id", "All of ${l?.name ?: id}", { LeagueMark(l, 18.dp) }) { viewModel.repo.toggleLeague(id) })
+            add(FollowEntry("l$id", l?.name ?: id, { LeagueMark(l, 18.dp) }) { viewModel.repo.togglePin(id) })
         }
         follows.words.forEach { w -> add(FollowEntry("w$w", "\"$w\"", null) { viewModel.repo.removeWord(w) }) }
     }
@@ -416,7 +411,7 @@ private fun LeagueCard(
             LiveText(
                 listOfNotNull(
                     if (teamsFollowed > 0) "$teamsFollowed followed" else null,
-                    if (league.sport == Sport.WRESTLING) "Schedule + your guide" else if (league.guideOnly) "From your guide" else null,
+                    if (league.sport == Sport.WRESTLING || league.id == "guide/boxing") "Schedule + your guide" else if (league.guideOnly) "From your guide" else null,
                     if (!inRegion) "Not on your Sports page" else null
                 ).joinToString(" · ").ifBlank { if (league.kind == LeagueKind.EVENT) "Events" else "Teams" },
                 color = SportsLook.Dim, size = 10.sp

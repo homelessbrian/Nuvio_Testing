@@ -64,5 +64,7 @@ internal fun endEstimate(ev: SportsEvent): Long {
 /** A followed team plays, a league you follow, a name you follow, or a reminder you set. */
 internal fun isMine(ev: SportsEvent, f: SportsFollows): Boolean =
     ev.leagueId in f.leagues || ev.word != null ||
+        // A followed event sport (UFC, F1, wrestling…): its events are yours (there's no team to pick).
+        (ev.leagueId in f.pins && SportsCatalog.league(ev.leagueId)?.kind == LeagueKind.EVENT) ||
         ev.sides.any { f.followsTeam(ev.leagueId, it.team.id) } ||
         f.reminders.any { it.eventId == ev.id }

@@ -99,6 +99,9 @@ data class Side(
 
 enum class GameState { PRE, LIVE, POST, OFF }
 
+/** One line of a race result or leaderboard: "1", "Kyle Larson", "-12" (golf) or null. */
+data class Standing(val pos: String, val name: String, val detail: String?)
+
 enum class EventSource { ESPN, GUIDE, FIXTURES }
 
 data class SportsEvent(
@@ -129,7 +132,9 @@ data class SportsEvent(
     /** When it ends, when known (shows found in the guide). */
     val endMs: Long? = null,
     /** A name you follow that this show mentions ("Luke Littler"). */
-    val word: String? = null
+    val word: String? = null,
+    /** A race's finishing (or running) order, a golf leaderboard: position, name, detail. */
+    val standings: List<Standing> = emptyList()
 ) {
     val sides: List<Side> get() = listOfNotNull(away, home)
     val hasScore: Boolean get() = (state == GameState.LIVE || state == GameState.POST) && sides.size == 2 && sides.all { !it.score.isNullOrBlank() }
@@ -174,7 +179,9 @@ data class SportsSettings(
     /** Event id -> "channelKey|startMs": the channel you picked for that game. */
     val eventChannels: Map<String, String> = emptyMap(),
     /** "eventId|channelKey": channels you said aren't showing that game. */
-    val blocked: Set<String> = emptySet()
+    val blocked: Set<String> = emptySet(),
+    /** A team ("family|team id", see [SportsCatalog.teamFamily]) -> the channel for all its games (a team's own sports network). */
+    val teamChannels: Map<String, String> = emptyMap()
 ) {
     fun toJson(): String = JSONObject()
         .put("showInSidebar", showInSidebar)
@@ -191,6 +198,7 @@ data class SportsSettings(
         .put("networkChannels", JSONObject(networkChannels as Map<*, *>))
         .put("eventChannels", JSONObject(eventChannels as Map<*, *>))
         .put("blocked", JSONArray(blocked.toList()))
+        .put("teamChannels", JSONObject(teamChannels as Map<*, *>))
         .toString()
 
     companion object {
@@ -213,7 +221,8 @@ data class SportsSettings(
                     hiddenLeagues = o.optJSONArray("hiddenLeagues").strings().toSet(),
                     networkChannels = o.optJSONObject("networkChannels").stringMap(),
                     eventChannels = o.optJSONObject("eventChannels").stringMap(),
-                    blocked = o.optJSONArray("blocked").strings().toSet()
+                    blocked = o.optJSONArray("blocked").strings().toSet(),
+                    teamChannels = o.optJSONObject("teamChannels").stringMap()
                 )
             }.getOrDefault(SportsSettings())
         }
@@ -249,7 +258,7 @@ data class SportsFollows(
     /** Leagues taken off the top bar (not added back by themselves when you follow a team there). */
     val unpinned: Set<String> = emptySet()
 ) {
-    val isEmpty: Boolean get() = teams.isEmpty() && leagues.isEmpty() && words.isEmpty()
+    val isEmpty: Boolean get() = teams.isEmpty() && leagues.isEmpty() && words.isEmpty() && pins.isEmpty()
 
     /**
      * Following [teamId]: in its own league, and in every competition it plays in (a football
@@ -309,11 +318,12 @@ data class SportsFollows(
                 }.orEmpty()
                 SportsFollows(
                     teams = teams,
-                    leagues = o.optJSONArray("leagues").strings().toSet(),
+                    leagues = emptySet(),
                     words = o.optJSONArray("words").strings(),
                     reminders = reminders,
                     setUp = o.optBoolean("setUp", false),
-                    pins = o.optJSONArray("pins").strings(),
+                    // "Every game" leagues (from before there was one Follow) are followed leagues now.
+                    pins = (o.optJSONArray("pins").strings() + o.optJSONArray("leagues").strings()).distinct(),
                     unpinned = o.optJSONArray("unpinned").strings().toSet()
                 )
             }.getOrDefault(SportsFollows())

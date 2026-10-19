@@ -152,9 +152,12 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             }
         }
 
-        // ---- 4. Your own fixes.
+        // ---- 4. Your own fixes: this game, then every game of a team.
         for (ev in wanted) {
             input.settings.eventChannels[ev.id]?.substringBefore('|')?.let { add(ev.id, it, 200, "Your pick", null) }
+            if (input.settings.teamChannels.isNotEmpty()) for (side in ev.sides) {
+                input.settings.teamChannels[teamChannelKey(ev.leagueId, side.team.id)]?.let { add(ev.id, it, 150, "Your channel for ${side.team.name}", null) }
+            }
         }
 
         val out = HashMap<String, List<ChannelMatch>>()
@@ -334,8 +337,12 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         val t = nameNorm(cleanTitle(p.title)).trim()
         val c = nameNorm(ch.name).trim()
         if (t.isEmpty() || c.isEmpty()) return t.isEmpty()
-        // The listing is the channel's name, or repeats the whole (multi-word) name.
-        return t == c || (c.contains(' ') && c.length >= 8 && " $t ".contains(" $c "))
+        if (t == c) return true
+        // A team's own channel ("ATLANTA HAWKS") showing its game ("Atlanta Hawks @ Orlando
+        // Magic"): a real game, not the channel's name repeated.
+        if (MATCHUP.containsMatchIn(" " + norm(p.title.replace("@", " at ")).trim() + " ")) return false
+        // The listing repeats the whole (multi-word) channel name: filler ("CINE PRO NXT").
+        return c.contains(' ') && c.length >= 8 && " $t ".contains(" $c ")
     }
 
     private fun termsFor(ev: SportsEvent): Terms {
@@ -500,3 +507,6 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         }
     }
 }
+
+/** The key a team's own channel is saved under: the same club or country in every competition. */
+internal fun teamChannelKey(leagueId: String, teamId: String): String = SportsCatalog.teamFamily(leagueId) + "|" + teamId
