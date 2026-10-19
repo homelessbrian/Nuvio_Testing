@@ -66,6 +66,12 @@ class SportsViewModel @Inject constructor(
         .distinctUntilChanged()
         .stateIn(viewModelScope, SharingStarted.Eagerly, null)
 
+    /** Something is playing (or starting) in the window, not paused: the TV stays awake. */
+    val playingNow: StateFlow<Boolean> = playback.state
+        .map { it.channelKey != null && (it.isPlaying || it.isBuffering) && !it.userPaused }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, false)
+
     val player: androidx.media3.common.Player? get() = playback.player
     fun attachPlayer(): androidx.media3.common.Player = playback.attach()
     fun detachPlayer() { playback.detach() }

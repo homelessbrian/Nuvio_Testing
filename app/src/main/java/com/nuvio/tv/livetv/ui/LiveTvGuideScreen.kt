@@ -228,6 +228,14 @@ fun LiveTvGuideScreen(
     val programs by viewModel.programs.collectAsStateWithLifecycle()
     val status by viewModel.status.collectAsStateWithLifecycle()
     val playback by viewModel.playbackState.collectAsStateWithLifecycle()
+    // A channel playing in the preview window: keep the TV awake (no screen saver), like full
+    // screen does. Also set again when full screen closes (it clears it on the way out).
+    val awakeView = androidx.compose.ui.platform.LocalView.current
+    val previewPlaying = playback.channelKey != null && (playback.isPlaying || playback.isBuffering) && !playback.userPaused
+    DisposableEffect(previewPlaying, fullscreen) {
+        if (previewPlaying) awakeView.keepScreenOn = true
+        onDispose { if (!fullscreen) awakeView.keepScreenOn = false }
+    }
     val now by viewModel.now.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 

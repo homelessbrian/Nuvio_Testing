@@ -101,17 +101,22 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
 
     Box(Modifier.fillMaxSize().background(colors.Background)) {
         Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 44.dp, top = 26.dp)) {
+            // A way back that's on screen (Back works too): "‹ Sports" on the left, Done on the right.
             Row(verticalAlignment = Alignment.CenterVertically) {
+                SportsAction("‹  Sports", onClick = onClose)
+                Spacer(Modifier.width(14.dp))
                 Column(Modifier.weight(1f)) {
                     LiveText("Pick Your Teams", size = 26.sp, weight = FontWeight.Black)
                     LiveText(
-                        "Their games show first in Sports, with a heads-up before they start. Back when you're done.",
+                        "Their games show first in Sports, with a reminder before they start.",
                         color = colors.TextSecondary, size = 13.sp
                     )
                 }
-                Box(Modifier.width(300.dp)) {
+                Box(Modifier.width(280.dp)) {
                     LiveTextField(value = query, onValueChange = { query = it }, hint = "Search any team")
                 }
+                Spacer(Modifier.width(12.dp))
+                SportsAction("✓  Done", selected = true, onClick = onClose)
             }
             Spacer(Modifier.height(12.dp))
             FollowingBar(follows, viewModel)

@@ -159,6 +159,14 @@ fun SportsScreen(
         if (videoOn) playerRef = viewModel.attachPlayer()
         onDispose { if (videoOn) { viewModel.detachPlayer(); playerRef = null } }
     }
+    // A game playing in the window: keep the TV awake (no screen saver), as Live TV does.
+    val playingNow by viewModel.playingNow.collectAsStateWithLifecycle()
+    val awakeView = androidx.compose.ui.platform.LocalView.current
+    val keepAwake = videoOn && playingNow
+    DisposableEffect(keepAwake) {
+        if (keepAwake) awakeView.keepScreenOn = true
+        onDispose { awakeView.keepScreenOn = false }
+    }
     var slot by remember { mutableStateOf<Rect?>(null) }
     var root by remember { mutableStateOf<Rect?>(null) }
     val videoSlot: @Composable (Modifier) -> Unit = { m -> VideoSlot(m) { slot = it } }
@@ -431,17 +439,21 @@ private fun SportsHub(
                 DayTab(label, selected = day == offset, onClick = { onDay(offset); focusedOnce = true })
                 Spacer(Modifier.width(4.dp))
             }
+            // Pick Your Teams: at the end of the title line (it used to be the last filter, and
+            // ended up hidden behind the video window).
+            if (videoOn) {
+                Spacer(Modifier.weight(1f))
+                FilterIcon("✎", "Teams", selected = false, withLabel = true) { onPick() }
+            }
         }
     }
     val filters: @Composable (Modifier) -> Unit = { m ->
         LazyRow(m, horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
-            item(key = CHIP_MINE) { FilterIcon("★", "My Teams", effectiveChip == CHIP_MINE, Modifier.focusRequester(firstChip)) { onChip(CHIP_MINE) } }
-            item(key = CHIP_LIVE) { FilterIcon("●", "Live · ${sections.liveCount}", effectiveChip == CHIP_LIVE, iconColor = SportsLook.Live) { onChip(CHIP_LIVE) } }
-            item(key = CHIP_ALL) { FilterIcon("▦", "All", effectiveChip == CHIP_ALL) { onChip(CHIP_ALL) } }
+            item(key = CHIP_MINE) { FilterIcon("★", "My Teams", effectiveChip == CHIP_MINE, Modifier.focusRequester(firstChip), withLabel = true) { onChip(CHIP_MINE) } }
+            item(key = CHIP_LIVE) { FilterIcon("●", "Live · ${sections.liveCount}", effectiveChip == CHIP_LIVE, iconColor = SportsLook.Live, withLabel = true) { onChip(CHIP_LIVE) } }
+            item(key = CHIP_ALL) { FilterIcon("▦", "All", effectiveChip == CHIP_ALL, withLabel = true) { onChip(CHIP_ALL) } }
             if (sportsToday.isNotEmpty()) item(key = "sep1") { Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(20.dp).background(SportsLook.Divider)) }
             items(sportsToday, key = { it.name }) { s -> FilterIcon(s.icon, s.label, effectiveChip == s.name) { onChip(s.name) } }
-            item(key = "sep2") { Box(Modifier.padding(horizontal = 2.dp).width(1.dp).height(20.dp).background(SportsLook.Divider)) }
-            item(key = "pick") { FilterIcon("✎", "Pick Your Teams", false) { onPick() } }
         }
     }
     val list: @Composable (Modifier) -> Unit = { m ->
@@ -494,6 +506,8 @@ private fun SportsHub(
                 Spacer(Modifier.weight(1f))
                 status?.let { LiveText(it, color = if (problem != null) NuvioTheme.colors.Error else SportsLook.Dim, size = 11.sp, modifier = Modifier.padding(end = 10.dp)) }
                 filters(Modifier.width(470.dp))
+                Spacer(Modifier.width(8.dp))
+                FilterIcon("✎", "Teams", selected = false, withLabel = true) { onPick() }
             }
             Spacer(Modifier.height(4.dp))
             list(Modifier.weight(1f))

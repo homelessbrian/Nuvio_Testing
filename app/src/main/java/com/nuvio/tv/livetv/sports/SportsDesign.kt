@@ -601,18 +601,17 @@ internal fun DayTab(text: String, selected: Boolean, modifier: Modifier = Modifi
 }
 
 /**
- * A round icon filter (My Teams, Live, All, a sport). The one switched on is filled white; the
- * highlighted one opens out to show its name, so nobody has to guess what an icon means.
+ * A filter at the top of the Sports page. My Teams, Live and All always show their name next
+ * to the icon ([withLabel]); a sport is just its symbol. The one switched on is filled white.
  */
 @Composable
-internal fun FilterIcon(icon: String, label: String, selected: Boolean, modifier: Modifier = Modifier, iconColor: Color? = null, onClick: () -> Unit) {
+internal fun FilterIcon(icon: String, label: String, selected: Boolean, modifier: Modifier = Modifier, iconColor: Color? = null, withLabel: Boolean = false, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
     Row(
         modifier
             .height(32.dp)
             .widthIn(min = 32.dp)
-            .animateContentSize()
             .clip(shape)
             .background(
                 when {
@@ -624,12 +623,12 @@ internal fun FilterIcon(icon: String, label: String, selected: Boolean, modifier
             .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else SportsLook.Border, shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-            .padding(horizontal = if (focused) 11.dp else 0.dp),
+            .padding(horizontal = if (withLabel) 12.dp else 0.dp),
         verticalAlignment = Alignment.CenterVertically,
         horizontalArrangement = Arrangement.Center
     ) {
         LiveText(icon, color = iconColor ?: if (selected) SportsLook.Ink else Color(0xFFD7DAE3), size = 14.sp, weight = FontWeight.Bold)
-        if (focused) {
+        if (withLabel) {
             Spacer(Modifier.width(6.dp))
             LiveText(label, color = if (selected) SportsLook.Ink else Color.White, size = 12.sp, weight = FontWeight.ExtraBold)
         }
