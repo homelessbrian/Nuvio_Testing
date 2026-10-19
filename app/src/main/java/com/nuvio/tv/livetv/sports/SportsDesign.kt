@@ -93,9 +93,11 @@ internal object SportsLook {
 internal fun bandColor(c: Color): Color = lerp(c, SportsLook.Ink, if (c.luminance() > 0.5f) 0.5f else if (c.luminance() > 0.25f) 0.25f else 0.08f)
 
 /**
- * The card frame: dark surface and thin border; highlighted: a little bigger, a white border and
- * a soft red glow; playing in the window: an accent glow.
+ * The card frame: dark surface and thin border. Highlighted: the app's own focus ring (the same
+ * 2dp ring in the theme's colours as posters and rows everywhere else) and a little bigger, no
+ * glow. Playing in the window (or a big event): a border in [accent].
  */
+@Composable
 internal fun Modifier.sportsFrame(
     focused: Boolean,
     playing: Boolean = false,
@@ -104,41 +106,20 @@ internal fun Modifier.sportsFrame(
     background: Color = SportsLook.Card
 ): Modifier {
     val shape = RoundedCornerShape(radius)
+    val ring = NuvioTheme.focusRing.brush()
     return this
         .graphicsLayer { val s = if (focused) 1.02f else 1f; scaleX = s; scaleY = s }
-        .drawBehind {
-            val glow = when {
-                focused -> SportsLook.Live
-                playing -> accent
-                else -> null
-            } ?: return@drawBehind
-            val r = radius.toPx()
-            listOf(3.dp.toPx() to 0.30f, 7.dp.toPx() to 0.12f).forEach { (g, a) ->
-                drawRoundRect(
-                    glow.copy(alpha = a),
-                    topLeft = Offset(-g, -g),
-                    size = Size(size.width + 2 * g, size.height + 2 * g),
-                    cornerRadius = CornerRadius(r + g)
-                )
-            }
-        }
         .clip(shape)
         .background(background)
         // The border on top of everything inside (team bands reach the edges).
         .drawWithContent {
             drawContent()
             val w = (if (focused || playing) 2.dp else 1.dp).toPx()
-            drawRoundRect(
-                when {
-                    focused -> Color.White
-                    playing -> accent
-                    else -> SportsLook.Border
-                },
-                topLeft = Offset(w / 2, w / 2),
-                size = Size(size.width - w, size.height - w),
-                cornerRadius = CornerRadius((radius.toPx() - w / 2).coerceAtLeast(0f)),
-                style = Stroke(w)
-            )
+            val topLeft = Offset(w / 2, w / 2)
+            val box = Size(size.width - w, size.height - w)
+            val corner = CornerRadius((radius.toPx() - w / 2).coerceAtLeast(0f))
+            if (focused) drawRoundRect(ring, topLeft = topLeft, size = box, cornerRadius = corner, style = Stroke(w))
+            else drawRoundRect(if (playing) accent else SportsLook.Border, topLeft = topLeft, size = box, cornerRadius = corner, style = Stroke(w))
         }
 }
 
@@ -167,6 +148,30 @@ internal fun LeagueMark(league: League?, size: Dp) {
             LiveText(league.short, color = Color.White, size = (size.value * 0.26f).coerceAtLeast(7f).sp, weight = FontWeight.Black, maxLines = 2)
         }
     }
+}
+
+/**
+ * The mark in a card's league column: the league's logo, except for shows with their own
+ * branding inside a league (NXT inside WWE): that show's own logo from TheSportsDB when the
+ * schedule file has one, else an "NXT" tile in its gold on black (lettering, not a logo image).
+ */
+@Composable
+internal fun EventMark(ev: SportsEvent, league: League?, size: Dp) {
+    if (league == null || league.sport != Sport.WRESTLING) { LeagueMark(league, size); return }
+    val brand = remember(ev.title, league.id) { SportsFeeds.brandLogo(league.id, ev.title) }
+    if (brand != null) {
+        AsyncImage(model = brand, contentDescription = null, contentScale = ContentScale.Fit, modifier = Modifier.size(size))
+        return
+    }
+    if (SportsCatalog.hasWord(SportsCatalog.norm(ev.title), "nxt")) {
+        Box(
+            Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(Color(0xFF111111))
+                .border(1.dp, Color(0xFFF2D06B).copy(alpha = 0.6f), RoundedCornerShape(size * 0.22f)),
+            contentAlignment = Alignment.Center
+        ) { LiveText("NXT", color = Color(0xFFF2D06B), size = (size.value * 0.3f).sp, weight = FontWeight.Black) }
+        return
+    }
+    LeagueMark(league, size)
 }
 
 /** A team's logo as it is (no disc), on a faint light spot so dark logos still show; its short name when there's no logo. */
@@ -361,7 +366,7 @@ internal fun GameCard(
                 Modifier.width(48.dp).fillMaxHeight().background(Color.White.copy(alpha = 0.03f))
                     .drawBehind { drawRect(SportsLook.Divider, topLeft = Offset(size.width - 1.dp.toPx(), 0f), size = Size(1.dp.toPx(), size.height)) },
                 contentAlignment = Alignment.Center
-            ) { LeagueMark(league, 28.dp) }
+            ) { EventMark(ev, league, 28.dp) }
             Column(Modifier.weight(1f).fillMaxHeight()) {
                 if (sides.size == 2) {
                     val showScore = ev.hasScore && !hideScores
@@ -531,7 +536,7 @@ internal fun UpcomingRow(
             LiveText(if (ampm != null) time.dropLast(2).trim() else time, color = Color.White, size = 14.sp, weight = FontWeight.Black)
             ampm?.let { LiveText(" $it", color = SportsLook.Dim, size = 8.sp, weight = FontWeight.Bold) }
         }
-        LeagueMark(league, 20.dp)
+        EventMark(ev, league, 20.dp)
         Box(Modifier.padding(horizontal = 10.dp).width(1.dp).height(26.dp).background(SportsLook.Divider))
         if (sides.size == 2) {
             UpcomingTeam(sides[0], follows.followsTeam(ev.leagueId, sides[0].team.id), Modifier.weight(1f))
@@ -620,7 +625,7 @@ internal fun FilterIcon(icon: String, label: String, selected: Boolean, modifier
                     else -> SportsLook.Card
                 }
             )
-            .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else SportsLook.Border, shape)
+            .border(if (focused) NuvioTheme.focusRing.border(2.dp) else androidx.compose.foundation.BorderStroke(1.dp, SportsLook.Border), shape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = if (withLabel) 12.dp else 0.dp),

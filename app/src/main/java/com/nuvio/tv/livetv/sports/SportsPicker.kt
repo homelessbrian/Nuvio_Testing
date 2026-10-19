@@ -81,7 +81,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
 
     val teams by produceState<List<TeamInfo>?>(null, league?.id) {
         value = null
-        value = league?.let { if (it.espnPath != null) viewModel.teams(it) else emptyList() }.orEmpty()
+        value = league?.let { if (it.espnPath != null || it.id.startsWith("tsdb/")) viewModel.teams(it) else emptyList() }.orEmpty()
     }
     // Search: every team in the leagues shown in your region (loaded as needed, then saved).
     val searchResults by produceState<List<TeamInfo>?>(null, query) {
@@ -89,7 +89,9 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
         if (q.length < 2) { value = null; return@produceState }
         delay(350)
         val all = ArrayList<TeamInfo>()
-        for (l in viewModel.repo.activeLeagues().filter { it.espnPath != null && it.kind == LeagueKind.TEAMS }) {
+        val searchIn = (viewModel.repo.activeLeagues().filter { it.espnPath != null && it.kind == LeagueKind.TEAMS && !it.national } +
+            SportsCatalog.leagues.firstOrNull { it.national }.let { listOfNotNull(it) } + SportsCatalog.extra).distinctBy { it.id }
+        for (l in searchIn) {
             all += viewModel.teams(l).filter { t ->
                 listOfNotNull(t.fullName, t.name, t.location, t.abbr).any { SportsCatalog.norm(it).contains(q) }
             }
@@ -166,9 +168,17 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                     Spacer(Modifier.height(10.dp))
                     if (league != null) {
                         val all = league.id in follows.leagues
+                        val pinned = league.id in follows.pins
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                            // Its own row under My Teams (this week's games), without making every
+                            // game one of "yours".
                             SportsPill(
-                                if (all) "★  Following every ${league.name} game" else "☆  Follow every ${league.name} game",
+                                if (pinned) "✓  Shown on My Teams" else "＋  Show on My Teams",
+                                selected = pinned,
+                                onClick = { viewModel.repo.togglePin(league.id) }
+                            )
+                            SportsPill(
+                                if (all) "★  Every game is under My Teams" else "☆  Put every game under My Teams",
                                 selected = all,
                                 onClick = { viewModel.repo.toggleLeague(league.id) }
                             )
@@ -189,6 +199,22 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                                 color = colors.TextSecondary, size = 13.sp, maxLines = 4
                             )
                             teams == null -> LiveText("Getting the teams…", color = colors.TextSecondary, size = 13.sp)
+                            league.national && teams.orEmpty().isNotEmpty() -> Column(Modifier.weight(1f)) {
+                                LiveText(
+                                    "Countries: follow one to see all its games, from qualifiers and the Nations League to friendlies, the World Cup and the Euros.",
+                                    color = colors.TextSecondary, size = 12.sp, maxLines = 2
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                TeamGrid(teams.orEmpty(), follows, viewModel, showLeague = false, modifier = Modifier.weight(1f))
+                            }
+                            league.id.startsWith("tsdb/") && teams.orEmpty().isNotEmpty() -> Column(Modifier.weight(1f)) {
+                                LiveText(
+                                    "Fixtures and results from TheSportsDB. On match days, scores update about every 15 minutes.",
+                                    color = colors.TextSecondary, size = 12.sp, maxLines = 2
+                                )
+                                Spacer(Modifier.height(8.dp))
+                                TeamGrid(teams.orEmpty(), follows, viewModel, showLeague = false, modifier = Modifier.weight(1f))
+                            }
                             teams.orEmpty().isEmpty() -> LiveText("Couldn't get this league's teams. Try again in a little while.", color = colors.TextSecondary, size = 13.sp)
                             else -> TeamGrid(teams.orEmpty(), follows, viewModel, showLeague = false, modifier = Modifier.weight(1f))
                         }

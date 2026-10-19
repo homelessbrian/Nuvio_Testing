@@ -28,6 +28,8 @@ class SportsViewModel @Inject constructor(
     val settings = repo.settings
     val follows = repo.follows
     val events = repo.events
+    /** The page's days plus followed teams' whole seasons (My Teams, game pages). */
+    val known = repo.known
     val matches = repo.matches
     val loading = repo.loading
     val matching = repo.matching

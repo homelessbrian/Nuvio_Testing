@@ -61,7 +61,9 @@ data class League(
      * Guide-only shows that are live without saying so (wrestling's weekly shows: guides call
      * them "WWE SmackDown", not "Live: …"). Repeats and highlights are still left out.
      */
-    val liveByDefault: Boolean = false
+    val liveByDefault: Boolean = false,
+    /** National teams (England, France, USA…): following one covers all their competitions. */
+    val national: Boolean = false
 ) {
     companion object {
         val ALL_REGIONS = setOf("US", "UK", "IE", "CA", "AU", "OTHER")
@@ -241,10 +243,30 @@ data class SportsFollows(
     val words: List<String> = emptyList(),
     val reminders: List<SportsReminder> = emptyList(),
     /** True once Pick Your Teams has been seen (it opens by itself the first time otherwise). */
-    val setUp: Boolean = false
+    val setUp: Boolean = false,
+    /** Leagues with their own button in the Sports top bar (and a row under My Teams), in order. */
+    val pins: List<String> = emptyList(),
+    /** Leagues taken off the top bar (not added back by themselves when you follow a team there). */
+    val unpinned: Set<String> = emptySet()
 ) {
     val isEmpty: Boolean get() = teams.isEmpty() && leagues.isEmpty() && words.isEmpty()
-    fun followsTeam(leagueId: String, teamId: String?): Boolean = teamId != null && teams.any { it.leagueId == leagueId && it.teamId == teamId }
+
+    /**
+     * Following [teamId]: in its own league, and in every competition it plays in (a football
+     * club's id is the same in the Premier League, the Champions League and the cups; a country's
+     * in the World Cup, qualifiers and friendlies).
+     */
+    fun followsTeam(leagueId: String, teamId: String?): Boolean {
+        if (teamId == null) return false
+        val family = SportsCatalog.teamFamily(leagueId)
+        return teams.any { it.teamId == teamId && (it.leagueId == leagueId || SportsCatalog.teamFamily(it.leagueId) == family) }
+    }
+
+    /** The followed team [team] is, if any. */
+    fun followedTeam(team: TeamInfo): FollowedTeam? {
+        val family = SportsCatalog.teamFamily(team.leagueId)
+        return teams.firstOrNull { it.teamId == team.id && (it.leagueId == team.leagueId || SportsCatalog.teamFamily(it.leagueId) == family) }
+    }
 
     fun toJson(): String = JSONObject()
         .put("teams", JSONArray().also { a ->
@@ -259,6 +281,8 @@ data class SportsFollows(
             reminders.forEach { r -> a.put(JSONObject().put("e", r.eventId).put("t", r.title).put("s", r.startMs)) }
         })
         .put("setUp", setUp)
+        .put("pins", JSONArray(pins))
+        .put("unpinned", JSONArray(unpinned.toList()))
         .toString()
 
     companion object {
@@ -288,7 +312,9 @@ data class SportsFollows(
                     leagues = o.optJSONArray("leagues").strings().toSet(),
                     words = o.optJSONArray("words").strings(),
                     reminders = reminders,
-                    setUp = o.optBoolean("setUp", false)
+                    setUp = o.optBoolean("setUp", false),
+                    pins = o.optJSONArray("pins").strings(),
+                    unpinned = o.optJSONArray("unpinned").strings().toSet()
                 )
             }.getOrDefault(SportsFollows())
         }

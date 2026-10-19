@@ -74,6 +74,27 @@ object SportsCatalog {
             regions = US, minutes = 115, color = 0xFF0A2240),
         League("soccer/mex.1", Sport.FOOTBALL, "Liga MX", "LIGA MX", "soccer/mex.1", guideWords = listOf("Liga MX"),
             regions = US, minutes = 115, color = 0xFF1A7F3C),
+        // ---- International (national teams: following one covers all of these)
+        League("soccer/fifa.world", Sport.FOOTBALL, "World Cup", "WORLD CUP", "soccer/fifa.world",
+            guideWords = listOf("World Cup", "FIFA World Cup"), regions = EVERYWHERE, minutes = 120, color = 0xFF56042C, national = true),
+        League("soccer/uefa.euro", Sport.FOOTBALL, "European Championship", "EURO", "soccer/uefa.euro",
+            guideWords = listOf("European Championship", "UEFA Euro"), regions = setOf("UK", "IE", "OTHER"), minutes = 120, color = 0xFF143CDB, national = true),
+        League("soccer/uefa.nations", Sport.FOOTBALL, "Nations League", "UNL", "soccer/uefa.nations",
+            guideWords = listOf("Nations League"), regions = setOf("UK", "IE", "OTHER"), minutes = 120, color = 0xFF0E1B4D, national = true),
+        League("soccer/fifa.worldq.uefa", Sport.FOOTBALL, "World Cup Qualifying (Europe)", "WCQ", "soccer/fifa.worldq.uefa",
+            guideWords = listOf("World Cup Qualifier", "World Cup Qualifying"), regions = setOf("UK", "IE", "OTHER"), minutes = 120, color = 0xFF56042C, national = true),
+        League("soccer/uefa.euroq", Sport.FOOTBALL, "Euro Qualifying", "EURO Q", "soccer/uefa.euroq",
+            guideWords = listOf("Euro Qualifier", "European Qualifier"), regions = setOf("UK", "IE", "OTHER"), minutes = 120, color = 0xFF143CDB, national = true),
+        League("soccer/fifa.friendly", Sport.FOOTBALL, "International Friendlies", "FRIENDLY", "soccer/fifa.friendly",
+            guideWords = listOf("International Friendly"), regions = emptySet(), minutes = 120, color = 0xFF33415C, national = true),
+        League("soccer/fifa.worldq.concacaf", Sport.FOOTBALL, "World Cup Qualifying (CONCACAF)", "WCQ", "soccer/fifa.worldq.concacaf",
+            guideWords = listOf("World Cup Qualifier", "World Cup Qualifying"), regions = NA, minutes = 120, color = 0xFF56042C, national = true),
+        League("soccer/concacaf.nations.league", Sport.FOOTBALL, "CONCACAF Nations League", "CNL", "soccer/concacaf.nations.league",
+            guideWords = listOf("Nations League"), regions = NA, minutes = 120, color = 0xFF002F6C, national = true),
+        League("soccer/concacaf.gold", Sport.FOOTBALL, "Gold Cup", "GOLD CUP", "soccer/concacaf.gold",
+            guideWords = listOf("Gold Cup"), regions = NA, minutes = 120, color = 0xFFB8860B, national = true),
+        League("soccer/conmebol.america", Sport.FOOTBALL, "Copa América", "COPA", "soccer/conmebol.america",
+            guideWords = listOf("Copa America"), regions = setOf("US", "OTHER"), minutes = 120, color = 0xFF003DA5, national = true),
         // ---- Fighting
         League("mma/ufc", Sport.FIGHTING, "UFC", "UFC", "mma/ufc", LeagueKind.EVENT, guideWords = listOf("UFC"),
             regions = EVERYWHERE, minutes = 300, color = 0xFFD20A0A),
@@ -130,7 +151,53 @@ object SportsCatalog {
     )
 
     private val byId = leagues.associateBy { it.id }
-    fun league(id: String): League? = byId[id]
+    fun league(id: String): League? = byId[id] ?: extraById[id]
+
+    /**
+     * Leagues that arrive with the data rather than being built in: non-league football from
+     * the nuvio-data files (ids "tsdb/<TheSportsDB id>"). Set when that data loads.
+     */
+    @Volatile var extra: List<League> = emptyList()
+        private set
+    @Volatile private var extraById: Map<String, League> = emptyMap()
+
+    fun setExtra(list: List<League>) {
+        extraById = list.associateBy { it.id }
+        extra = list
+    }
+
+    /** Every league, built in and from the data. */
+    val all: List<League> get() = leagues + extra
+
+    private val UEFA_CLUB = listOf("soccer/uefa.champions", "soccer/uefa.europa", "soccer/uefa.europa.conf")
+    private val EURO_TOP = setOf("soccer/esp.1", "soccer/ita.1", "soccer/ger.1", "soccer/fra.1", "soccer/sco.1") + UEFA_CLUB
+
+    /**
+     * The other competitions a team followed in [leagueId] plays in: a country's every
+     * international competition; an English club's European games and cups; a club from another
+     * top European league, its European games.
+     */
+    fun relatedLeagues(leagueId: String): List<String> {
+        val l = league(leagueId) ?: return emptyList()
+        val out = when {
+            l.national -> leagues.filter { it.national }.map { it.id }
+            leagueId.startsWith("soccer/eng.") && !leagueId.startsWith("soccer/eng.w") ->
+                UEFA_CLUB + listOf("soccer/eng.fa", "soccer/eng.league_cup")
+            leagueId in EURO_TOP -> UEFA_CLUB
+            else -> emptyList()
+        }
+        return out.filter { it != leagueId }
+    }
+
+    /**
+     * Leagues whose team ids are shared: ESPN's football (soccer) competitions all use the same
+     * club and country ids; the non-league files use TheSportsDB's. Other sports: the league itself.
+     */
+    fun teamFamily(leagueId: String): String = when {
+        leagueId.startsWith("tsdb/") -> "tsdb"
+        leagueId.startsWith("soccer/") -> "soccer"
+        else -> leagueId
+    }
 
     /** The TV's country, as a Sports region. */
     fun deviceRegion(): String = when (Locale.getDefault().country.uppercase()) {
@@ -174,7 +241,7 @@ object SportsCatalog {
             "CA" -> listOf(Sport.HOCKEY, Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL)
             else -> listOf(Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL, Sport.HOCKEY, Sport.FOOTBALL)
         }
-        return leagues.sortedBy { l -> first.indexOf(l.sport).let { if (it < 0) 100 + l.sport.ordinal else it } }
+        return all.sortedBy { l -> first.indexOf(l.sport).let { if (it < 0) 100 + l.sport.ordinal else it } }
     }
 
     /** The sports in the region's order. */
