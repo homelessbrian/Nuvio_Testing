@@ -45,6 +45,7 @@ import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.lerp
 import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.layout.ContentScale
@@ -63,6 +64,7 @@ import com.nuvio.tv.livetv.ui.LiveText
 import com.nuvio.tv.livetv.ui.formatClock
 import com.nuvio.tv.ui.theme.NuvioTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 /*
  * The Sports look, shared by every Sports page and pop-up so they all match: dark cards with a
@@ -833,4 +835,37 @@ internal fun SportsChannelRow(
 @Composable
 internal fun OneLine(text: String, color: Color, size: TextUnit, weight: FontWeight = FontWeight.Normal, modifier: Modifier = Modifier) {
     androidx.compose.material3.Text(text, color = color, fontSize = size, fontWeight = weight, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = modifier)
+}
+
+/**
+ * Holding ◀ or ▶ in a sideways list: one item at a time, and never out of the list (to the side
+ * menu, or the list on the left) while the next item is still off screen.
+ */
+@Composable
+internal fun Modifier.steadyRowKeys(
+    state: androidx.compose.foundation.lazy.LazyListState,
+    index: Int,
+    count: Int,
+    requesterAt: (Int) -> androidx.compose.ui.focus.FocusRequester
+): Modifier {
+    val scope = androidx.compose.runtime.rememberCoroutineScope()
+    return onPreviewKeyEvent { e ->
+        if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+        val target = when (e.key) {
+            androidx.compose.ui.input.key.Key.DirectionLeft -> index - 1
+            androidx.compose.ui.input.key.Key.DirectionRight -> index + 1
+            else -> return@onPreviewKeyEvent false
+        }
+        // At the end: a held button stops there (a single press still moves on, as usual).
+        if (target !in 0 until count) return@onPreviewKeyEvent e.nativeKeyEvent.repeatCount > 0
+        if (state.layoutInfo.visibleItemsInfo.any { it.index == target }) {
+            runCatching { requesterAt(target).requestFocus() }.isSuccess
+        } else {
+            scope.launch {
+                state.scrollToItem(target)
+                runCatching { requesterAt(target).requestFocus() }
+            }
+            true
+        }
+    }
 }

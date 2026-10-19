@@ -3,6 +3,7 @@ package com.nuvio.tv.livetv.sports
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
 import androidx.compose.foundation.border
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
@@ -39,10 +40,14 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
@@ -95,6 +100,10 @@ private fun splitSubtitle(ev: SportsEvent): Pair<String?, String?> {
 
 // ------------------------------------------------------------------ the page
 
+/** Where a highlighted row sits in the list: its heading just below the top, so two rows show whole. */
+private val ROW_TOP_INSET = 36.dp
+
+@OptIn(ExperimentalFoundationApi::class, androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 internal fun MyTeamsRows(
     page: MyTeamsPage,
@@ -122,7 +131,10 @@ internal fun MyTeamsRows(
 ) {
     fun playing(ev: SportsEvent) = playingKey != null && matches[ev.id]?.any { it.channel.key == playingKey } == true
     fun channelOf(ev: SportsEvent) = matches[ev.id]?.firstOrNull()?.channel?.name ?: ev.broadcasts.firstOrNull()
-    val hero = page.hero
+    val heroes = page.heroes
+    var heroIndex by remember { mutableStateOf(0) }
+    val heroAt = heroIndex.coerceIn(0, (heroes.size - 1).coerceAtLeast(0))
+    val hero = heroes.getOrNull(heroAt)
     val heroReq = requesterFor("hero")
     var focusedOnce by remember { mutableStateOf(false) }
     LaunchedEffect(hero != null, page.rows.isNotEmpty()) {
@@ -137,6 +149,36 @@ internal fun MyTeamsRows(
             .onFailure { runCatching { heroReq.requestFocus() } }
     }
 
+    // Scrolling like Home's rows: the highlighted row's heading stays near the top (two rows show
+    // whole), and in a row the highlighted game sits at the left edge (earlier games off screen).
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val defaultSpec = androidx.compose.foundation.gestures.LocalBringIntoViewSpec.current
+    val verticalSpec = remember(density, defaultSpec, columnState) {
+        val inset = with(density) { ROW_TOP_INSET.toPx() }
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+        object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+            override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> = defaultSpec.scrollAnimationSpec
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val distance = offset - inset
+                if (kotlin.math.abs(distance) < 1f) return 0f
+                if (distance < 0f && !columnState.canScrollBackward) return 0f
+                return distance
+            }
+        }
+    }
+    val rowSpec = remember(density, defaultSpec) {
+        val start = with(density) { 6.dp.toPx() }
+        @Suppress("DEPRECATION", "OVERRIDE_DEPRECATION")
+        object : androidx.compose.foundation.gestures.BringIntoViewSpec {
+            override val scrollAnimationSpec: androidx.compose.animation.core.AnimationSpec<Float> = defaultSpec.scrollAnimationSpec
+            override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float): Float {
+                val child = kotlin.math.abs(size)
+                val leading = if (child <= containerSize && containerSize - start < child) containerSize - child else start
+                return offset - leading
+            }
+        }
+    }
+
     Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 28.dp, top = 20.dp)) {
         header()
         Spacer(Modifier.height(10.dp))
@@ -144,6 +186,8 @@ internal fun MyTeamsRows(
             if (hero != null) {
                 HeroCard(
                     ev = hero,
+                    index = heroAt,
+                    count = heroes.size,
                     follows = follows,
                     now = now,
                     use24h = use24h,
@@ -152,6 +196,7 @@ internal fun MyTeamsRows(
                     playing = playing(hero),
                     reminded = follows.reminders.any { it.eventId == hero.id },
                     modifier = Modifier.weight(1f).fillMaxHeight().focusRequester(heroReq).onFocusChanged { if (it.isFocused) onFocusKey("hero") },
+                    onStep = { d -> heroIndex = (heroAt + d).coerceIn(0, heroes.size - 1) },
                     onClick = { onOpen(hero) },
                     onLongClick = { onQuickWatch(hero) }
                 )
@@ -173,39 +218,60 @@ internal fun MyTeamsRows(
                 videoSlot(Modifier.fillMaxHeight().aspectRatio(16f / 9f))
             }
         }
-        LazyColumn(
-            state = columnState,
-            modifier = Modifier.weight(1f),
-            contentPadding = PaddingValues(top = 4.dp, bottom = 48.dp),
-            verticalArrangement = Arrangement.spacedBy(2.dp)
-        ) {
-            items(page.rows, key = { it.key }) { row ->
-                Column {
-                    RowHeader(row, follows)
-                    if (row.events.isEmpty()) {
-                        LiveText(
-                            "No games found for ${row.title} yet. They show here as soon as the schedule has them.",
-                            color = SportsLook.Dim, size = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
-                        )
-                    } else LazyRow(
-                        state = rowState(row.key, row.startIndex),
-                        horizontalArrangement = Arrangement.spacedBy(10.dp),
-                        contentPadding = PaddingValues(start = 4.dp, end = 24.dp, top = 4.dp, bottom = 6.dp)
-                    ) {
-                        itemsIndexed(row.events, key = { _, ev -> ev.id }) { _, ev ->
-                            val key = "${row.key}|${ev.id}"
-                            RowCard(
-                                ev = ev,
-                                follows = follows,
-                                now = now,
-                                use24h = use24h,
-                                hideScores = settings.hideScores,
-                                channel = channelOf(ev),
-                                playing = playing(ev),
-                                modifier = Modifier.focusRequester(requesterFor(key)).onFocusChanged { if (it.isFocused) onFocusKey(key) },
-                                onClick = { onOpen(ev) },
-                                onLongClick = { onQuickWatch(ev) }
+        Spacer(Modifier.height(6.dp))
+        androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides verticalSpec) {
+            LazyColumn(
+                state = columnState,
+                modifier = Modifier.weight(1f),
+                contentPadding = PaddingValues(bottom = 160.dp)
+            ) {
+                items(page.rows, key = { it.key }) { row ->
+                    Column {
+                        RowHeader(row, follows)
+                        if (row.events.isEmpty()) {
+                            LiveText(
+                                "No games found for ${row.title} yet. They show here as soon as the schedule has them.",
+                                color = SportsLook.Dim, size = 12.sp, modifier = Modifier.padding(start = 4.dp, bottom = 8.dp)
                             )
+                        } else {
+                            val state = rowState(row.key, row.startIndex)
+                            val keyAt: (Int) -> String = { i -> "${row.key}|${row.events[i].id}" }
+                            androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides rowSpec) {
+                                LazyRow(
+                                    state = state,
+                                    // Coming back to a row: the game you were on; the first time: the
+                                    // game on now or next (not whichever is under the row above).
+                                    modifier = Modifier
+                                        .fillMaxWidth()
+                                        .focusRestorer {
+                                            val visible = state.layoutInfo.visibleItemsInfo.map { it.index }
+                                            val idx = row.startIndex.takeIf { it in visible } ?: visible.firstOrNull()
+                                            idx?.let { requesterFor(keyAt(it)) } ?: FocusRequester.Default
+                                        }
+                                        .focusGroup(),
+                                    horizontalArrangement = Arrangement.spacedBy(10.dp),
+                                    contentPadding = PaddingValues(start = 6.dp, end = 640.dp, top = 4.dp, bottom = 8.dp)
+                                ) {
+                                    itemsIndexed(row.events, key = { _, ev -> ev.id }) { i, ev ->
+                                        val key = keyAt(i)
+                                        RowCard(
+                                            ev = ev,
+                                            follows = follows,
+                                            now = now,
+                                            use24h = use24h,
+                                            hideScores = settings.hideScores,
+                                            channel = channelOf(ev),
+                                            playing = playing(ev),
+                                            modifier = Modifier
+                                                .focusRequester(requesterFor(key))
+                                                .onFocusChanged { if (it.isFocused) onFocusKey(key) }
+                                                .steadyRowKeys(state, i, row.events.size) { j -> requesterFor(keyAt(j)) },
+                                            onClick = { onOpen(ev) },
+                                            onLongClick = { onQuickWatch(ev) }
+                                        )
+                                    }
+                                }
+                            }
                         }
                     }
                 }
@@ -359,13 +425,16 @@ private fun OutlineBadge(text: String, color: Color) {
 }
 
 /**
- * The next big game for your teams (or the one on now): both teams large on the first team's
- * colour, the score when it's on, and when, where and which channel.
+ * The big card: the next game for your teams (or the one on now), split in the two teams'
+ * colours with their badges large, the score or "VS" between them, and when, where and which
+ * channel along the bottom. ◀ ▶ go through your next few games (the dots show where you are).
  */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun HeroCard(
     ev: SportsEvent,
+    index: Int,
+    count: Int,
     follows: SportsFollows,
     now: Long,
     use24h: Boolean,
@@ -374,6 +443,7 @@ private fun HeroCard(
     playing: Boolean,
     reminded: Boolean,
     modifier: Modifier,
+    onStep: (Int) -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -384,74 +454,104 @@ private fun HeroCard(
     val sides = ev.ordered(sport)
     val mine = sides.firstOrNull { follows.followsTeam(ev.leagueId, it.team.id) }
     val look = if (sides.size != 2) eventLook(ev, league) else null
-    val base = bandColor(mine?.let { teamColor(it.team) } ?: look?.color ?: sides.firstOrNull()?.let { teamColor(it.team) } ?: leagueColor(league))
-    val other = sides.firstOrNull { it != mine }?.let { bandColor(teamColor(it.team)) } ?: base
     val label = when {
         ev.state == GameState.LIVE -> "● LIVE NOW"
         mine != null -> "NEXT FOR ${mine.team.name.uppercase()} · ${dayWord(ev.startMs, now).uppercase()}"
-        else -> "NEXT UP · ${dayWord(ev.startMs, now).uppercase()}"
+        else -> "COMING UP · ${dayWord(ev.startMs, now).uppercase()}"
     }
     val (round, place) = remember(ev.subtitle) { splitSubtitle(ev) }
     Box(
         modifier
             .sportsFrame(focused, playing, accent, radius = 16.dp)
-            .drawBehind {
-                drawRect(Brush.horizontalGradient(0f to base.copy(alpha = 0.95f), 0.45f to base.copy(alpha = 0.55f), 1f to other.copy(alpha = 0.35f)), size = Size(size.width, size.height))
-            }
             .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { e ->
+                if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                when (e.key) {
+                    androidx.compose.ui.input.key.Key.DirectionLeft -> if (index > 0) { onStep(-1); true } else false
+                    androidx.compose.ui.input.key.Key.DirectionRight -> if (index < count - 1) { onStep(1); true } else false
+                    else -> false
+                }
+            }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
                 indication = null,
                 onClick = onClick,
                 onLongClick = onLongClick
             )
-            .padding(horizontal = 18.dp, vertical = 14.dp)
     ) {
-        Column(Modifier.fillMaxSize()) {
+        // ---- the colours: each team on its half, meeting in the middle
+        if (sides.size == 2) {
+            val a = bandColor(teamColor(sides[0].team))
+            val b = bandColor(teamColor(sides[1].team))
+            Row(Modifier.fillMaxSize()) {
+                Box(Modifier.weight(1f).fillMaxHeight().background(Brush.horizontalGradient(0f to a.copy(alpha = 0.98f), 0.7f to a.copy(alpha = 0.75f), 1f to a.copy(alpha = 0.45f))))
+                Box(Modifier.width(2.dp).fillMaxHeight().background(Color.Black.copy(alpha = 0.35f)))
+                Box(Modifier.weight(1f).fillMaxHeight().background(Brush.horizontalGradient(0f to b.copy(alpha = 0.45f), 0.3f to b.copy(alpha = 0.75f), 1f to b.copy(alpha = 0.98f))))
+            }
+        } else if (look != null) {
+            val c = bandColor(look.color)
+            Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to c.copy(alpha = 0.98f), 0.7f to c.copy(alpha = 0.55f), 1f to c.copy(alpha = 0.25f))))
+        }
+        // A soft dark fade at the bottom, for the details line.
+        Box(Modifier.align(Alignment.BottomCenter).fillMaxWidth().height(46.dp).background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.55f)))))
+
+        Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 12.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 LiveText(
                     label,
-                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(if (ev.state == GameState.LIVE) SportsLook.Live else Color.Black.copy(alpha = 0.35f)).padding(horizontal = 8.dp, vertical = 2.dp),
+                    modifier = Modifier.clip(RoundedCornerShape(6.dp)).background(if (ev.state == GameState.LIVE) SportsLook.Live else Color.Black.copy(alpha = 0.4f)).padding(horizontal = 8.dp, vertical = 2.dp),
                     color = Color.White, size = 10.sp, weight = FontWeight.Black
                 )
-                if (reminded) LiveText("  🔔 Reminder set", color = Color.White, size = 10.sp, weight = FontWeight.Bold)
+                if (reminded) LiveText("  🔔", size = 11.sp)
                 Spacer(Modifier.weight(1f))
-                EventMark(ev, league, 26.dp)
+                Box(Modifier.size(30.dp).clip(RoundedCornerShape(8.dp)).background(Color.Black.copy(alpha = 0.3f)), contentAlignment = Alignment.Center) {
+                    EventMark(ev, league, 22.dp)
+                }
             }
             Spacer(Modifier.weight(1f))
             if (sides.size == 2) {
                 val showScore = ev.hasScore && !hideScores
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    HeroSide(sides[0], Modifier.weight(1f, fill = false))
-                    LiveText(
-                        if (showScore) "  ${sides[0].score} – ${sides[1].score}  " else if (sport.homeFirst) "  v  " else "  @  ",
-                        color = Color.White, size = if (showScore) 26.sp else 14.sp, weight = FontWeight.Black
-                    )
-                    HeroSide(sides[1], Modifier.weight(1f, fill = false))
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
+                        TeamLogo(sides[0].team, 50.dp)
+                        Spacer(Modifier.width(10.dp))
+                        LiveText(sides[0].team.name, color = Color.White, size = 19.sp, weight = FontWeight.Black, maxLines = 1)
+                    }
+                    Box(
+                        Modifier.clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.45f)).padding(horizontal = 12.dp, vertical = 4.dp),
+                        contentAlignment = Alignment.Center
+                    ) {
+                        if (showScore) ScoreLabel("${sides[0].score} – ${sides[1].score}", false, 24.sp)
+                        else LiveText(if (sport.homeFirst) "VS" else "AT", color = Color.White, size = 14.sp, weight = FontWeight.Black)
+                    }
+                    Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.End) {
+                        LiveText(sides[1].team.name, color = Color.White, size = 19.sp, weight = FontWeight.Black, maxLines = 1)
+                        Spacer(Modifier.width(10.dp))
+                        TeamLogo(sides[1].team, 50.dp)
+                    }
                 }
             } else if (look != null) {
-                LiveText(look.headline, color = look.text, size = 28.sp, weight = FontWeight.Black, maxLines = 1)
+                look.label?.let { LiveText(it, color = if (look.premium) Color(0xFFFFCE54) else Color.White.copy(alpha = 0.75f), size = 10.sp, weight = FontWeight.Black) }
+                LiveText(look.headline, color = look.text, size = 30.sp, weight = FontWeight.Black, maxLines = 1)
             }
             Spacer(Modifier.weight(1f))
-            OneLine(
-                listOfNotNull(league?.name, round, whenLabel(ev, now, use24h, hideScores), place, channel).joinToString("  ·  "),
-                Color.White.copy(alpha = 0.9f), 12.sp, FontWeight.SemiBold
-            )
+            Row(verticalAlignment = Alignment.CenterVertically) {
+                OneLine(
+                    listOfNotNull(league?.name, round, whenLabel(ev, now, use24h, hideScores), place, channel).joinToString("  ·  "),
+                    Color.White, 12.sp, FontWeight.SemiBold, Modifier.weight(1f)
+                )
+                if (count > 1) {
+                    Spacer(Modifier.width(10.dp))
+                    if (focused) LiveText("◀ ▶  ", color = Color.White.copy(alpha = 0.7f), size = 10.sp, weight = FontWeight.Bold)
+                    repeat(count) { i ->
+                        Box(
+                            Modifier.padding(horizontal = 2.dp).size(if (i == index) 8.dp else 6.dp).clip(RoundedCornerShape(4.dp))
+                                .background(if (i == index) Color.White else Color.White.copy(alpha = 0.35f))
+                        )
+                    }
+                }
+            }
         }
-        LiveText(
-            "OK: game info  ·  Hold OK: watch",
-            color = Color.White.copy(alpha = 0.55f), size = 9.sp,
-            modifier = Modifier.align(Alignment.BottomEnd).padding(bottom = 18.dp)
-        )
-    }
-}
-
-@Composable
-private fun HeroSide(side: Side, modifier: Modifier) {
-    Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-        TeamLogo(side.team, 42.dp)
-        Spacer(Modifier.width(10.dp))
-        LiveText(side.team.name, color = Color.White, size = 20.sp, weight = FontWeight.Black, maxLines = 1)
     }
 }
 

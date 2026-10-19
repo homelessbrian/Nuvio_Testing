@@ -493,11 +493,13 @@ private fun SportsHub(
         }
     }
 
-    val status = when {
-        problem != null -> problem
-        loading -> "Updating scores…"
-        matching -> "Finding channels…"
-        else -> null
+    // Only a problem is worth a line (scores update quietly in the background), and it sits in
+    // the bottom corner so nothing on the page moves when it comes and goes.
+    val status: String? = problem
+    val statusLine: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit = {
+        status?.let {
+            LiveText(it, color = NuvioTheme.colors.Error, size = 10.sp, modifier = Modifier.align(Alignment.BottomEnd).padding(end = 32.dp, bottom = 8.dp))
+        }
     }
     val header: @Composable (Modifier) -> Unit = { hm ->
         Row(hm, verticalAlignment = Alignment.CenterVertically) {
@@ -598,7 +600,6 @@ private fun SportsHub(
                         LiveText("Sports", size = 26.sp, weight = FontWeight.Black)
                         Spacer(Modifier.width(14.dp))
                         filters(Modifier.weight(1f))
-                        status?.let { LiveText(it, color = if (problem != null) NuvioTheme.colors.Error else SportsLook.Dim, size = 11.sp, modifier = Modifier.padding(horizontal = 8.dp)) }
                         FilterIcon("✎", "Teams", selected = false, withLabel = true) { onPick() }
                     }
                 },
@@ -619,6 +620,7 @@ private fun SportsHub(
                 color = NuvioTheme.colors.TextTertiary, size = 10.sp,
                 modifier = Modifier.align(Alignment.BottomStart).padding(start = 60.dp, bottom = 8.dp)
             )
+            statusLine()
         }
         return
     }
@@ -630,7 +632,6 @@ private fun SportsHub(
                 header(Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
                 filters(Modifier.fillMaxWidth())
-                status?.let { LiveText(it, color = if (problem != null) NuvioTheme.colors.Error else SportsLook.Dim, size = 11.sp, modifier = Modifier.padding(start = 4.dp, top = 2.dp)) }
                 list(Modifier.weight(1f))
             }
             Spacer(Modifier.width(18.dp))
@@ -644,7 +645,6 @@ private fun SportsHub(
         Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 36.dp, top = 20.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 header(Modifier.weight(1f))
-                status?.let { LiveText(it, color = if (problem != null) NuvioTheme.colors.Error else SportsLook.Dim, size = 11.sp, modifier = Modifier.padding(end = 10.dp)) }
                 filters(Modifier.width(470.dp))
                 Spacer(Modifier.width(8.dp))
                 FilterIcon("✎", "Teams", selected = false, withLabel = true) { onPick() }
@@ -658,6 +658,7 @@ private fun SportsHub(
         color = NuvioTheme.colors.TextTertiary, size = 10.sp,
         modifier = Modifier.align(Alignment.BottomStart).padding(start = 60.dp, bottom = 8.dp)
     )
+    statusLine()
     }
 }
 

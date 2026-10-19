@@ -75,6 +75,11 @@ class SportsRepository @Inject constructor(
     /** ESPN games from the day after tomorrow to a week ahead (updated a few times a day). */
     private val weekData = MutableStateFlow<Map<String, LeagueData>>(emptyMap())
     private val fixtureData = MutableStateFlow<Map<String, LeagueData>>(emptyMap())
+    /**
+     * Leagues you follow or show on My Teams: their games from a week ahead to five weeks ahead
+     * (the week before that is in [weekData]), so a league's row runs well past this week.
+     */
+    private val aheadData = MutableStateFlow<Map<String, LeagueData>>(emptyMap())
     /** Followed teams' whole seasons from ESPN, by followed team key. */
     private val scheduleData = MutableStateFlow<Map<String, LeagueData>>(emptyMap())
     /** Non-league football (nuvio-data files): whole seasons, by league id. */
@@ -105,10 +110,10 @@ class SportsRepository @Inject constructor(
      * Everything we know, for My Teams: the page's days plus your teams' whole seasons and the
      * non-league seasons. A game in both counts once (the fresher copy, from the page's days).
      */
-    val known: StateFlow<List<SportsEvent>> = combine(events, scheduleData, tsdbData) { ev, s, t ->
+    val known: StateFlow<List<SportsEvent>> = combine(events, scheduleData, tsdbData, aheadData) { ev, s, t, a ->
         val seen = HashSet<String>(ev.size * 2)
         ev.forEach { seen += dedupeKey(it) }
-        val extra = (s.values.flatMap { it.events } + t.values.flatMap { it.events }).filter { seen.add(dedupeKey(it)) }
+        val extra = (a.values.flatMap { it.events } + s.values.flatMap { it.events } + t.values.flatMap { it.events }).filter { seen.add(dedupeKey(it)) }
         ev + extra
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
@@ -202,6 +207,7 @@ class SportsRepository @Inject constructor(
             if (active) {
                 val force = forceExtras.also { forceExtras = false }
                 runCatching { updateWeek(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Sports week update failed", it) }
+                runCatching { updateAhead(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Sports weeks-ahead update failed", it) }
                 runCatching { updateTsdb(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Non-league update failed", it) }
                 runCatching { updateSchedules(System.currentTimeMillis(), force) }.onFailure { Log.w(TAG, "Team schedules update failed", it) }
             }
@@ -292,7 +298,7 @@ class SportsRepository @Inject constructor(
         val f = follows.value
         val viewing = viewers.value > 0
         val due = activeLeagues(s, f).filter { l ->
-            if (l.espnPath == null || l.id in dayByDay) return@filter false
+            if (l.espnPath == null) return@filter false
             val age = now - (weekData.value[l.id]?.fetchedAt ?: 0L)
             when {
                 force -> age > 30 * MINUTE
@@ -305,20 +311,54 @@ class SportsRepository @Inject constructor(
         val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
         val from = fmt.format(java.util.Date(now + 2 * DAY))
         val to = fmt.format(java.util.Date(now + DAYS_AHEAD * DAY))
+        val singleDays = (2..DAYS_AHEAD).map { d -> fmt.format(java.util.Date(now + d * DAY)) }
         val gate = Semaphore(3)
         coroutineScopeFetch(due) { l ->
             gate.withPermit {
-                val raw = runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()
+                // One request for the whole week; a feed that won't take a range of days: a day at a time.
+                val raws: List<String> = (if (l.id !in dayByDay) runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()?.let { listOf(it) } else null)
+                    ?: singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
                 val at = System.currentTimeMillis()
-                if (raw == null) {
+                if (raws.isEmpty()) {
                     // Try again in an hour, not straight away.
                     weekData.update { m -> m + (l.id to LeagueData(m[l.id]?.events.orEmpty(), at - 2 * HOUR, "failed")) }
+                    LiveTvLoadReport.add("Sports: couldn't get the week ahead for ${l.name}")
                     return@withPermit
                 }
-                val parsed = runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList())
+                val parsed = raws.flatMap { raw -> runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList()) }.distinctBy { it.id }
                 weekData.update { it + (l.id to LeagueData(parsed, at, null)) }
-                runCatching { File(dir, "wk_${safe(l.id)}.json").writeText("$at\n$raw") }
+                runCatching { File(dir, "wk_${safe(l.id)}.json").writeText("$at\n" + raws.joinToString(RAW_SEP)) }
             }
+        }
+    }
+
+    /**
+     * Leagues you follow or show on My Teams: up to five weeks ahead (one request each, a few
+     * times a day), so their rows aren't only this week. Not for feeds that need asking a day at a time.
+     */
+    private suspend fun updateAhead(now: Long, force: Boolean) {
+        val f = follows.value
+        val ids = (f.pins + f.leagues).toSet()
+        if (aheadData.value.keys.any { it !in ids }) aheadData.update { m -> m.filterKeys { it in ids } }
+        val due = ids.mapNotNull { SportsCatalog.league(it) }.filter { l ->
+            l.espnPath != null && l.id !in dayByDay &&
+                now - (aheadData.value[l.id]?.fetchedAt ?: 0L) > (if (force) HOUR else 6 * HOUR)
+        }
+        if (due.isEmpty()) return
+        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
+        val from = fmt.format(java.util.Date(now + (DAYS_AHEAD + 1) * DAY))
+        val to = fmt.format(java.util.Date(now + 35 * DAY))
+        for (l in due) {
+            val raw = runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()
+            val at = System.currentTimeMillis()
+            if (raw == null) {
+                aheadData.update { m -> m + (l.id to LeagueData(m[l.id]?.events.orEmpty(), at - 5 * HOUR, "failed")) }
+                continue
+            }
+            val parsed = withContext(com.nuvio.tv.livetv.data.BackgroundWork.quiet) {
+                runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList())
+            }
+            aheadData.update { it + (l.id to LeagueData(parsed, at, null)) }
         }
     }
 
@@ -343,6 +383,8 @@ class SportsRepository @Inject constructor(
                 }
             }
             val at = System.currentTimeMillis()
+            // The league's team list (saved for a week): where the colours come from.
+            if (raws.isNotEmpty()) runCatching { leagueTeams(l) }
             if (raws.isEmpty()) {
                 scheduleData.update { m -> m + (t.key to LeagueData(m[t.key]?.events.orEmpty(), at - 5 * HOUR, "failed")) }
                 continue
@@ -365,7 +407,31 @@ class SportsRepository @Inject constructor(
                 byId.putIfAbsent(ev.espnId ?: ev.id, ev)
             }
         }
-        return byId.values.sortedBy { it.startMs }
+        // A team's schedule from ESPN leaves out the teams' colours (the scoreboard has them):
+        // filled in from the league's team list and today's games, so every card has its colours.
+        val known = HashMap<String, TeamInfo>()
+        fun learn(t: TeamInfo) {
+            if (t.color == null && t.altColor == null) return
+            known.putIfAbsent(SportsCatalog.teamFamily(t.leagueId) + "|" + t.id, t)
+        }
+        raws.map { it.first }.distinctBy { it.id }.forEach { l -> cachedTeams(l).forEach(::learn) }
+        (leagueData.value.values + weekData.value.values).forEach { d -> d.events.forEach { ev -> ev.sides.forEach { learn(it.team) } } }
+        synchronized(teamCache) { teamCache.values.toList() }.forEach { list -> list.forEach(::learn) }
+        fun fill(side: Side?): Side? {
+            if (side == null || side.team.color != null) return side
+            val k = known[SportsCatalog.teamFamily(side.team.leagueId) + "|" + side.team.id] ?: return side
+            return side.copy(team = side.team.copy(color = k.color, altColor = k.altColor, logo = side.team.logo ?: k.logo))
+        }
+        return byId.values.map { ev -> if (ev.sides.all { it.team.color != null }) ev else ev.copy(away = fill(ev.away), home = fill(ev.home)) }
+            .sortedBy { it.startMs }
+    }
+
+    /** A league's teams as already saved (no download): for colours. */
+    private fun cachedTeams(league: League): List<TeamInfo> {
+        synchronized(teamCache) { teamCache[league.id] }?.let { return it }
+        val file = File(dir, "teams_${safe(league.id)}.json")
+        if (!file.exists()) return emptyList()
+        return runCatching { SportsFeeds.parseTeams(league, file.readText()) }.getOrDefault(emptyList())
     }
 
     @Volatile private var tsdbIndexAt = 0L
@@ -531,7 +597,7 @@ class SportsRepository @Inject constructor(
                 val nl = text.indexOf('\n')
                 val at = text.substring(0, nl).toLong()
                 if (now - at > 3 * DAY) return@runCatching
-                wk[l.id] = LeagueData(SportsFeeds.parseScoreboard(l, text.substring(nl + 1)), at, null)
+                wk[l.id] = LeagueData(text.substring(nl + 1).split(RAW_SEP).flatMap { SportsFeeds.parseScoreboard(l, it) }.distinctBy { it.id }, at, null)
             }
         }
         weekData.value = wk

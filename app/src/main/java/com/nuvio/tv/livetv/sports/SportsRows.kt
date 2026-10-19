@@ -21,7 +21,8 @@ internal class SportsRow(
     enum class Kind { UPCOMING, TEAM, LEAGUE, WORD }
 }
 
-internal class MyTeamsPage(val hero: SportsEvent?, val rows: List<SportsRow>)
+/** [heroes]: the big card's games (on now first, then the next ones); left and right go through them. */
+internal class MyTeamsPage(val heroes: List<SportsEvent>, val rows: List<SportsRow>)
 
 internal object SportsRows {
     private const val HOUR = 3_600_000L
@@ -76,9 +77,12 @@ internal object SportsRows {
             val l = SportsCatalog.league(id) ?: continue
             val all = known.filter { it.leagueId == id }
             // This week (with the last two days' results); a league between rounds: its next games.
-            val week = all.filter { it.startMs in (now - 2 * DAY)..(now + 8 * DAY) || it.state == GameState.LIVE }
-            val games = if (week.any { it.state != GameState.POST }) week
-            else week + all.filter { it.state == GameState.PRE && it.startMs > now }.sortedBy { it.startMs }.take(12)
+            // The last couple of days' results, then every game ahead we have (up to five weeks;
+            // capped so a busy league like MLB stays a row you can get through).
+            val recent = all.filter { it.startMs >= now - 2 * DAY && (it.state == GameState.POST || it.state == GameState.OFF) }
+            val ahead = all.filter { it.state == GameState.LIVE || ((it.state == GameState.PRE || it.state == GameState.OFF) && it.startMs >= now - 3 * HOUR) }
+                .sortedBy { it.startMs }.take(60)
+            val games = recent + ahead
             if (games.isEmpty()) continue
             rows += timeline("l:$id", l.name, SportsRow.Kind.LEAGUE, games.distinctBy { it.id }, now, league = l, results = 8)
         }
@@ -90,8 +94,8 @@ internal object SportsRows {
             rows += timeline("w:$w", "“$w”", SportsRow.Kind.WORD, games, now)
         }
 
-        val hero = soon.firstOrNull { it.state == GameState.LIVE } ?: soon.firstOrNull { it.state == GameState.PRE && it.startMs >= now - HOUR }
-        return MyTeamsPage(hero, rows)
+        val heroes = soon.filter { it.state == GameState.LIVE || (it.state == GameState.PRE && it.startMs >= now - HOUR) }.take(8)
+        return MyTeamsPage(heroes, rows)
     }
 
     /** Games in date order: the last few results, then what's on and what's next. */

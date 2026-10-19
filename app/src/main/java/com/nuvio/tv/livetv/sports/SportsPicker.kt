@@ -40,6 +40,10 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.graphics.Brush
@@ -78,6 +82,21 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
     var query by rememberSaveable { mutableStateOf("") }
     var askWord by remember { mutableStateOf(false) }
     val firstSport = remember { FocusRequester() }
+    // Up from the sports list or the leagues: the Following bar (it was skipped, the highlight
+    // went to "‹ Sports" instead).
+    val followFirst = remember { FocusRequester() }
+    val hasFollows = !follows.isEmpty
+    val leagueRowState = androidx.compose.foundation.lazy.rememberLazyListState()
+    val leagueReqs = remember { HashMap<String, FocusRequester>() }
+    fun leagueReq(id: String) = leagueReqs.getOrPut(id) { FocusRequester() }
+    // OK on a sport: the highlight goes over to its first league.
+    var toLeagues by remember { mutableStateOf(0) }
+    LaunchedEffect(toLeagues) {
+        if (toLeagues == 0) return@LaunchedEffect
+        delay(90)
+        runCatching { leagueRowState.scrollToItem(0) }
+        leagues.firstOrNull()?.let { runCatching { leagueReq(it.id).requestFocus() } }
+    }
 
     val teams by produceState<List<TeamInfo>?>(null, league?.id) {
         value = null
@@ -121,7 +140,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                 SportsAction("✓  Done", selected = true, onClick = onClose)
             }
             Spacer(Modifier.height(12.dp))
-            FollowingBar(follows, viewModel)
+            FollowingBar(follows, viewModel, firstReq = followFirst, fallback = firstSport)
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxSize()) {
                 // ---- sports
@@ -133,9 +152,10 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                             sport = s,
                             selected = s.name == sport && query.isBlank(),
                             count = count,
-                            modifier = if (s == sports.first()) Modifier.focusRequester(firstSport) else Modifier,
+                            modifier = if (s == sports.first()) Modifier.focusRequester(firstSport)
+                                .focusUp(if (hasFollows) followFirst else null) else Modifier,
                             onFocused = { if (query.isBlank()) sport = s.name },
-                            onClick = { query = ""; sport = s.name }
+                            onClick = { query = ""; sport = s.name; toLeagues++ }
                         )
                     }
                 }
@@ -152,9 +172,14 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                         return@Column
                     }
                     // ---- leagues
-                    LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(end = 24.dp)) {
-                        items(leagues, key = { it.id }) { l ->
+                    LazyRow(state = leagueRowState, horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(end = 24.dp)) {
+                        items(leagues.size, key = { leagues[it].id }) { i ->
+                            val l = leagues[i]
                             LeagueCard(
+                                modifier = Modifier
+                                    .focusRequester(leagueReq(l.id))
+                                    .focusUp(if (hasFollows) followFirst else null)
+                                    .steadyRowKeys(leagueRowState, i, leagues.size) { j -> leagueReq(leagues[j].id) },
                                 league = l,
                                 selected = l.id == league?.id,
                                 followed = l.id in follows.leagues,
@@ -188,6 +213,11 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                         }
                         Spacer(Modifier.height(10.dp))
                         when {
+                            league.sport == Sport.WRESTLING -> LiveText(
+                                "${league.name}'s schedule (weekly shows and big events, with times and venues) comes from TheSportsDB, updated every day. " +
+                                    "Your own TV guide is checked too, to find the channel it's on. Follow it to see every show under My Teams.",
+                                color = colors.TextSecondary, size = 13.sp, maxLines = 4
+                            )
                             league.guideOnly -> LiveText(
                                 "${league.name} comes from your own TV guide: live shows with \"${league.guideWords.first()}\" in the title. " +
                                     "Follow it to see them under My Teams. Follow a name (a player, a team) to catch shows that mention it.",
@@ -238,48 +268,73 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
     }
 }
 
+/** Something you follow, in the Following bar. */
+private class FollowEntry(val key: String, val label: String, val badge: (@Composable () -> Unit)?, val remove: () -> Unit)
+
 @Composable
-private fun FollowingBar(follows: SportsFollows, viewModel: SportsViewModel) {
+private fun FollowingBar(follows: SportsFollows, viewModel: SportsViewModel, firstReq: FocusRequester, fallback: FocusRequester) {
     val colors = NuvioTheme.colors
-    Row(
-        Modifier
-            .fillMaxWidth()
-            .sportsFrame(focused = false, accent = NuvioTheme.colors.Secondary)
-            .padding(horizontal = 12.dp, vertical = 8.dp),
-        verticalAlignment = Alignment.CenterVertically
-    ) {
-        val total = follows.teams.size + follows.leagues.size + follows.words.size
-        LiveText("FOLLOWING · $total", color = colors.TextTertiary, size = 10.sp, weight = FontWeight.ExtraBold)
-        Spacer(Modifier.width(10.dp))
-        if (total == 0) {
-            LiveText("Nothing yet: pick a team below.", color = colors.TextSecondary, size = 12.sp)
-            return@Row
+    val entries = buildList {
+        follows.teams.forEach { t ->
+            add(FollowEntry("t" + t.key, t.name, { TeamLogo(TeamInfo(t.leagueId, t.teamId, t.name, t.name, t.abbr, null, t.color, null, t.logo), 22.dp) }) {
+                viewModel.repo.updateFollows { f -> f.copy(teams = f.teams.filterNot { it.key == t.key }) }
+            })
         }
-        LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-            items(follows.teams, key = { "t" + it.key }) { t ->
-                FollowPill(
-                    label = t.name,
-                    badge = { TeamLogo(TeamInfo(t.leagueId, t.teamId, t.name, t.name, t.abbr, null, t.color, null, t.logo), 22.dp) },
-                    onClick = { viewModel.repo.updateFollows { f -> f.copy(teams = f.teams.filterNot { it.key == t.key }) } }
-                )
-            }
-            items(follows.leagues.toList(), key = { "l$it" }) { id ->
-                val l = SportsCatalog.league(id)
-                FollowPill(label = "All of ${l?.name ?: id}", badge = { LeagueMark(l, 18.dp) }, onClick = { viewModel.repo.toggleLeague(id) })
-            }
-            items(follows.words, key = { "w$it" }) { w ->
-                FollowPill(label = "\"$w\"", badge = null, onClick = { viewModel.repo.removeWord(w) })
+        follows.leagues.forEach { id ->
+            val l = SportsCatalog.league(id)
+            add(FollowEntry("l$id", "All of ${l?.name ?: id}", { LeagueMark(l, 18.dp) }) { viewModel.repo.toggleLeague(id) })
+        }
+        follows.words.forEach { w -> add(FollowEntry("w$w", "\"$w\"", null) { viewModel.repo.removeWord(w) }) }
+    }
+    val reqs = remember { HashMap<String, FocusRequester>() }
+    fun req(k: String) = reqs.getOrPut(k) { FocusRequester() }
+    // Taking one off: the highlight moves to the one next to it (the last one: the one before).
+    var refocus by remember { mutableStateOf<Int?>(null) }
+    LaunchedEffect(entries.size, refocus) {
+        val at = refocus ?: return@LaunchedEffect
+        delay(60)
+        val target = entries.getOrNull(at) ?: entries.getOrNull(at - 1)
+        val ok = target != null && runCatching { req(target.key).requestFocus() }.isSuccess
+        if (!ok) runCatching { fallback.requestFocus() }
+        refocus = null
+    }
+    Column(Modifier.fillMaxWidth()) {
+        Row(
+            Modifier
+                .fillMaxWidth()
+                .sportsFrame(focused = false, accent = NuvioTheme.colors.Secondary)
+                .padding(horizontal = 12.dp, vertical = 8.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            LiveText("FOLLOWING · ${entries.size}", color = colors.TextTertiary, size = 10.sp, weight = FontWeight.ExtraBold)
+            Spacer(Modifier.width(10.dp))
+            if (entries.isEmpty()) {
+                LiveText("Nothing yet: pick a team below.", color = colors.TextSecondary, size = 12.sp)
+            } else {
+                LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    items(entries.size, key = { entries[it].key }) { i ->
+                        val e = entries[i]
+                        FollowPill(
+                            label = e.label,
+                            badge = e.badge,
+                            modifier = Modifier.focusRequester(req(e.key)).then(if (i == 0) Modifier.focusRequester(firstReq) else Modifier),
+                            onClick = { refocus = i; e.remove() }
+                        )
+                    }
+                }
             }
         }
-        LiveText("OK on one to remove it", color = colors.TextTertiary, size = 11.sp)
+        if (entries.isNotEmpty()) {
+            LiveText("OK on one to stop following it", color = colors.TextTertiary, size = 10.sp, modifier = Modifier.padding(start = 12.dp, top = 3.dp))
+        }
     }
 }
 
 @Composable
-private fun FollowPill(label: String, badge: (@Composable () -> Unit)?, onClick: () -> Unit) {
+private fun FollowPill(label: String, badge: (@Composable () -> Unit)?, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Row(
-        Modifier
+        modifier
             .clip(RoundedCornerShape(50))
             .background(if (focused) Color.White else SportsLook.CardRaised)
             .border(1.dp, if (focused) Color.White else SportsLook.Border, RoundedCornerShape(50))
@@ -299,6 +354,11 @@ private fun SportRow(sport: Sport, selected: Boolean, count: Int, modifier: Modi
     val accent = NuvioTheme.colors.Secondary
     Row(
         modifier
+            // Holding ◀ through the leagues stops here instead of carrying on into the side menu.
+            .onPreviewKeyEvent { e ->
+                e.type == androidx.compose.ui.input.key.KeyEventType.KeyDown &&
+                    e.key == androidx.compose.ui.input.key.Key.DirectionLeft && e.nativeKeyEvent.repeatCount > 0
+            }
             .fillMaxWidth()
             .height(40.dp)
             .clip(SportsLook.SmallShape)
@@ -327,6 +387,7 @@ private fun SportRow(sport: Sport, selected: Boolean, count: Int, modifier: Modi
 
 @Composable
 private fun LeagueCard(
+    modifier: Modifier = Modifier,
     league: League,
     selected: Boolean,
     followed: Boolean,
@@ -340,6 +401,7 @@ private fun LeagueCard(
     Row(
         Modifier
             .padding(4.dp)
+            .then(modifier)
             .height(54.dp)
             .sportsFrame(focused, playing = selected && !focused, accent = accent, radius = 12.dp)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
@@ -354,7 +416,7 @@ private fun LeagueCard(
             LiveText(
                 listOfNotNull(
                     if (teamsFollowed > 0) "$teamsFollowed followed" else null,
-                    if (league.guideOnly) "From your guide" else null,
+                    if (league.sport == Sport.WRESTLING) "Schedule + your guide" else if (league.guideOnly) "From your guide" else null,
                     if (!inRegion) "Not on your Sports page" else null
                 ).joinToString(" · ").ifBlank { if (league.kind == LeagueKind.EVENT) "Events" else "Teams" },
                 color = SportsLook.Dim, size = 10.sp
@@ -434,3 +496,7 @@ private fun TeamTile(team: TeamInfo, followed: Boolean, showLeague: Boolean, onC
         }
     }
 }
+
+/** Where ↑ goes from here (null: the usual place). */
+private fun Modifier.focusUp(target: FocusRequester?): Modifier =
+    if (target == null) this else focusProperties { up = target }
