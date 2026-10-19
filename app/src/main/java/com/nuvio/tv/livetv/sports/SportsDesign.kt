@@ -341,11 +341,13 @@ internal fun GameCard(
     val league = SportsCatalog.league(ev.leagueId)
     val sport = league?.sport ?: Sport.OTHER
     val sides = ev.ordered(sport)
+    val premium = sides.size != 2 && eventLook(ev, league).premium
     Box(
         modifier
             .fillMaxWidth()
             .height(86.dp)
-            .sportsFrame(focused, playing, accent)
+            // Big events (WrestleMania…): a gold border, same size as every other card.
+            .sportsFrame(focused, playing || premium, if (playing) accent else Color(0xFFFFCE54))
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -384,25 +386,82 @@ internal fun GameCard(
     }
 }
 
-/** The single band of an event without two teams: the sport's symbol, its name and a note. */
+/** How an event without two teams is shown: its headline, colour, label and whether it's a big event. */
+internal class EventLook(val headline: String, val color: Color, val text: Color, val label: String?, val premium: Boolean)
+
+private val PREMIUM_EVENTS = listOf(
+    "wrestlemania", "royal rumble", "summerslam", "survivor series", "elimination chamber", "money in the bank",
+    "saturday night's main event", "saturday nights main event", "night of champions", "crown jewel", "backlash",
+    "bad blood", "clash in paris", "wrestlepalooza", "all in", "all out", "full gear", "revolution", "double or nothing",
+    "worlds end", "forbidden door", "grand slam", "bound for glory", "slammiversary", "hard to kill", "rebellion"
+)
+
+/**
+ * Wrestling shows in their own colours (just colours, no logos): Raw red, SmackDown blue, NXT
+ * gold on black, AEW gold, TNA blue. Big events (WrestleMania, All In…) get the gold Premium Live
+ * Event label. Other sports' events (a race, a fight card) use the league's colour and name.
+ */
+internal fun eventLook(ev: SportsEvent, league: League?): EventLook {
+    val sport = league?.sport ?: Sport.OTHER
+    val t = SportsCatalog.norm(ev.title)
+    fun has(w: String) = SportsCatalog.hasWord(t, w)
+    if (sport == Sport.WRESTLING) {
+        // "WWE Friday Night SmackDown" -> "Friday Night SmackDown": the promotion is in the logo column.
+        val headline = ev.title.replace(Regex("""(?i)^\s*(wwe|aew|tna|njpw)\s*[:\-–]?\s*"""), "").trim().ifBlank { ev.title }
+        val premium = PREMIUM_EVENTS.any { has(SportsCatalog.norm(it).trim()) }
+        val (color, text) = when {
+            premium -> Color(0xFF5A1478) to Color.White
+            has("smackdown") -> Color(0xFF0052CC) to Color.White
+            has("raw") -> Color(0xFFC8102E) to Color.White
+            has("nxt") -> Color(0xFF282828) to Color(0xFFF2D06B)
+            has("dynamite") || has("aew") || league?.id == "guide/aew" -> Color(0xFF96732B) to Color.White
+            has("collision") -> Color(0xFF6B2D8F) to Color.White
+            has("tna") || has("impact") -> Color(0xFF1E5AC8) to Color.White
+            else -> leagueColor(league) to Color.White
+        }
+        return EventLook(headline, color, text, if (premium) "★ PREMIUM LIVE EVENT" else "WEEKLY SHOW", premium)
+    }
+    return EventLook(ev.title, leagueColor(league), Color.White, league?.name?.uppercase(), false)
+}
+
+/**
+ * The band of an event without two teams: a small label (WEEKLY SHOW, ★ PREMIUM LIVE EVENT, the
+ * league), the event's name big in its colour, and where it is. The same height as a game's two
+ * team bands, so cards always line up.
+ */
 @Composable
 internal fun EventBand(ev: SportsEvent, league: League?, sport: Sport, modifier: Modifier = Modifier, big: Boolean = false) {
-    val c = bandColor(leagueColor(league))
+    val look = eventLook(ev, league)
+    val c = bandColor(look.color)
+    val gold = Color(0xFFFFCE54)
     Row(
         modifier
-            .background(Brush.horizontalGradient(0f to c.copy(alpha = 0.9f), 0.75f to c.copy(alpha = 0.25f), 1f to Color.Transparent))
+            .background(
+                if (look.premium) Brush.horizontalGradient(0f to c.copy(alpha = 0.95f), 0.75f to Color(0xFFD4AF37).copy(alpha = 0.30f), 1f to Color.Transparent)
+                else Brush.horizontalGradient(0f to c.copy(alpha = 0.92f), 0.72f to c.copy(alpha = 0.25f), 1f to c.copy(alpha = 0.04f))
+            )
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier.size(if (big) 52.dp else 38.dp).clip(RoundedCornerShape(10.dp)).background(Color.Black.copy(alpha = 0.25f)),
-            contentAlignment = Alignment.Center
-        ) { LiveText(sport.icon, size = if (big) 26.sp else 19.sp) }
-        Spacer(Modifier.width(11.dp))
+        if (sport != Sport.WRESTLING) {
+            Box(
+                Modifier.size(if (big) 44.dp else 30.dp).clip(RoundedCornerShape(9.dp)).background(Color.Black.copy(alpha = 0.25f)),
+                contentAlignment = Alignment.Center
+            ) { LiveText(sport.icon, size = if (big) 22.sp else 15.sp) }
+            Spacer(Modifier.width(10.dp))
+        }
         Column(Modifier.weight(1f)) {
-            LiveText(ev.title, color = Color.White, size = if (big) 22.sp else 14.sp, weight = FontWeight.ExtraBold, maxLines = 2)
-            (ev.note ?: ev.word?.let { "Mentions $it" } ?: league?.name)?.let {
-                LiveText(it, color = Color.White.copy(alpha = 0.65f), size = if (big) 13.sp else 10.sp, maxLines = 1)
+            look.label?.let {
+                SportsBadge(
+                    it,
+                    if (look.premium) gold else Color.Black.copy(alpha = 0.35f),
+                    if (look.premium) SportsLook.Ink else Color.White
+                )
+                Spacer(Modifier.height(2.dp))
+            }
+            LiveText(look.headline, color = look.text, size = if (big) 28.sp else 19.sp, weight = FontWeight.Black, maxLines = 1)
+            (ev.note ?: ev.word?.let { "Mentions $it" } ?: ev.subtitle)?.let {
+                OneLine(it, Color.White.copy(alpha = 0.72f), if (big) 13.sp else 10.sp)
             }
         }
     }

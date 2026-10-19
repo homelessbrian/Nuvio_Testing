@@ -384,7 +384,7 @@ class SportsRepository @Inject constructor(
             val f = follows.value
             // Sports ESPN doesn't cover, and names you follow, from the guide: yesterday to tomorrow.
             val guideLeagues = activeLeagues(s, f).filter { it.guideOnly }
-            val keys = channels.mapTo(HashSet()) { it.key }
+            val keys = channels.associateBy { it.key }
             val days = HashMap<Long, List<SportsEvent>>()
             for (offset in -1..1) {
                 val start = dayStart(offset)

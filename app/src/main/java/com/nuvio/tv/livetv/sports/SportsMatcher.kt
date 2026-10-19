@@ -75,8 +75,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             }.getOrDefault(emptyList())
             if (hits.isEmpty()) return@forEach
             val prepared = hits.mapNotNull { (key, p0) ->
-                if (key !in byKey) return@mapNotNull null
+                val ch = byKey[key] ?: return@mapNotNull null
                 val p = if (input.shiftMs == 0L) p0 else p0.copy(startMs = p0.startMs + input.shiftMs, stopMs = p0.stopMs + input.shiftMs)
+                if (fillerOrLoop(ch, p)) return@mapNotNull null
                 val nt = norm(p.title)
                 if (SportsCatalog.NOT_LIVE_WORDS.any { hasWord(nt, it) }) return@mapNotNull null
                 Triple(key, p, nt to norm(p.description.orEmpty()))
@@ -189,7 +190,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         dayEnd: Long,
         leagues: List<League>,
         followedWords: List<String>,
-        channels: Set<String>,
+        channels: Map<String, LiveChannel>,
         shiftMs: Long,
         now: Long
     ): List<SportsEvent> {
@@ -203,14 +204,19 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         val meta = HashMap<String, Pair<League?, String?>>()
         val seen = HashSet<String>()
         for ((key, p0) in hits) {
-            if (key !in channels || !seen.add("$key|${p0.startMs}")) continue
+            val ch = channels[key] ?: continue
+            if (!seen.add("$key|${p0.startMs}")) continue
             val p = if (shiftMs == 0L) p0 else p0.copy(startMs = p0.startMs + shiftMs, stopMs = p0.stopMs + shiftMs)
             val nt = norm(p.title)
             val nd = norm(p.description.orEmpty())
             if (SportsCatalog.NOT_LIVE_WORDS.any { hasWord(nt, it) }) continue
             val league = leagueWords.firstOrNull { (w, _) -> hasWord(nt, norm(w).trim()) }?.second
-            // Wrestling's weekly shows are live without the guide saying so.
-            if (!isLive(nt, nd) && league?.liveByDefault != true) continue
+            // 24/7 and loop channels ("NETFLIX WWE", a movie channel called "… NXT"): not live sport.
+            if (fillerOrLoop(ch, p)) continue
+            val saysLive = isLive(nt, nd)
+            // Wrestling's weekly shows are live without the guide saying so, but not on a channel
+            // named after the show or league (those run old shows all day).
+            if (!saysLive && (league?.liveByDefault != true || league.guideWords.any { hasWord(nameNorm(ch.name), norm(it).trim()) })) continue
             val word = followedWords.firstOrNull { w -> hasWord(nt, norm(w).trim()) || hasWord(nd, norm(w).trim()) }
             if (league == null && word == null) continue
             val clean = cleanTitle(p.title)
@@ -299,6 +305,24 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         }
     }
 
+    /** A channel name without "US:" and quality words, for comparing with show titles. */
+    private fun nameNorm(name: String): String =
+        norm(name.replace(NAME_PREFIX, "")).replace(NAME_NOISE, " ").replace(Regex(" +"), " ")
+
+    /**
+     * Not a real broadcast of a game or show: a 24/7 channel, a block of 6 hours or more, or a
+     * listing that's just the channel's own name ("CINE PRO NXT" on CINE PRO NXT).
+     */
+    private fun fillerOrLoop(ch: LiveChannel, p: EpgProgram): Boolean {
+        if (com.nuvio.tv.livetv.data.LiveTvPosterResolver.is247(ch)) return true
+        if (p.stopMs - p.startMs >= 6 * HOUR) return true
+        val t = nameNorm(cleanTitle(p.title)).trim()
+        val c = nameNorm(ch.name).trim()
+        if (t.isEmpty() || c.isEmpty()) return t.isEmpty()
+        // The listing is the channel's name, or repeats the whole (multi-word) name.
+        return t == c || (c.contains(' ') && c.length >= 8 && " $t ".contains(" $c "))
+    }
+
     private fun termsFor(ev: SportsEvent): Terms {
         val league = SportsCatalog.league(ev.leagueId)
         val leagueWords = league?.guideWords.orEmpty().map { norm(it).trim() }.filter { it.length >= 2 }
@@ -324,6 +348,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
     companion object {
         private const val MINUTE = 60_000L
         private const val HOUR = 60 * MINUTE
+
+        private val NAME_PREFIX = Regex("""^\s*[A-Za-z]{2,3}\s*[:|\-]\s*""")
+        private val NAME_NOISE = Regex(""" (fhd|uhd|hd|sd|4k|hevc|raw|backup|vip) """)
 
         /** Shows found in the guide for a followed name that isn't one of the listed sports. */
         const val OTHER_ID = "guide/other"
