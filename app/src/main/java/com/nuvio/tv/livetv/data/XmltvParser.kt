@@ -37,14 +37,15 @@ object XmltvParser {
         input: InputStream,
         windowStartMs: Long,
         windowEndMs: Long,
-        selectChannels: (Map<String, XmltvChannel>) -> Set<String>?,
         /**
          * For a guide with no channel list before its shows (so [selectChannels] can't pick
          * any and returns null): whether to keep a channel's shows, asked once per channel id.
          * Null keeps them all. Without it, every show in a big guide was held in memory, which
          * on a low-memory box could slow the app down or close it.
+         * (Before [selectChannels], so `parse(…) { channels -> … }` still means selectChannels.)
          */
-        keepUnlisted: ((String) -> Boolean)? = null
+        keepUnlisted: ((String) -> Boolean)? = null,
+        selectChannels: (Map<String, XmltvChannel>) -> Set<String>?
     ): XmltvResult {
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
