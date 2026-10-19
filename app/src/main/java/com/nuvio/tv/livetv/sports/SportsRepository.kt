@@ -79,9 +79,15 @@ class SportsRepository @Inject constructor(
     /** Every game and event we know of, around today (yesterday to tomorrow). */
     val events: StateFlow<List<SportsEvent>> = combine(leagueData, fixtureData, guideData) { l, f, g ->
         val guide = g.values.flatten()
-        // A sport's dates from sporting-events.org only show when the guide has nothing for it that day.
-        val guideDays = guide.map { it.leagueId to dayOf(it.startMs) }.toSet()
-        val fixtures = f.values.flatMap { it.events }.filter { (it.leagueId to dayOf(it.startMs)) !in guideDays }
+        // A scheduled event (sporting-events.org, the wrestling schedule) gives way to the same
+        // event found in the guide: one of its league within 3 hours of its start (or, for
+        // events with a date only, that day). Anything else in the guide doesn't hide it.
+        val guideByLeague = guide.groupBy { it.leagueId }
+        val fixtures = f.values.flatMap { it.events }.filter { fx ->
+            val same = guideByLeague[fx.leagueId].orEmpty()
+            if (fx.hasTime) same.none { kotlin.math.abs(it.startMs - fx.startMs) <= 3 * HOUR }
+            else same.none { dayOf(it.startMs) == dayOf(fx.startMs) }
+        }
         (l.values.flatMap { it.events } + fixtures + guide).distinctBy { it.id }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 

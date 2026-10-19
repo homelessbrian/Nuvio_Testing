@@ -393,8 +393,21 @@ private val PREMIUM_EVENTS = listOf(
     "wrestlemania", "royal rumble", "summerslam", "survivor series", "elimination chamber", "money in the bank",
     "saturday night's main event", "saturday nights main event", "night of champions", "crown jewel", "backlash",
     "bad blood", "clash in paris", "wrestlepalooza", "all in", "all out", "full gear", "revolution", "double or nothing",
-    "worlds end", "forbidden door", "grand slam", "bound for glory", "slammiversary", "hard to kill", "rebellion"
+    "worlds end", "forbidden door", "grand slam", "bound for glory", "slammiversary", "hard to kill", "rebellion",
+    "halloween havoc", "wargames", "dynasty", "great american bash", "stand and deliver", "vengeance day"
 )
+
+/**
+ * A wrestling show's headline: without the promotion in front (its logo is beside it) and without
+ * the episode number. A special episode's own name wins: "Collision #168 Fright Night Collision"
+ * -> "Fright Night Collision", "RAW #1743" -> "RAW", "WWE Friday Night SmackDown" -> "Friday Night SmackDown".
+ */
+internal fun wrestlingHeadline(title: String): String {
+    val t = title.replace(Regex("""(?i)^\s*(wwe|aew|tna|njpw)\s*[:\-–]?\s*"""), "").trim()
+    val m = Regex("""^(.*?)\s*#\s*\d+\s*(.*)$""").find(t)
+    val out = if (m != null) m.groupValues[2].trim().ifBlank { m.groupValues[1].trim() } else t
+    return out.ifBlank { title }
+}
 
 /**
  * Wrestling shows in their own colours (just colours, no logos): Raw red, SmackDown blue, NXT
@@ -407,7 +420,7 @@ internal fun eventLook(ev: SportsEvent, league: League?): EventLook {
     fun has(w: String) = SportsCatalog.hasWord(t, w)
     if (sport == Sport.WRESTLING) {
         // "WWE Friday Night SmackDown" -> "Friday Night SmackDown": the promotion is in the logo column.
-        val headline = ev.title.replace(Regex("""(?i)^\s*(wwe|aew|tna|njpw)\s*[:\-–]?\s*"""), "").trim().ifBlank { ev.title }
+        val headline = wrestlingHeadline(ev.title)
         val premium = PREMIUM_EVENTS.any { has(SportsCatalog.norm(it).trim()) }
         val (color, text) = when {
             premium -> Color(0xFF5A1478) to Color.White

@@ -213,6 +213,10 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             val league = leagueWords.firstOrNull { (w, _) -> hasWord(nt, norm(w).trim()) }?.second
             // 24/7 and loop channels ("NETFLIX WWE", a movie channel called "… NXT"): not live sport.
             if (fillerOrLoop(ch, p)) continue
+            // Wrestling words turn up in other shows' titles ("RuPaul's Drag Race - Lip Sync
+            // Smackdown", "The Goldbergs - WrestleMania"): the title must start with the show's
+            // name, or name the promotion (WWE, AEW, TNA).
+            if (league?.sport == Sport.WRESTLING && !wrestlingTitle(cleanTitle(p.title), league)) continue
             val saysLive = isLive(nt, nd)
             // Wrestling's weekly shows are live without the guide saying so, but not on a channel
             // named after the show or league (those run old shows all day).
@@ -302,6 +306,17 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                 return listOf("$x $y", "$x at $y", "$x vs $y", "$x v $y", "$y $x", "$y vs $x", "$y v $x", "$y at $x").any { hasWord(nn, it) }
             }
             return eventWords.isNotEmpty() && any(nn, leagueWords) && eventWords.count { hasWord(nn, it) } >= 1
+        }
+    }
+
+    /** A wrestling show's own title: starts with one of the league's names, or names the promotion. */
+    private fun wrestlingTitle(title: String, league: League): Boolean {
+        val t = norm(title)
+        if (listOf("wwe", "aew", "tna", "njpw", "all elite wrestling", "impact wrestling").any { hasWord(t, it) }) return true
+        val start = t.trim()
+        return league.guideWords.any { w ->
+            val n = norm(w).trim()
+            start == n || start.startsWith("$n ") || start.startsWith("friday night $n") || start.startsWith("monday night $n")
         }
     }
 
