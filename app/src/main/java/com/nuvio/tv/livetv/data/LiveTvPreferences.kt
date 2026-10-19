@@ -155,6 +155,7 @@ class LiveTvPreferences @Inject constructor(
         val clockSize = stringPreferencesKey("clock_size")
         val clockOpacity = intPreferencesKey("clock_opacity")
         val clockBackground = booleanPreferencesKey("clock_background")
+        val panelBackground = stringPreferencesKey("panel_background")
         val recentInPanel = booleanPreferencesKey("recent_in_panel")
         val panelRow = stringPreferencesKey("panel_row")
         val channelSurf = booleanPreferencesKey("channel_surf")
@@ -369,6 +370,7 @@ class LiveTvPreferences @Inject constructor(
             clockSize = p[Keys.clockSize] ?: d.clockSize,
             clockOpacity = p[Keys.clockOpacity] ?: d.clockOpacity,
             clockBackground = p[Keys.clockBackground] ?: d.clockBackground,
+            panelBackground = p[Keys.panelBackground] ?: d.panelBackground,
             recentInPanel = p[Keys.recentInPanel] ?: d.recentInPanel,
             // Before the choice existed it was an on / off switch for Recent.
             panelRow = p[Keys.panelRow] ?: if (p[Keys.recentInPanel] == false) "OFF" else d.panelRow,
@@ -552,6 +554,7 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.clockSize] = s.clockSize
         p[Keys.clockOpacity] = s.clockOpacity
         p[Keys.clockBackground] = s.clockBackground
+        p[Keys.panelBackground] = s.panelBackground
         p[Keys.recentInPanel] = s.recentInPanel
         p[Keys.panelRow] = s.panelRow
         p[Keys.channelSurf] = s.channelSurf

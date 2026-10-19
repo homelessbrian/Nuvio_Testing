@@ -12,6 +12,7 @@ import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
@@ -38,10 +39,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.navigation.NavController
-import com.nuvio.tv.livetv.ui.LiveDialog
-import com.nuvio.tv.livetv.ui.LiveTag
 import com.nuvio.tv.livetv.ui.LiveText
-import com.nuvio.tv.livetv.ui.MenuItem
 import com.nuvio.tv.ui.navigation.Screen
 import com.nuvio.tv.ui.theme.NuvioTheme
 import dagger.hilt.EntryPoint
@@ -194,46 +192,47 @@ private fun ReminderDialog(
 ) {
     val first = remember(ev.id) { FocusRequester() }
     LaunchedEffect(ev.id) { delay(120_000); onDismiss() }
-    LiveDialog(onDismiss = onDismiss, width = 480.dp) {
-        LiveText(heading, color = NuvioTheme.colors.Secondary, size = 13.sp, weight = FontWeight.SemiBold)
-        LiveText(ev.title, size = 22.sp, weight = FontWeight.Bold, maxLines = 2)
-        LiveText(
-            listOfNotNull(SportsCatalog.league(ev.leagueId)?.name, best?.channel?.name ?: ev.broadcasts.firstOrNull()).joinToString(" · "),
-            color = NuvioTheme.colors.TextSecondary, size = 14.sp
-        )
-        Spacer(Modifier.height(14.dp))
-        Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
-            if (best != null) MenuItem("Watch on ${best.channel.name}", Modifier.focusRequester(first)) { onWatch(best) }
-            MenuItem("Open in Sports", if (best == null) Modifier.focusRequester(first) else Modifier) { onOpen() }
-            MenuItem("Dismiss") { onDismiss() }
+    SportsDialog(onDismiss = onDismiss, width = 480.dp, header = { GameHeaderBands(ev, hideScores = true) }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SportsBadge(heading.uppercase(), NuvioTheme.colors.Secondary, NuvioTheme.colors.OnSecondary)
+            Spacer(Modifier.width(8.dp))
+            LiveText(
+                listOfNotNull(SportsCatalog.league(ev.leagueId)?.name, best?.channel?.name ?: ev.broadcasts.firstOrNull()).joinToString(" · "),
+                color = SportsLook.Dim, size = 12.sp
+            )
+        }
+        Spacer(Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            if (best != null) SportsMenuRow("Watch on ${best.channel.name}", Modifier.focusRequester(first)) { onWatch(best) }
+            SportsMenuRow("Open in Sports", if (best == null) Modifier.focusRequester(first) else Modifier) { onOpen() }
+            SportsMenuRow("Dismiss") { onDismiss() }
         }
     }
     LaunchedEffect(ev.id) { delay(80); runCatching { first.requestFocus() } }
 }
 
+/** "Bears score!": the game's two bands with the new score, in the corner for a few seconds. */
 @Composable
 private fun ScoringAlertCard(a: SportsAlert) {
     val ev = a.event
     val sides = ev.ordered(a.league.sport)
-    Row(
+    Column(
         Modifier
             .padding(top = 28.dp, end = 32.dp)
-            .background(Color(0xF00B0C10), RoundedCornerShape(14.dp))
-            .border(1.dp, teamColor(a.team).copy(alpha = 0.9f), RoundedCornerShape(14.dp))
-            .padding(horizontal = 14.dp, vertical = 10.dp),
-        verticalAlignment = Alignment.CenterVertically
+            .width(300.dp)
+            .sportsFrame(focused = false, playing = true, accent = SportsLook.Flash)
     ) {
-        TeamBadge(a.team, 34.dp)
-        Spacer(Modifier.width(12.dp))
-        Column {
-            LiveText("${a.team.name} score!", color = Color(0xFFF5C400), size = 12.sp, weight = FontWeight.ExtraBold)
-            if (sides.size == 2) {
-                LiveText(
-                    "${sides[0].team.name} ${sides[0].score}  –  ${sides[1].score} ${sides[1].team.name}",
-                    color = Color.White, size = 16.sp, weight = FontWeight.Black
-                )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 7.dp), verticalAlignment = Alignment.CenterVertically) {
+            SportsBadge("${a.team.name.uppercase()} SCORE!", SportsLook.Flash, SportsLook.Ink)
+            Spacer(Modifier.weight(1f))
+            ev.status?.let { LiveText(it, color = Color.White, size = 11.sp, weight = FontWeight.Black) }
+        }
+        if (sides.size == 2) {
+            val lead = sides.maxByOrNull { it.score?.toDoubleOrNull() ?: 0.0 }
+            val tied = sides[0].score == sides[1].score
+            sides.forEach { s ->
+                TeamBand(s, showScore = true, dim = !tied && s != lead, followed = false, modifier = Modifier.height(40.dp), logo = 28.dp, name = 13.sp, score = 20.sp)
             }
-            ev.status?.let { LiveText(it, color = Color.White.copy(alpha = 0.7f), size = 11.sp) }
         }
     }
 }
@@ -256,17 +255,31 @@ fun SportsScoreTag(channelKey: String?) {
     val league = SportsCatalog.league(ev.leagueId) ?: return
     val sides = ev.ordered(league.sport)
     if (sides.size != 2) return
-    val text = "${sides[0].team.abbr.ifBlank { sides[0].team.name }} ${sides[0].score} – ${sides[1].score} ${sides[1].team.abbr.ifBlank { sides[1].team.name }}" +
-        (ev.status?.let { " · $it" } ?: "")
     Spacer(Modifier.width(6.dp))
-    LiveTag(text, Color(0xFF0B0C10).copy(alpha = 0.6f), Color.White, Modifier.border(1.dp, teamColor(sides[0].team).copy(alpha = 0.8f), RoundedCornerShape(5.dp)))
+    Row(
+        Modifier.clip(RoundedCornerShape(6.dp)).background(SportsLook.Card).border(1.dp, Color.White.copy(alpha = 0.14f), RoundedCornerShape(6.dp)),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        sides.forEachIndexed { i, s ->
+            Row(
+                Modifier.background(bandColor(teamColor(s.team))).padding(horizontal = 6.dp, vertical = 1.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LiveText(s.team.abbr.ifBlank { s.team.name }, color = Color.White, size = 10.sp, weight = FontWeight.Black)
+                Spacer(Modifier.width(4.dp))
+                ScoreLabel(s.score.orEmpty(), dim = false, size = 11.sp)
+            }
+            if (i == 0) Box(Modifier.width(1.dp).height(14.dp).background(SportsLook.Divider))
+        }
+        ev.status?.let { LiveText(it, color = Color.White, size = 10.sp, weight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 6.dp)) }
+    }
 }
 
 /**
  * The game card in the top right corner while the full info panel is up (OK while watching):
- * the teams in their colors, the score and clock (or "No live score"), and the time bar.
- * Nothing when the channel isn't showing a game we're sure about. The corner clock is hidden
- * while the panel is up (the panel shows the time), so the two never overlap.
+ * the same look as the Sports page's cards (each team on its band with the score, the status on
+ * the right). Nothing when the channel isn't showing a game we're sure about. The corner clock
+ * is hidden while the panel is up (the panel shows the time), so the two never overlap.
  */
 @Composable
 fun SportsCornerCard(channelKey: String?, use24h: Boolean, modifier: Modifier = Modifier) {
@@ -282,62 +295,24 @@ fun SportsCornerCard(channelKey: String?, use24h: Boolean, modifier: Modifier = 
     val league = SportsCatalog.league(ev.leagueId) ?: return
     val sides = ev.ordered(league.sport)
     val now = System.currentTimeMillis()
-    val shape = RoundedCornerShape(14.dp)
-    val left = if (sides.size == 2) teamColor(sides[0].team) else leagueColor(league)
-    val right = if (sides.size == 2) teamColor(sides[1].team) else leagueColor(league)
-    Column(
+    Row(
         modifier
-            .width(290.dp)
-            .clip(shape)
-            .splitBackground(left, right)
-            .border(1.dp, Color.White.copy(alpha = 0.18f), shape)
-            .padding(horizontal = 12.dp, vertical = 10.dp)
+            .width(330.dp)
+            .height(if (sides.size == 2) 80.dp else 64.dp)
+            .sportsFrame(focused = false, accent = NuvioTheme.colors.Secondary)
     ) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            LeagueTag(league)
-            Spacer(Modifier.weight(1f))
-            LiveDot()
-            Spacer(Modifier.width(4.dp))
-            LiveText(cornerStatus(ev, use24h, settings.hideScores), color = Color.White, size = 11.sp, weight = FontWeight.ExtraBold)
-        }
-        Spacer(Modifier.height(8.dp))
-        if (sides.size == 2) {
-            val showScore = ev.hasScore && !settings.hideScores
-            val lead = if (showScore) sides.maxByOrNull { it.score?.toDoubleOrNull() ?: 0.0 } else null
-            val tied = showScore && sides[0].score == sides[1].score
-            sides.forEachIndexed { i, side ->
-                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 4.dp)) {
-                    TeamBadge(side.team, 24.dp)
-                    Spacer(Modifier.width(8.dp))
-                    LiveText(side.team.name, color = Color.White, size = 13.sp, weight = FontWeight.Black)
-                    Spacer(Modifier.weight(1f))
-                    when {
-                        showScore -> LiveText(
-                            side.score.orEmpty(), size = 20.sp, weight = FontWeight.Black,
-                            color = if (tied || side == lead) Color.White else Color.White.copy(alpha = 0.5f)
-                        )
-                        i == 0 -> LiveText(
-                            if (settings.hideScores) "SCORE HIDDEN" else "NO LIVE SCORE",
-                            color = Color.White.copy(alpha = 0.55f), size = 8.sp, weight = FontWeight.ExtraBold
-                        )
-                    }
+        Column(Modifier.weight(1f).fillMaxHeight()) {
+            if (sides.size == 2) {
+                val showScore = ev.hasScore && !settings.hideScores
+                val lead = if (showScore) sides.maxByOrNull { it.score?.toDoubleOrNull() ?: 0.0 } else null
+                val tied = showScore && sides[0].score == sides[1].score
+                sides.forEach { s ->
+                    TeamBand(s, showScore, showScore && !tied && s != lead, followed = false, modifier = Modifier.weight(1f), logo = 26.dp, name = 12.sp, score = 19.sp)
                 }
+            } else {
+                EventBand(ev, league, league.sport, Modifier.fillMaxSize())
             }
-        } else {
-            LiveText(ev.title, color = Color.White, size = 14.sp, weight = FontWeight.Black, maxLines = 2)
         }
-        ev.situation?.takeIf { !settings.hideScores }?.let {
-            LiveText(it, color = Color.White.copy(alpha = 0.75f), size = 10.sp)
-        }
-        Spacer(Modifier.height(6.dp))
-        Box(
-            Modifier
-                .fillMaxWidth()
-                .height(3.dp)
-                .clip(RoundedCornerShape(2.dp))
-                .background(Color.White.copy(alpha = 0.2f))
-        ) {
-            Box(Modifier.fillMaxWidth(progressOf(ev, now)).height(3.dp).background(Color.White))
-        }
+        StatusColumn(ev, playing = false, now = now, use24h = use24h, hideScores = settings.hideScores, modifier = Modifier.width(112.dp))
     }
 }

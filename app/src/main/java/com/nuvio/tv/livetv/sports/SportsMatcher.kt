@@ -132,8 +132,11 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                     candidates[n].orEmpty()
                         .map { ch ->
                             val p = onNow[ch.key]
+                            val showText = p?.let { norm(it.title + " " + (it.episode ?: "")) }
                             val score = when {
                                 p == null -> if (keys.size < 400 && national) 45 else 0
+                                // The guide says it's a different game: not this one.
+                                terms[ev.id]?.otherGame(showText!!) == true -> 0
                                 sporty.any { hasWord(norm(p.title), it) } && SportsCatalog.NOT_LIVE_WORDS.none { hasWord(norm(p.title), it) } ->
                                     if (national) 62 else 52
                                 else -> 0
@@ -205,8 +208,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             val nt = norm(p.title)
             val nd = norm(p.description.orEmpty())
             if (SportsCatalog.NOT_LIVE_WORDS.any { hasWord(nt, it) }) continue
-            if (!isLive(nt, nd)) continue
             val league = leagueWords.firstOrNull { (w, _) -> hasWord(nt, norm(w).trim()) }?.second
+            // Wrestling's weekly shows are live without the guide saying so.
+            if (!isLive(nt, nd) && league?.liveByDefault != true) continue
             val word = followedWords.firstOrNull { w -> hasWord(nt, norm(w).trim()) || hasWord(nd, norm(w).trim()) }
             if (league == null && word == null) continue
             val clean = cleanTitle(p.title)
@@ -275,6 +279,15 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             }
         }
 
+        /** The show names a game ("Bills at Raiders", "Juventus vs. Lazio") that isn't this one. */
+        fun otherGame(text: String): Boolean {
+            if (a.isEmpty() || b.isEmpty()) return false
+            val us = any(text, a) || any(text, aWeak) || any(text, b) || any(text, bWeak) ||
+                listOfNotNull(abbrA, abbrB).any { it.length >= 2 && hasWord(text, it) }
+            if (us) return false
+            return MATCHUP.containsMatchIn(text)
+        }
+
         fun inName(nn: String): Boolean {
             if (a.isNotEmpty() && b.isNotEmpty()) {
                 if (any(nn, a) && any(nn, b)) return true
@@ -329,6 +342,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         private fun isLive(nt: String, nd: String): Boolean =
             nt.startsWith(" live ") || hasWord(nt, "live") || nd.startsWith(" live ") ||
                 hasWord(nd, "live coverage") || hasWord(nd, "live action") || hasWord(nd, "coverage of")
+
+        /** "x at y", "x vs y", "x v y" in a show title (text already through norm). */
+        private val MATCHUP = Regex("""\s(?:at|vs|v|versus)\s""")
 
         private val LIVE_PREFIX = Regex("""^\s*(?:live\s*[:\-–|]?\s*)""", RegexOption.IGNORE_CASE)
         fun cleanTitle(t: String): String = t.replace(LIVE_PREFIX, "").trim().ifBlank { t }
@@ -400,8 +416,8 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         /** Channel-name words that rule a channel out for that network (FOX News isn't FOX). */
         private val NETWORK_NOT: Map<String, List<String>> = mapOf(
             "fox" to listOf("news", "business", "deportes", "sports 1", "sports 2", "fs1", "fs2", "soccer", "weather", "life", "kids", "movies", "classics", "comedy", "nation", "family", "crime", "reality"),
-            "cbs" to listOf("news", "sports network", "cbssn", "reality", "drama", "action"),
-            "nbc" to listOf("news", "nbcsn", "sports network", "universo", "golf"),
+            "cbs" to listOf("news", "sports", "cbssn", "golazo", "reality", "drama", "action"),
+            "nbc" to listOf("news", "nbcsn", "sports", "universo", "golf"),
             "abc" to listOf("news", "family", "kids", "me", "australia"),
             "espn" to listOf("2", "u", "news", "deportes", "classic", "plus", "espn2", "espnu", "espnews"),
             "tnt" to listOf("sports 1", "sports 2", "sports 3", "sports 4", "sports 5", "drama", "series", "film", "comedy"),

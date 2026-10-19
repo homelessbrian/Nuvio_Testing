@@ -42,6 +42,8 @@ import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
@@ -49,7 +51,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.nuvio.tv.livetv.ui.LiveText
 import com.nuvio.tv.livetv.ui.LiveTextField
 import com.nuvio.tv.livetv.ui.TextInputDialog
-import com.nuvio.tv.livetv.ui.ThemeGlow
 import com.nuvio.tv.ui.theme.NuvioTheme
 import kotlinx.coroutines.delay
 import java.util.Locale
@@ -99,11 +100,10 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
     LaunchedEffect(Unit) { delay(150); runCatching { firstSport.requestFocus() } }
 
     Box(Modifier.fillMaxSize().background(colors.Background)) {
-        ThemeGlow(Modifier.fillMaxWidth().height(240.dp))
         Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 44.dp, top = 26.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 Column(Modifier.weight(1f)) {
-                    LiveText("Pick Your Teams", size = 28.sp, weight = FontWeight.Black)
+                    LiveText("Pick Your Teams", size = 26.sp, weight = FontWeight.Black)
                     LiveText(
                         "Their games show first in Sports, with a heads-up before they start. Back when you're done.",
                         color = colors.TextSecondary, size = 13.sp
@@ -213,9 +213,7 @@ private fun FollowingBar(follows: SportsFollows, viewModel: SportsViewModel) {
     Row(
         Modifier
             .fillMaxWidth()
-            .clip(RoundedCornerShape(14.dp))
-            .background(Color.White.copy(alpha = 0.035f))
-            .border(1.dp, Color.White.copy(alpha = 0.08f), RoundedCornerShape(14.dp))
+            .sportsFrame(focused = false, accent = NuvioTheme.colors.Secondary)
             .padding(horizontal = 12.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
@@ -230,13 +228,13 @@ private fun FollowingBar(follows: SportsFollows, viewModel: SportsViewModel) {
             items(follows.teams, key = { "t" + it.key }) { t ->
                 FollowPill(
                     label = t.name,
-                    badge = { TeamBadge(TeamInfo(t.leagueId, t.teamId, t.name, t.name, t.abbr, null, t.color, null, t.logo), 20.dp) },
+                    badge = { TeamLogo(TeamInfo(t.leagueId, t.teamId, t.name, t.name, t.abbr, null, t.color, null, t.logo), 22.dp) },
                     onClick = { viewModel.repo.updateFollows { f -> f.copy(teams = f.teams.filterNot { it.key == t.key }) } }
                 )
             }
             items(follows.leagues.toList(), key = { "l$it" }) { id ->
                 val l = SportsCatalog.league(id)
-                FollowPill(label = "All of ${l?.name ?: id}", badge = { LeagueTag(l, onCard = false) }, onClick = { viewModel.repo.toggleLeague(id) })
+                FollowPill(label = "All of ${l?.name ?: id}", badge = { LeagueMark(l, 18.dp) }, onClick = { viewModel.repo.toggleLeague(id) })
             }
             items(follows.words, key = { "w$it" }) { w ->
                 FollowPill(label = "\"$w\"", badge = null, onClick = { viewModel.repo.removeWord(w) })
@@ -252,7 +250,8 @@ private fun FollowPill(label: String, badge: (@Composable () -> Unit)?, onClick:
     Row(
         Modifier
             .clip(RoundedCornerShape(50))
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.08f))
+            .background(if (focused) Color.White else SportsLook.CardRaised)
+            .border(1.dp, if (focused) Color.White else SportsLook.Border, RoundedCornerShape(50))
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(start = if (badge != null) 4.dp else 10.dp, end = 10.dp, top = 3.dp, bottom = 3.dp),
@@ -266,33 +265,32 @@ private fun FollowPill(label: String, badge: (@Composable () -> Unit)?, onClick:
 @Composable
 private fun SportRow(sport: Sport, selected: Boolean, count: Int, modifier: Modifier, onFocused: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
+    val accent = NuvioTheme.colors.Secondary
     Row(
         modifier
             .fillMaxWidth()
-            .height(38.dp)
-            .clip(RoundedCornerShape(10.dp))
+            .height(40.dp)
+            .clip(SportsLook.SmallShape)
             .background(
                 when {
                     focused -> Color.White
-                    selected -> Color.White.copy(alpha = 0.11f)
+                    selected -> accent.copy(alpha = 0.14f)
                     else -> Color.Transparent
                 }
             )
+            .border(1.5.dp, if (selected && !focused) accent else Color.Transparent, SportsLook.SmallShape)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 10.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        LiveText(sport.icon, size = 15.sp)
+        Box(
+            Modifier.size(28.dp).clip(CircleShape).background(if (focused) Color(0xFFE8E9EE) else SportsLook.Card),
+            contentAlignment = Alignment.Center
+        ) { LiveText(sport.icon, size = 14.sp) }
         Spacer(Modifier.width(10.dp))
-        LiveText(sport.label, color = if (focused) Color(0xFF0B0C10) else Color.White, size = 13.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
-        if (count > 0) {
-            LiveText(
-                "$count",
-                modifier = Modifier.clip(RoundedCornerShape(8.dp)).background(Color(0xFF2BC4E6)).padding(horizontal = 6.dp),
-                color = Color(0xFF06222B), size = 10.sp, weight = FontWeight.Black
-            )
-        }
+        LiveText(sport.label, color = if (focused) SportsLook.Ink else Color.White, size = 13.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+        if (count > 0) SportsBadge("$count", accent, NuvioTheme.colors.OnSecondary)
     }
 }
 
@@ -307,37 +305,28 @@ private fun LeagueCard(
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
+    val accent = NuvioTheme.colors.Secondary
     Row(
         Modifier
-            .height(52.dp)
-            .clip(RoundedCornerShape(12.dp))
-            .background(
-                when {
-                    focused -> Color.White
-                    selected -> Color.White.copy(alpha = 0.11f)
-                    else -> Color.White.copy(alpha = 0.045f)
-                }
-            )
-            .border(1.dp, if (selected && !focused) Color.White.copy(alpha = 0.22f) else Color.Transparent, RoundedCornerShape(12.dp))
+            .padding(4.dp)
+            .height(54.dp)
+            .sportsFrame(focused, playing = selected && !focused, accent = accent, radius = 12.dp)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {
-        Box(
-            Modifier.size(32.dp).clip(RoundedCornerShape(8.dp)).background(leagueColor(league)),
-            contentAlignment = Alignment.Center
-        ) { LiveText(league.short.take(4), color = Color.White, size = 9.sp, weight = FontWeight.Black) }
+        LeagueMark(league, 30.dp)
         Spacer(Modifier.width(10.dp))
         Column {
-            LiveText(league.name + if (followed) " ★" else "", color = if (focused) Color(0xFF0B0C10) else Color.White, size = 13.sp, weight = FontWeight.ExtraBold)
+            LiveText(league.name + if (followed) " ★" else "", color = Color.White, size = 13.sp, weight = FontWeight.ExtraBold)
             LiveText(
                 listOfNotNull(
                     if (teamsFollowed > 0) "$teamsFollowed followed" else null,
                     if (league.guideOnly) "From your guide" else null,
                     if (!inRegion) "Not on your Sports page" else null
                 ).joinToString(" · ").ifBlank { if (league.kind == LeagueKind.EVENT) "Events" else "Teams" },
-                color = if (focused) Color(0xFF555A66) else Color(0xFF8B90A0), size = 10.sp
+                color = SportsLook.Dim, size = 10.sp
             )
         }
     }
@@ -370,42 +359,36 @@ private fun TeamGrid(teams: List<TeamInfo>, follows: SportsFollows, viewModel: S
     }
 }
 
+/** A team in Pick Your Teams: on its band in its colour, like the game cards; ★ when followed. */
 @Composable
 private fun TeamTile(team: TeamInfo, followed: Boolean, showLeague: Boolean, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(12.dp)
+    val c = bandColor(teamColor(team))
     Box(
         Modifier
             .fillMaxWidth()
             .height(62.dp)
-            .graphicsLayer { val s = if (focused) 1.04f else 1f; scaleX = s; scaleY = s }
-            .clip(shape)
-            .background(if (focused) Color.White else Color.White.copy(alpha = 0.045f))
-            .border(
-                if (focused) 0.dp else 1.dp,
-                if (followed) Color(0x80F5C400) else Color.White.copy(alpha = 0.06f),
-                shape
-            )
+            .sportsFrame(focused, playing = followed && !focused, accent = Color(0xFFF5C400), radius = 12.dp)
+            .background(Brush.horizontalGradient(0f to c.copy(alpha = 0.92f), 0.75f to c.copy(alpha = 0.25f), 1f to c.copy(alpha = 0.05f)))
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) {
-        Box(Modifier.width(4.dp).fillMaxHeight().background(teamColor(team)))
-        Row(Modifier.fillMaxSize().padding(start = 14.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            TeamBadge(team, 34.dp)
+        Row(Modifier.fillMaxSize().padding(start = 10.dp, end = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+            TeamLogo(team, 36.dp)
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f)) {
-                LiveText(team.name, color = if (focused) Color(0xFF0B0C10) else Color.White, size = 13.sp, weight = FontWeight.ExtraBold)
+                LiveText(team.name, color = Color.White, size = 13.sp, weight = FontWeight.ExtraBold)
                 LiveText(
                     listOfNotNull(
                         if (showLeague) SportsCatalog.league(team.leagueId)?.short else null,
                         team.location?.takeIf { !team.name.lowercase(Locale.ROOT).contains(it.lowercase(Locale.ROOT)) },
                         team.record
                     ).joinToString(" · "),
-                    color = if (focused) Color(0xFF555A66) else Color.White.copy(alpha = 0.55f), size = 10.sp
+                    color = Color.White.copy(alpha = 0.6f), size = 10.sp
                 )
             }
             if (followed) {
-                Box(Modifier.size(18.dp).clip(RoundedCornerShape(9.dp)).background(Color(0xFFF5C400)), contentAlignment = Alignment.Center) {
+                Box(Modifier.size(18.dp).clip(CircleShape).background(Color(0xFFF5C400)), contentAlignment = Alignment.Center) {
                     LiveText("★", color = Color.Black, size = 10.sp, weight = FontWeight.Black)
                 }
             }
@@ -413,8 +396,8 @@ private fun TeamTile(team: TeamInfo, followed: Boolean, showLeague: Boolean, onC
         if (focused) {
             LiveText(
                 if (followed) "FOLLOWING · OK TO UNFOLLOW" else "OK TO FOLLOW",
-                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color(0xFF0B0C10)).padding(vertical = 1.dp),
-                color = Color.White, size = 8.sp, weight = FontWeight.Black,
+                modifier = Modifier.align(Alignment.BottomCenter).fillMaxWidth().background(Color.White).padding(vertical = 1.dp),
+                color = SportsLook.Ink, size = 8.sp, weight = FontWeight.Black,
                 align = androidx.compose.ui.text.style.TextAlign.Center
             )
         }

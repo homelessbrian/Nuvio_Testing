@@ -11,6 +11,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.flow.first
 import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
@@ -55,6 +56,26 @@ class SportsViewModel @Inject constructor(
     /** Tunes Live TV to the channel (the screen then opens it full screen). */
     fun watch(m: ChannelMatch) {
         playback.play(m.channel)
+    }
+
+    // ---- the video window (the same player as Live TV's preview and full screen)
+
+    /** The channel playing now (null: nothing), for the PLAYING tags and the window. */
+    val playingKey: StateFlow<String?> = playback.state
+        .map { if (it.catchupTitle == null) it.channelKey else null }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, null)
+
+    val player: androidx.media3.common.Player? get() = playback.player
+    fun attachPlayer(): androidx.media3.common.Player = playback.attach()
+    fun detachPlayer() { playback.detach() }
+    fun onSurfaceAttached() = playback.onSurfaceAttached()
+
+    /** Plays the channel in the Sports page's window (no full screen), remembered as last watched. */
+    fun playHere(m: ChannelMatch) {
+        if (playback.playingChannel?.key == m.channel.key && playingKey.value != null) return
+        playback.play(m.channel)
+        viewModelScope.launch { runCatching { livePrefs.recordWatched(m.channel.key) } }
     }
 
     /**

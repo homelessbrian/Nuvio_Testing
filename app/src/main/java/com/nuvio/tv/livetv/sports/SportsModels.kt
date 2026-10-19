@@ -20,6 +20,7 @@ enum class Sport(val label: String, val icon: String) {
     CRICKET("Cricket", "🏏"),
     DARTS("Darts", "🎯"),
     SNOOKER("Snooker", "🎱"),
+    WRESTLING("Wrestling", "🤼"),
     OTHER("More Sports", "🏅");
 
     /** Home team first with "v" (UK style) instead of away team first with "at" (US style). */
@@ -55,7 +56,12 @@ data class League(
     /** sporting-events.org dataset for event dates (guide-only sports). */
     val fixtureSlug: String? = null,
     /** Badge color for the league tag. */
-    val color: Long = 0xFF2A2F3A
+    val color: Long = 0xFF2A2F3A,
+    /**
+     * Guide-only shows that are live without saying so (wrestling's weekly shows: guides call
+     * them "WWE SmackDown", not "Live: …"). Repeats and highlights are still left out.
+     */
+    val liveByDefault: Boolean = false
 ) {
     companion object {
         val ALL_REGIONS = setOf("US", "UK", "IE", "CA", "AU", "OTHER")
@@ -157,6 +163,8 @@ data class SportsSettings(
     val scoringAlerts: Boolean = false,
     /** Leave out games none of your channels show (games of teams you follow always show). */
     val onlyOnMyChannels: Boolean = true,
+    /** The video window on the Sports page (games play there; off: the full-width layout). */
+    val videoWindow: Boolean = true,
     /** Leagues taken off the Sports page. */
     val hiddenLeagues: Set<String> = emptySet(),
     /** A network as ESPN names it (lowercase) -> the channel you picked for it. */
@@ -176,6 +184,7 @@ data class SportsSettings(
         .put("remindMinutes", remindMinutes)
         .put("scoringAlerts", scoringAlerts)
         .put("onlyOnMyChannels", onlyOnMyChannels)
+        .put("videoWindow", videoWindow)
         .put("hiddenLeagues", JSONArray(hiddenLeagues.toList()))
         .put("networkChannels", JSONObject(networkChannels as Map<*, *>))
         .put("eventChannels", JSONObject(eventChannels as Map<*, *>))
@@ -198,6 +207,7 @@ data class SportsSettings(
                     remindMinutes = o.optInt("remindMinutes", d.remindMinutes),
                     scoringAlerts = o.optBoolean("scoringAlerts", d.scoringAlerts),
                     onlyOnMyChannels = o.optBoolean("onlyOnMyChannels", d.onlyOnMyChannels),
+                    videoWindow = o.optBoolean("videoWindow", d.videoWindow),
                     hiddenLeagues = o.optJSONArray("hiddenLeagues").strings().toSet(),
                     networkChannels = o.optJSONObject("networkChannels").stringMap(),
                     eventChannels = o.optJSONObject("eventChannels").stringMap(),

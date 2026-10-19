@@ -129,14 +129,33 @@ class LiveTvViewModel @Inject constructor(
 
     private val searchQuery = MutableStateFlow("")
 
+    /**
+     * Guide Time Offset: each channel's listings as last moved, by the original list. Declared
+     * before [programs], whose first run can start while the rest is still being set up.
+     */
+    private val shiftedLists = java.util.IdentityHashMap<List<EpgProgram>, List<EpgProgram>>()
+    private var shiftedBy = 0L
+
     /** Programs with the user's EPG time offset applied. */
     val programs: StateFlow<Map<String, List<EpgProgram>>> = combine(
         repository.programs,
         settings.map { it.epgOffsetMinutes }.distinctUntilChanged()
     ) { map, offset ->
-        if (offset == 0) map else {
+        if (offset == 0) { shiftedLists.clear(); map } else {
             val shift = offset * 60_000L
-            map.mapValues { (_, list) -> list.map { it.copy(startMs = it.startMs + shift, stopMs = it.stopMs + shift) } }
+            if (shift != shiftedBy) { shiftedLists.clear(); shiftedBy = shift }
+            // Only channels whose listings changed are moved again: each update of the guide
+            // (as the hours pass, scrolling ahead) used to copy every show of every channel, and
+            // made every guide row redraw. Keyed by the list itself (same list = same listings).
+            val next = java.util.IdentityHashMap<List<EpgProgram>, List<EpgProgram>>(map.size)
+            val out = map.mapValues { (_, list) ->
+                val moved = shiftedLists[list] ?: list.map { it.copy(startMs = it.startMs + shift, stopMs = it.stopMs + shift) }
+                next[list] = moved
+                moved
+            }
+            shiftedLists.clear()
+            shiftedLists.putAll(next)
+            out
         }
     }.flowOn(Dispatchers.Default).stateIn(viewModelScope, SharingStarted.Eagerly, emptyMap())
 
@@ -150,7 +169,10 @@ class LiveTvViewModel @Inject constructor(
     val displayChannels: StateFlow<List<LiveChannel>> = channelStore.displayChannels
 
     val uiState: StateFlow<LiveTvUiState> = combine(
-        combine(displayChannels, userState, settings) { a, b, c -> Triple(a, b, c) },
+        // Only what the lists use: saving the last channel, its picture quality or audio track
+        // (on every channel change) used to rebuild every list over every channel, right when a
+        // slower box needed its processor to start the new channel.
+        combine(displayChannels, userState.distinctUntilChanged { a, b -> sameForLists(a, b) }, settings) { a, b, c -> Triple(a, b, c) },
         session.currentGroupId,
         searchQuery,
         combine(hasSources, com.nuvio.tv.livetv.parental.ParentalControls.unlocked) { h, _ -> h }
@@ -215,6 +237,14 @@ class LiveTvViewModel @Inject constructor(
             }
         }
     }
+
+    /** The parts of the saved user state that [buildUi] reads; keep in step with it. */
+    private fun sameForLists(a: LiveUserState, b: LiveUserState): Boolean =
+        a.favorites == b.favorites && a.recent == b.recent &&
+            a.hiddenChannels == b.hiddenChannels && a.hiddenGroups == b.hiddenGroups &&
+            a.lockedGroups == b.lockedGroups && a.customGroups == b.customGroups &&
+            a.channelOrder == b.channelOrder && a.groupOrder == b.groupOrder &&
+            a.channelCopies == b.channelCopies
 
     private fun buildUi(
         channels: List<LiveChannel>,

@@ -79,7 +79,14 @@ object SportsCatalog {
             regions = EVERYWHERE, minutes = 300, color = 0xFFD20A0A),
         League("guide/boxing", Sport.FIGHTING, "Boxing", "BOXING", guideWords = listOf("Boxing"), regions = EVERYWHERE,
             guideOnly = true, fixtureSlug = "boxing", kind = LeagueKind.EVENT, color = 0xFF7A1F1F),
-        League("guide/wrestling", Sport.FIGHTING, "Wrestling", "WWE", guideWords = listOf("WWE", "AEW", "Wrestling"),
+        // ---- Wrestling (from the guide: weekly shows and big events)
+        League("guide/wwe", Sport.WRESTLING, "WWE", "WWE",
+            guideWords = listOf("WWE", "SmackDown", "Monday Night Raw", "WWE Raw", "NXT", "WrestleMania", "Royal Rumble", "SummerSlam", "Survivor Series"),
+            regions = EVERYWHERE, guideOnly = true, kind = LeagueKind.EVENT, minutes = 120, color = 0xFF1C1C1C, liveByDefault = true),
+        League("guide/aew", Sport.WRESTLING, "AEW", "AEW",
+            guideWords = listOf("AEW", "AEW Dynamite", "AEW Collision", "AEW Rampage", "All Elite Wrestling"),
+            regions = EVERYWHERE, guideOnly = true, kind = LeagueKind.EVENT, minutes = 120, color = 0xFF8C6D1F, liveByDefault = true),
+        League("guide/wrestling", Sport.WRESTLING, "Wrestling", "WRESTLING", guideWords = listOf("TNA Wrestling", "TNA iMPACT", "NJPW", "Wrestling"),
             regions = setOf("US", "CA", "UK", "OTHER"), guideOnly = true, kind = LeagueKind.EVENT, color = 0xFF3A3A3A),
         // ---- Racing
         League("racing/f1", Sport.RACING, "Formula 1", "F1", "racing/f1", LeagueKind.EVENT,
@@ -162,7 +169,7 @@ object SportsCatalog {
     fun ordered(s: SportsSettings): List<League> {
         val region = regionOf(s)
         val first: List<Sport> = when (region) {
-            "UK", "IE" -> listOf(Sport.FOOTBALL, Sport.RUGBY, Sport.CRICKET, Sport.DARTS, Sport.SNOOKER, Sport.RACING, Sport.FIGHTING, Sport.GOLF, Sport.TENNIS)
+            "UK", "IE" -> listOf(Sport.FOOTBALL, Sport.RUGBY, Sport.CRICKET, Sport.DARTS, Sport.SNOOKER, Sport.RACING, Sport.FIGHTING, Sport.WRESTLING, Sport.GOLF, Sport.TENNIS)
             "AU" -> listOf(Sport.RUGBY, Sport.CRICKET, Sport.FOOTBALL, Sport.BASKETBALL)
             "CA" -> listOf(Sport.HOCKEY, Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL)
             else -> listOf(Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL, Sport.HOCKEY, Sport.FOOTBALL)
@@ -195,7 +202,8 @@ object SportsCatalog {
     val NOT_LIVE_WORDS = listOf(
         "highlights", "replay", "classic", "classics", "rewind", "recap", "review", "reaction",
         "condensed", "mini match", "extended", "best of", "in 60", "in 90", "encore", "re air", "reair",
-        "magazine", "preview show", "goals", "match of the day", "motd", "uncut", "repeat"
+        "magazine", "preview show", "goals", "match of the day", "motd", "uncut", "repeat",
+        "this week in", "bottom line", "untold", "vault", "biography"
     )
 
     /** Other names guides use for teams (and the start of names that need them). */

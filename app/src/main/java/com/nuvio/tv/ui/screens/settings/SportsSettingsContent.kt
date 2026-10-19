@@ -128,6 +128,12 @@ fun SportsSettingsContent(
                         { update { it.copy(scoreOnInfoBar = !it.scoreOnInfoBar) } }
                     )
                     SettingsToggleRow(
+                        "Video Window in Sports",
+                        "Games play in a window on the Sports page while you browse. Off: games open full screen, and the page uses the whole width",
+                        s.videoWindow,
+                        { update { it.copy(videoWindow = !it.videoWindow) } }
+                    )
+                    SettingsToggleRow(
                         "Only Games on My Channels",
                         "Leaves out games none of your channels show. Games of teams you follow always show",
                         s.onlyOnMyChannels,
@@ -185,7 +191,8 @@ fun SportsSettingsContent(
             item(key = "about") {
                 Text(
                     text = "Scores, schedules, team logos and colors come from ESPN's free public feed. " +
-                        "Some event dates come from sporting-events.org. Darts, snooker, rugby and other sports they don't cover are found in your own TV guide.",
+                        "Some event dates come from sporting-events.org, and the wrestling schedule and logos from TheSportsDB. " +
+                        "Darts, snooker, rugby and other sports they don't cover are found in your own TV guide.",
                     style = MaterialTheme.typography.bodySmall,
                     color = NuvioTheme.colors.TextTertiary,
                     modifier = Modifier.padding(start = NuvioTheme.spacing.lg, end = NuvioTheme.spacing.lg)

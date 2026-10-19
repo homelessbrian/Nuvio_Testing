@@ -285,6 +285,20 @@ class SportsRepository @Inject constructor(
             val list = runCatching { SportsFeeds.parseFixtures(l, raw) }.getOrDefault(emptyList())
             fixtureData.update { it + (l.id to LeagueData(list, System.currentTimeMillis(), null)) }
         }
+        // Wrestling's schedule (from TheSportsDB, through a file a GitHub job keeps up to date).
+        val wrestling = activeLeagues(s).filter { it.sport == Sport.WRESTLING }.map { it.id }.toSet()
+        if (wrestling.isNotEmpty()) {
+            val file = File(dir, "fx_wrestling.json")
+            val raw = runCatching { feeds.wrestlingRaw() }.onSuccess { runCatching { file.writeText(it) } }.getOrNull()
+                ?: runCatching { file.readText() }.getOrNull()
+            if (raw != null) {
+                val byLeague = runCatching { SportsFeeds.parseWrestling(raw) }.getOrDefault(emptyMap())
+                val at = System.currentTimeMillis()
+                fixtureData.update { cur ->
+                    cur + byLeague.filterKeys { it in wrestling }.mapValues { (_, list) -> LeagueData(list, at, null) }
+                }
+            }
+        }
     }
 
     private fun loadCache() {
@@ -311,6 +325,10 @@ class SportsRepository @Inject constructor(
             val file = File(dir, "fx_$slug.json")
             if (!file.exists()) continue
             runCatching { fx[l.id] = LeagueData(SportsFeeds.parseFixtures(l, file.readText()), 0L, null) }
+        }
+        runCatching {
+            val file = File(dir, "fx_wrestling.json")
+            if (file.exists()) SportsFeeds.parseWrestling(file.readText()).forEach { (id, list) -> fx[id] = LeagueData(list, 0L, null) }
         }
         leagueData.value = m
         fixtureData.value = fx
@@ -348,7 +366,8 @@ class SportsRepository @Inject constructor(
     private val matchKick = MutableStateFlow(0)
     private var lastSummary: String? = null
 
-    private suspend fun runMatch() = withContext(Dispatchers.Default) {
+    // Nobody on the Sports page: low priority, out of the way of the guide and the video.
+    private suspend fun runMatch() = withContext(if (viewers.value > 0) Dispatchers.Default else com.nuvio.tv.livetv.data.BackgroundWork.quiet) {
         val live = prefs.settings.first()
         val user = prefs.userState.first()
         val channels: List<LiveChannel> = channelStore.displayChannels.value.filter { ch ->

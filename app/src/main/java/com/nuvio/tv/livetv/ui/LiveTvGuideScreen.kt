@@ -68,6 +68,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.layout.boundsInRoot
 import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.onSizeChanged
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.graphics.drawscope.translate
@@ -151,6 +152,21 @@ fun LiveTvGuideScreen(
     // preview window to the whole screen and back. The picture never moves to a different
     // view, which is what froze it (or left it loading) on some TVs.
     var fullscreen by remember { mutableStateOf(false) }
+    // For the smoothness line in the start-up report: guide and full screen counted apart.
+    val perfView = androidx.compose.ui.platform.LocalView.current
+    LaunchedEffect(fullscreen) {
+        runCatching {
+            androidx.metrics.performance.PerformanceMetricsState.getHolderForHierarchy(perfView).state
+                ?.putState("LiveTv", if (fullscreen) "Live TV full screen" else "Live TV guide")
+        }
+    }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        onDispose {
+            runCatching {
+                androidx.metrics.performance.PerformanceMetricsState.getHolderForHierarchy(perfView).state?.removeState("LiveTv")
+            }
+        }
+    }
     // Where you were browsing when you held Back / pressed Play to go full screen; restored
     // when you come back, so you return to the channel you had selected.
     var savedSpot by remember { mutableStateOf<Pair<String, String?>?>(null) }
@@ -174,6 +190,13 @@ fun LiveTvGuideScreen(
     val seriesList by viewModel.seriesRules.collectAsStateWithLifecycle()
     // Shows set to record, by channel (for the red dot in the guide).
     val scheduledStarts = remember(schedulesList) { schedulesList.groupBy({ it.channel.key }, { it.startMs }).mapValues { it.value.toSet() } }
+    // Reminders by channel, worked out once (each row used to filter the whole list itself, and
+    // got a new set every redraw, so no row could ever skip redrawing).
+    val reminderStartsByChannel = remember(user.reminders) {
+        user.reminders.groupBy({ it.channelKey }, { it.startMs }).mapValues { it.value.toSet() }
+    }
+    // The guide's width, measured once for every row (see ProgramArea).
+    var gridWidthPx by remember { mutableIntStateOf(0) }
 
     /** The Record item for a show, or null when it can't be recorded (already over, no catch-up). */
     fun recordLabel(ch: LiveChannel, p: EpgProgram?): String? {
@@ -995,6 +1018,8 @@ fun LiveTvGuideScreen(
                 Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
                     // ---------------------------------------------------------------- time ruler
                     val channelColWidth = channelColumnWidth(settings)
+                    val programAreaWidth: Dp? = if (gridWidthPx <= 0) null
+                        else with(androidx.compose.ui.platform.LocalDensity.current) { gridWidthPx.toDp() } - channelColWidth
                     // Tight rows so at least 8 channels fit even with the info panel and preview on.
                     val rowHeight = guideRowHeight(settings)
                     Row(
@@ -1289,7 +1314,11 @@ fun LiveTvGuideScreen(
                                 action = null
                             )
                             else -> {
-                                LazyColumn(state = listState, modifier = Modifier.fillMaxSize(), userScrollEnabled = false) {
+                                LazyColumn(
+                                    state = listState,
+                                    modifier = Modifier.fillMaxSize().onSizeChanged { if (it.width != gridWidthPx) gridWidthPx = it.width },
+                                    userScrollEnabled = false
+                                ) {
                                     itemsIndexed(channels, key = { _, c -> c.key }) { index, ch ->
                                         androidx.compose.runtime.CompositionLocalProvider(LocalGuideScale provides guideScale(settings)) { GuideRow(
                                             channel = ch,
@@ -1309,10 +1338,10 @@ fun LiveTvGuideScreen(
                                             nameFocused = (index == row && gridFocused && nameFocus) ||
                                                 (reorderActive && reorderKey == null && index == row),
                                             quality = if (settings.showQualityBadges) user.channelQuality[ch.key] else null,
-                                            reminderStarts = if (user.reminders.isEmpty()) emptySet()
-                                                else user.reminders.filter { it.channelKey == ch.key }.map { it.startMs }.toSet(),
+                                            reminderStarts = reminderStartsByChannel[ch.key].orEmpty(),
                                             recordingSpan = recordingUntil[ch.key],
-                                            scheduledStarts = scheduledStarts[ch.key].orEmpty()
+                                            scheduledStarts = scheduledStarts[ch.key].orEmpty(),
+                                            programAreaWidth = programAreaWidth
                                         ) }
                                     }
                                 }
@@ -2146,7 +2175,9 @@ private fun GuideRow(
     /** Being recorded: from when to when (shows in this span get a red REC dot). */
     recordingSpan: Pair<Long, Long>? = null,
     /** Start times of shows set to record (a red dot too). */
-    scheduledStarts: Set<Long> = emptySet()
+    scheduledStarts: Set<Long> = emptySet(),
+    /** Width of the shows part of the row, measured once for the whole guide (null: measure here). */
+    programAreaWidth: Dp? = null
 ) {
     val windowEnd = windowStart + guideWindowMs(settings)
     val cellShape = RoundedCornerShape(liveCorner())
@@ -2260,11 +2291,12 @@ private fun GuideRow(
         }
 
         // Program blocks
-        BoxWithConstraints(modifier = Modifier.weight(1f).fillMaxHeight()) {
-            val totalW = maxWidth
+        ProgramArea(programAreaWidth, Modifier.weight(1f).fillMaxHeight()) { totalW ->
             fun xOf(t: Long): Dp = totalW * ((t.coerceIn(windowStart, windowEnd) - windowStart) / guideWindowMs(settings).toFloat())
 
-            val visible = programs.filter { it.stopMs > windowStart && it.startMs < windowEnd }
+            // Worked out once per change of shows or time window, not on every redraw.
+            val laid = remember(programs, windowStart, windowEnd) { layOutRow(programs, windowStart, windowEnd) }
+            val visible = laid.visible
             // Highlighted in the program column: the whole empty row lights up, keeping its text
             // (in bold), instead of a small half-hour "No information" block.
             // (Also while the highlight is on the channel itself: a show lights up then too, and
@@ -2310,15 +2342,7 @@ private fun GuideRow(
             // Gaps in a channel's listings (nothing listed for a while, then shows again): the
             // same striped tile as a channel with no guide at all, instead of empty background.
             if (visible.isNotEmpty()) {
-                val sorted = visible.sortedBy { it.startMs }
-                val gaps = ArrayList<Pair<Long, Long>>()
-                var cursor = windowStart
-                for (p in sorted) {
-                    if (p.startMs - cursor > 60_000L) gaps += cursor to p.startMs
-                    cursor = maxOf(cursor, p.stopMs)
-                }
-                if (windowEnd - cursor > 60_000L) gaps += cursor to windowEnd
-                gaps.forEach { (from, to) ->
+                laid.gaps.forEach { (from, to) ->
                     val gx = xOf(from)
                     val gw = xOf(to) - gx
                     if (gw > 4.dp) {
@@ -2394,6 +2418,33 @@ private fun GuideRow(
             }
         }
     }
+}
+
+/** A row's shows inside the time window, and the gaps between them (nothing listed). */
+private class RowLayout(val visible: List<EpgProgram>, val gaps: List<Pair<Long, Long>>)
+
+private fun layOutRow(programs: List<EpgProgram>, windowStart: Long, windowEnd: Long): RowLayout {
+    val visible = programs.filter { it.stopMs > windowStart && it.startMs < windowEnd }
+    if (visible.isEmpty()) return RowLayout(visible, emptyList())
+    val gaps = ArrayList<Pair<Long, Long>>()
+    var cursor = windowStart
+    for (p in visible.sortedBy { it.startMs }) {
+        if (p.startMs - cursor > 60_000L) gaps += cursor to p.startMs
+        cursor = maxOf(cursor, p.stopMs)
+    }
+    if (windowEnd - cursor > 60_000L) gaps += cursor to windowEnd
+    return RowLayout(visible, gaps)
+}
+
+/**
+ * The shows part of a guide row. The guide measures its width once and hands it to every row;
+ * measuring inside each row (BoxWithConstraints) costs an extra layout pass per row, which made
+ * scrolling the guide heavier on slower boxes. Measured here only until the guide's width is known.
+ */
+@Composable
+private fun ProgramArea(width: Dp?, modifier: Modifier, content: @Composable androidx.compose.foundation.layout.BoxScope.(Dp) -> Unit) {
+    if (width != null && width > 0.dp) Box(modifier) { content(width) }
+    else BoxWithConstraints(modifier) { content(maxWidth) }
 }
 
 @Composable

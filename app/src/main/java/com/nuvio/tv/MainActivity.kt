@@ -1411,7 +1411,14 @@ open class MainActivity : ComponentActivity() {
         }
 
         jankStats = JankStats.createAndTrack(window) { frameData ->
-            if (frameData.isJank) {
+            // Counted per screen for the start-up report (Live TV says guide or full screen).
+            // It used to write every slow frame to the system log, which cost a little on each
+            // one and nobody could see; that's kept for debug builds only.
+            val states = frameData.states
+            val screen = states.firstOrNull { it.key == "LiveTv" }?.value
+                ?: states.firstOrNull { it.key == "Screen" }?.value
+            com.nuvio.tv.livetv.model.LiveSmoothness.frame(screen, frameData.isJank)
+            if (frameData.isJank && BuildConfig.IS_DEBUG_BUILD) {
                 Log.w(
                     "JankStats",
                     "JANK: ${frameData.frameDurationUiNanos / 1_000_000}ms | states: ${frameData.states}"

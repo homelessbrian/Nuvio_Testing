@@ -1087,6 +1087,12 @@ class LiveTvPlaybackController @Inject constructor(
         return out
     }
 
+    /** How much the player may download ahead, in bytes, from how much memory the app gets. */
+    private fun playerBufferBytes(): Int {
+        val appMemory = Runtime.getRuntime().maxMemory().takeIf { it in 1 until Long.MAX_VALUE } ?: (512L shl 20)
+        return (appMemory * 3 / 10).coerceIn(32L shl 20, 160L shl 20).toInt()
+    }
+
     private fun buildPlayer(): ExoPlayer {
         val passthrough = audioPassthrough
         val renderers = object : DefaultRenderersFactory(context) {
@@ -1118,6 +1124,12 @@ class LiveTvPlaybackController @Inject constructor(
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(minMs, maxMs, startMs, rebufferMs)
             .setPrioritizeTimeOverSizeThresholds(true)
+            // The download-ahead lives in the app's memory. The player's own cap (about 130 MB
+            // for video) is more than half of what a cheap stick gives an app, which made the
+            // whole app stutter as memory ran short. Capped to about 30% of the app's memory:
+            // the same on boxes with plenty, smaller on low-memory ones. The minimum buffer
+            // time is always kept, so channels are just as steady.
+            .setTargetBufferBytes(playerBufferBytes())
             .build()
         return ExoPlayer.Builder(context, renderers)
             .setLoadControl(loadControl)

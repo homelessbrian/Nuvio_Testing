@@ -61,8 +61,74 @@ internal class SportsFeeds {
 
     fun fixturesRaw(slug: String): String = get("https://sporting-events.org/data/$slug.json")
 
+    /**
+     * The wrestling schedule (WWE, AEW…): a file a daily GitHub job makes from TheSportsDB, so
+     * the app never asks TheSportsDB itself.
+     */
+    fun wrestlingRaw(): String = get(WRESTLING_URL)
+
     companion object {
         private const val ESPN = "https://site.api.espn.com/apis/site/v2/sports/"
+        const val WRESTLING_URL = "https://raw.githubusercontent.com/homelessbrian/nuvio-data/main/wrestling.json"
+
+        /** The schedule file's league keys -> our leagues. */
+        private fun wrestlingLeague(key: String?): String = when (key) {
+            "wwe" -> "guide/wwe"
+            "aew" -> "guide/aew"
+            else -> "guide/wrestling"
+        }
+
+        /**
+         * The wrestling schedule, by league id. League logos in it (addresses only, on
+         * TheSportsDB's image server) go to [leagueLogos]. Shows already over are marked ended;
+         * ones on now count as live until about two hours after their start.
+         */
+        fun parseWrestling(raw: String, now: Long = System.currentTimeMillis()): Map<String, List<SportsEvent>> {
+            val root = JSONObject(raw)
+            root.optJSONArray("leagues")?.let { arr ->
+                for (i in 0 until arr.length()) {
+                    val l = arr.optJSONObject(i) ?: continue
+                    val badge = l.str("badge")?.takeIf { it.startsWith("https://") } ?: continue
+                    leagueLogos[wrestlingLeague(l.str("key"))] = badge
+                }
+            }
+            val out = HashMap<String, MutableList<SportsEvent>>()
+            val arr = root.optJSONArray("events") ?: return out
+            for (i in 0 until arr.length()) {
+                val e = arr.optJSONObject(i) ?: continue
+                val name = e.str("name") ?: continue
+                val leagueId = wrestlingLeague(e.str("league"))
+                val league = SportsCatalog.league(leagueId)
+                val hasTime = e.optBoolean("hasTime", true)
+                // A date only: that day on the TV's own calendar (not midnight in London).
+                val start = if (hasTime) parseIso(e.str("start")) ?: continue else {
+                    val p = e.str("start")?.take(10)?.split('-')?.mapNotNull { it.toIntOrNull() }.orEmpty()
+                    if (p.size != 3) continue
+                    Calendar.getInstance().apply { clear(); set(p[0], p[1] - 1, p[2], 0, 0, 0) }.timeInMillis
+                }
+                val end = start + (league?.minutes ?: 120) * 60_000L
+                out.getOrPut(leagueId) { ArrayList() } += SportsEvent(
+                    id = "tsdb:" + (e.str("id") ?: "$leagueId:$name:$start"),
+                    leagueId = leagueId,
+                    startMs = start,
+                    hasTime = hasTime,
+                    state = when {
+                        !hasTime -> GameState.PRE
+                        now >= end -> GameState.POST
+                        now >= start -> GameState.LIVE
+                        else -> GameState.PRE
+                    },
+                    title = name,
+                    subtitle = listOfNotNull(e.str("venue"), e.str("city"), e.str("country")).joinToString(", ").ifBlank { null },
+                    status = null,
+                    away = null, home = null,
+                    source = EventSource.FIXTURES,
+                    endMs = end,
+                    note = if (!hasTime) "Time to be confirmed" else listOfNotNull(e.str("venue"), e.str("city")).joinToString(" · ").ifBlank { null }
+                )
+            }
+            return out
+        }
 
         private val iso = listOf("yyyy-MM-dd'T'HH:mm'Z'", "yyyy-MM-dd'T'HH:mm:ss'Z'", "yyyy-MM-dd'T'HH:mm:ss.SSS'Z'")
 
@@ -138,8 +204,29 @@ internal class SportsFeeds {
                 .filter { it.fullName.isNotBlank() }
         }
 
+        /**
+         * League logos from the feed (the version made for dark backgrounds when there is one),
+         * by league id: shown on the Sports page's game cards.
+         */
+        val leagueLogos = java.util.concurrent.ConcurrentHashMap<String, String>()
+
         fun parseScoreboard(league: League, raw: String): List<SportsEvent> {
-            val events = JSONObject(raw).optJSONArray("events") ?: return emptyList()
+            val root = JSONObject(raw)
+            if (!leagueLogos.containsKey(league.id)) runCatching {
+                val logos = root.optJSONArray("leagues")?.optJSONObject(0)?.optJSONArray("logos")
+                if (logos != null && logos.length() > 0) {
+                    var pick: String? = null
+                    for (i in 0 until logos.length()) {
+                        val l = logos.optJSONObject(i) ?: continue
+                        val href = l.optString("href").takeIf { it.startsWith("http") } ?: continue
+                        val rel = l.optJSONArray("rel")?.toString().orEmpty()
+                        if (pick == null) pick = href
+                        if ("dark" in rel) { pick = href; break }
+                    }
+                    pick?.let { leagueLogos[league.id] = it }
+                }
+            }
+            val events = root.optJSONArray("events") ?: return emptyList()
             val out = ArrayList<SportsEvent>()
             for (i in 0 until events.length()) {
                 val ev = events.optJSONObject(i) ?: continue
