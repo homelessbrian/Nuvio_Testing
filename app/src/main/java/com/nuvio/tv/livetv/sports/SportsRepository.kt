@@ -317,8 +317,8 @@ class SportsRepository @Inject constructor(
         coroutineScopeFetch(due) { l ->
             gate.withPermit {
                 // One request for the whole week; a feed that won't take a range of days: a day at a time.
-                val raws: List<String> = (if (l.id !in dayByDay) runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()?.let { listOf(it) } else null)
-                    ?: singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
+                // A day at a time (ESPN turns down a range of days).
+                val raws: List<String> = singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
                 val at = System.currentTimeMillis()
                 if (raws.isEmpty()) {
                     // Try again in an hour, not straight away.
@@ -342,22 +342,25 @@ class SportsRepository @Inject constructor(
         val ids = (f.pins + f.leagues).toSet()
         if (aheadData.value.keys.any { it !in ids }) aheadData.update { m -> m.filterKeys { it in ids } }
         val due = ids.mapNotNull { SportsCatalog.league(it) }.filter { l ->
-            l.espnPath != null && l.id !in dayByDay &&
-                now - (aheadData.value[l.id]?.fetchedAt ?: 0L) > (if (force) HOUR else 6 * HOUR)
+            l.espnPath != null && now - (aheadData.value[l.id]?.fetchedAt ?: 0L) > (if (force) HOUR else 6 * HOUR)
         }
         if (due.isEmpty()) return
-        val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
-        val from = fmt.format(java.util.Date(now + (DAYS_AHEAD + 1) * DAY))
-        val to = fmt.format(java.util.Date(now + 35 * DAY))
+        // ESPN takes a whole month ("202611") though not a range of days: the months the next
+        // five weeks touch, kept from a week ahead on (the week before is in [weekData]).
+        val months = SimpleDateFormat("yyyyMM", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
+        val wanted = listOf(now + (DAYS_AHEAD + 1) * DAY, now + 35 * DAY).map { months.format(java.util.Date(it)) }.distinct()
+        val keepFrom = dayStart(DAYS_AHEAD + 1)
+        val keepTo = now + 36 * DAY
         for (l in due) {
-            val raw = runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()
+            val raws = wanted.mapNotNull { m -> runCatching { feeds.scoreboardDayRaw(l, m) }.getOrNull() }
             val at = System.currentTimeMillis()
-            if (raw == null) {
+            if (raws.isEmpty()) {
                 aheadData.update { m -> m + (l.id to LeagueData(m[l.id]?.events.orEmpty(), at - 5 * HOUR, "failed")) }
                 continue
             }
             val parsed = withContext(com.nuvio.tv.livetv.data.BackgroundWork.quiet) {
-                runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList())
+                raws.flatMap { raw -> runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList()) }
+                    .filter { it.startMs in keepFrom until keepTo }.distinctBy { it.id }
             }
             aheadData.update { it + (l.id to LeagueData(parsed, at, null)) }
         }
@@ -388,8 +391,7 @@ class SportsRepository @Inject constructor(
         val gate = Semaphore(3)
         coroutineScopeFetch(due) { l ->
             gate.withPermit {
-                val raws: List<String> = (if (l.id !in dayByDay) runCatching { feeds.scoreboardRaw(l, from, to) }.getOrNull()?.let { listOf(it) } else null)
-                    ?: singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
+                val raws: List<String> = singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
                 val at = System.currentTimeMillis()
                 val parsed = raws.flatMap { raw -> runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrDefault(emptyList()) }.distinctBy { it.id }
                 weekData.update { it + ("p|" + l.id to LeagueData(parsed, if (raws.isEmpty()) at - HOUR else at, null)) }
@@ -531,23 +533,14 @@ class SportsRepository @Inject constructor(
      * A league's games for the three days around today: one request for the whole range; if the
      * feed won't take that, one request per day; failing that, whatever day the feed picks.
      */
-    private fun fetchScoreboard(l: League, from: String, to: String, days: List<String>): List<String> {
+    private fun fetchScoreboard(l: League, @Suppress("UNUSED_PARAMETER") from: String, @Suppress("UNUSED_PARAMETER") to: String, days: List<String>): List<String> {
+        // ESPN turns down a range of days ("20261019-20261021": HTTP 400, in every league), so
+        // a day at a time (the ESPN check in nuvio-data showed it).
         var firstError: Throwable? = null
-        if (l.id !in dayByDay) {
-            val r = runCatching { feeds.scoreboardRaw(l, from, to) }
-            r.getOrNull()?.let { return listOf(it) }
-            firstError = r.exceptionOrNull()
-        }
         val singles = days.mapNotNull { d ->
             runCatching { feeds.scoreboardDayRaw(l, d) }.onFailure { if (firstError == null) firstError = it }.getOrNull()
         }
-        if (singles.isNotEmpty()) {
-            if (l.id !in dayByDay) {
-                dayByDay += l.id
-                LiveTvLoadReport.add("Sports: ${l.name} doesn't take a range of days (${firstError?.let { describe(it) }}); asking one day at a time")
-            }
-            return singles
-        }
+        if (singles.isNotEmpty()) return singles
         runCatching { feeds.scoreboardDefaultRaw(l) }.getOrNull()?.let { return listOf(it) }
         throw firstError ?: java.io.IOException("no answer")
     }
