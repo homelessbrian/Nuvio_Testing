@@ -36,6 +36,8 @@ import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.draw.drawWithContent
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
@@ -868,4 +870,31 @@ internal fun Modifier.steadyRowKeys(
             true
         }
     }
+}
+
+/**
+ * Holding a direction on the remote stays inside this list or row: a held ◀ ▶ (or ▲ ▼) stops at
+ * the end instead of carrying on into another part of the screen (the side menu, the filters).
+ * A single press still moves out, as usual. [horizontal] / [vertical]: which directions it holds.
+ */
+@Composable
+internal fun Modifier.keepFocusWhileHeld(horizontal: Boolean = true, vertical: Boolean = true): Modifier {
+    val held = remember { BooleanArray(1) }
+    return this
+        .onPreviewKeyEvent { e ->
+            when (e.type) {
+                KeyEventType.KeyDown -> held[0] = e.nativeKeyEvent.repeatCount > 0
+                KeyEventType.KeyUp -> held[0] = false
+            }
+            false
+        }
+        .focusProperties {
+            onExit = {
+                val d = requestedFocusDirection
+                val sideways = d == androidx.compose.ui.focus.FocusDirection.Left || d == androidx.compose.ui.focus.FocusDirection.Right
+                val upDown = d == androidx.compose.ui.focus.FocusDirection.Up || d == androidx.compose.ui.focus.FocusDirection.Down
+                if (held[0] && ((horizontal && sideways) || (vertical && upDown))) cancelFocusChange()
+            }
+        }
+        .focusGroup()
 }

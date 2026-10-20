@@ -19,6 +19,7 @@ import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.grid.GridCells
 import androidx.compose.foundation.lazy.grid.GridItemSpan
@@ -81,6 +82,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
     val league = leagues.firstOrNull { it.id == leagueId } ?: leagues.firstOrNull()
     var query by rememberSaveable { mutableStateOf("") }
     var askWord by remember { mutableStateOf(false) }
+    var arrange by remember { mutableStateOf(SportsLaunch.takeOpenArrange()) }
     val firstSport = remember { FocusRequester() }
     // Up from the sports list or the leagues: the Following bar (it was skipped, the highlight
     // went to "‹ Sports" instead).
@@ -102,21 +104,27 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
         value = null
         value = league?.let { if (it.espnPath != null || it.id.startsWith("tsdb/")) viewModel.teams(it) else emptyList() }.orEmpty()
     }
-    // Search: every team in the leagues shown in your region (loaded as needed, then saved).
+    // Search: every team in every league (loaded as needed, then saved for a week).
     val searchResults by produceState<List<TeamInfo>?>(null, query) {
         val q = SportsCatalog.norm(query).trim()
         if (q.length < 2) { value = null; return@produceState }
         delay(350)
         val all = ArrayList<TeamInfo>()
-        val searchIn = (viewModel.repo.activeLeagues().filter { it.espnPath != null && it.kind == LeagueKind.TEAMS && !it.national } +
+        // Your region's leagues first, then every other league (MLS from the UK, the Premier
+        // League from the US…): a team can be found wherever it plays.
+        fun teamLeague(l: League) = l.espnPath != null && l.kind == LeagueKind.TEAMS && !l.national
+        val searchIn = (viewModel.repo.activeLeagues().filter(::teamLeague) +
+            SportsCatalog.ordered(settings).filter(::teamLeague) +
             SportsCatalog.leagues.firstOrNull { it.national }.let { listOfNotNull(it) } + SportsCatalog.extra).distinctBy { it.id }
         for (l in searchIn) {
             all += viewModel.teams(l).filter { t ->
                 listOfNotNull(t.fullName, t.name, t.location, t.abbr).any { SportsCatalog.norm(it).contains(q) }
             }
-            value = all.toList()
+            // A club in more than one competition (Arsenal: Premier League and Champions League)
+            // shows once, under its own league (found first).
+            value = all.distinctBy { SportsCatalog.teamFamily(it.leagueId) + "|" + it.id }
         }
-        value = all.toList()
+        value = all.distinctBy { SportsCatalog.teamFamily(it.leagueId) + "|" + it.id }
     }
     LaunchedEffect(Unit) { delay(150); runCatching { firstSport.requestFocus() } }
 
@@ -137,6 +145,8 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                     LiveTextField(value = query, onValueChange = { query = it }, hint = "Search any team")
                 }
                 Spacer(Modifier.width(12.dp))
+                SportsAction("↕  Arrange", onClick = { arrange = true })
+                Spacer(Modifier.width(8.dp))
                 SportsAction("✓  Done", selected = true, onClick = onClose)
             }
             Spacer(Modifier.height(12.dp))
@@ -144,7 +154,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
             Spacer(Modifier.height(14.dp))
             Row(Modifier.fillMaxSize()) {
                 // ---- sports
-                LazyColumn(Modifier.width(196.dp).fillMaxHeight(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                LazyColumn(Modifier.width(196.dp).fillMaxHeight().keepFocusWhileHeld(), verticalArrangement = Arrangement.spacedBy(3.dp)) {
                     items(sports, key = { it.name }) { s ->
                         val count = follows.teams.count { SportsCatalog.league(it.leagueId)?.sport == s } +
                             follows.pins.count { SportsCatalog.league(it)?.sport == s }
@@ -172,7 +182,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                         return@Column
                     }
                     // ---- leagues
-                    LazyRow(state = leagueRowState, horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(end = 24.dp)) {
+                    LazyRow(state = leagueRowState, modifier = Modifier.keepFocusWhileHeld(vertical = false), horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(end = 24.dp)) {
                         items(leagues.size, key = { leagues[it].id }) { i ->
                             val l = leagues[i]
                             LeagueCard(
@@ -248,6 +258,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
             }
         }
     }
+    if (arrange) ArrangeDialog(follows, viewModel) { arrange = false }
     if (askWord) {
         TextInputDialog(
             title = "Follow a name",
@@ -306,7 +317,7 @@ private fun FollowingBar(follows: SportsFollows, viewModel: SportsViewModel, fir
             if (entries.isEmpty()) {
                 LiveText("Nothing yet: pick a team below.", color = colors.TextSecondary, size = 12.sp)
             } else {
-                LazyRow(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                LazyRow(Modifier.weight(1f).keepFocusWhileHeld(vertical = false), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     items(entries.size, key = { entries[it].key }) { i ->
                         val e = entries[i]
                         FollowPill(
@@ -412,7 +423,7 @@ private fun LeagueCard(
                 listOfNotNull(
                     if (teamsFollowed > 0) "$teamsFollowed followed" else null,
                     if (league.sport == Sport.WRESTLING || league.id == "guide/boxing") "Schedule + your guide" else if (league.guideOnly) "From your guide" else null,
-                    if (!inRegion) "Not on your Sports page" else null
+                    if (!inRegion) "Outside your region" else null
                 ).joinToString(" · ").ifBlank { if (league.kind == LeagueKind.EVENT) "Events" else "Teams" },
                 color = SportsLook.Dim, size = 10.sp
             )
@@ -429,7 +440,7 @@ private fun TeamGrid(teams: List<TeamInfo>, follows: SportsFollows, viewModel: S
     }
     LazyVerticalGrid(
         columns = GridCells.Fixed(4),
-        modifier = modifier,
+        modifier = modifier.keepFocusWhileHeld(),
         horizontalArrangement = Arrangement.spacedBy(8.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp),
         contentPadding = PaddingValues(bottom = 40.dp, end = 8.dp, top = 4.dp)
@@ -495,3 +506,82 @@ private fun TeamTile(team: TeamInfo, followed: Boolean, showLeague: Boolean, onC
 /** Where ↑ goes from here (null: the usual place). */
 private fun Modifier.focusUp(target: FocusRequester?): Modifier =
     if (target == null) this else focusProperties { up = target }
+
+/**
+ * Arrange My Sports: My Sports' rows top to bottom (teams, countries, leagues, names), each with
+ * ▲ and ▼. The highlight stays on the button you pressed, so pressing again keeps moving the row.
+ */
+@Composable
+private fun ArrangeDialog(follows: SportsFollows, viewModel: SportsViewModel, onDismiss: () -> Unit) {
+    val keys = remember(follows) { SportsRows.rowKeys(follows) }
+    val reqs = remember { HashMap<String, FocusRequester>() }
+    fun req(k: String) = reqs.getOrPut(k) { FocusRequester() }
+    val listState = androidx.compose.foundation.lazy.rememberLazyListState()
+    // After a move: the same button on the row that moved.
+    var refocus by remember { mutableStateOf<String?>(null) }
+    LaunchedEffect(keys, refocus) {
+        val target = refocus ?: return@LaunchedEffect
+        val i = keys.indexOf(target.substringAfter('#'))
+        if (i >= 0) {
+            if (listState.layoutInfo.visibleItemsInfo.none { it.index == i }) runCatching { listState.scrollToItem(i) }
+            delay(40)
+            runCatching { req(target).requestFocus() }
+        }
+        refocus = null
+    }
+    LaunchedEffect(Unit) { delay(90); keys.firstOrNull()?.let { runCatching { req("down#$it").requestFocus() } } }
+    SportsDialog(onDismiss = onDismiss, width = 620.dp) {
+        LiveText("Arrange My Sports", size = 18.sp, weight = FontWeight.Bold)
+        LiveText(
+            "The order of the rows on My Sports. Live & Upcoming always comes first.",
+            color = SportsLook.Dim, size = 12.sp, maxLines = 2
+        )
+        Spacer(Modifier.height(10.dp))
+        if (keys.isEmpty()) {
+            LiveText("Follow some teams or leagues first.", color = SportsLook.Dim, size = 13.sp)
+        }
+        LazyColumn(state = listState, modifier = Modifier.heightIn(max = 340.dp).keepFocusWhileHeld(horizontal = false), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            items(keys.size, key = { keys[it] }) { i ->
+                val k = keys[i]
+                Row(
+                    Modifier.fillMaxWidth().clip(SportsLook.SmallShape).background(SportsLook.CardRaised).padding(horizontal = 10.dp, vertical = 6.dp),
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    LiveText("${i + 1}", color = SportsLook.Dim, size = 12.sp, weight = FontWeight.Black, modifier = Modifier.width(26.dp))
+                    ArrangeMark(k, follows)
+                    Spacer(Modifier.width(10.dp))
+                    LiveText(arrangeName(k, follows), size = 14.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    SportsAction(
+                        "▲", modifier = Modifier.focusRequester(req("up#$k")),
+                        onClick = { if (i > 0) { refocus = "up#$k"; viewModel.repo.moveRow(k, -1) } }
+                    )
+                    Spacer(Modifier.width(6.dp))
+                    SportsAction(
+                        "▼", modifier = Modifier.focusRequester(req("down#$k")),
+                        onClick = { if (i < keys.size - 1) { refocus = "down#$k"; viewModel.repo.moveRow(k, 1) } }
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(8.dp))
+        SportsMenuRow("Done") { onDismiss() }
+    }
+}
+
+/** The badge in front of a row's name in Arrange My Sports. */
+@Composable
+private fun ArrangeMark(key: String, follows: SportsFollows) {
+    when {
+        key.startsWith("t:") -> follows.teams.firstOrNull { "t:${it.key}" == key }?.let { t ->
+            TeamLogo(TeamInfo(t.leagueId, t.teamId, t.name, t.name, t.abbr, null, t.color, null, t.logo), 24.dp)
+        }
+        key.startsWith("l:") -> LeagueMark(SportsCatalog.league(key.removePrefix("l:")), 22.dp)
+        else -> LiveText("★", color = Color(0xFFF5C400), size = 14.sp)
+    }
+}
+
+private fun arrangeName(key: String, follows: SportsFollows): String = when {
+    key.startsWith("t:") -> follows.teams.firstOrNull { "t:${it.key}" == key }?.name ?: key
+    key.startsWith("l:") -> SportsCatalog.league(key.removePrefix("l:"))?.name ?: key.removePrefix("l:")
+    else -> "\u201C" + key.removePrefix("w:") + "\u201D"
+}

@@ -30,6 +30,16 @@ internal object SportsRows {
     /** Results kept at the start of a team's row. */
     private const val RESULTS = 5
 
+    /** The keys of My Sports' rows (not Live & Upcoming), in your order (see [SportsFollows.order]). */
+    fun rowKeys(f: SportsFollows): List<String> {
+        val all = LinkedHashSet<String>()
+        f.teams.forEach { all += "t:${it.key}" }
+        (f.pins + f.leagues).forEach { all += "l:$it" }
+        f.words.forEach { all += "w:$it" }
+        val placed = f.order.filter { it in all }
+        return placed + all.filter { it !in placed }
+    }
+
     /** Sports you follow something in (a team, a whole league, a league on the top bar). */
     fun followedSports(follows: SportsFollows, order: List<Sport>): List<Sport> {
         val ids = follows.teams.map { it.leagueId } + follows.leagues + follows.pins
@@ -95,7 +105,11 @@ internal object SportsRows {
         }
 
         val heroes = soon.filter { it.state == GameState.LIVE || (it.state == GameState.PRE && it.startMs >= now - HOUR) }.take(8)
-        return MyTeamsPage(heroes, rows)
+        // Your order (Arrange My Sports); Live & Upcoming always first.
+        val rank = rowKeys(follows).withIndex().associate { (i, k) -> k to i }
+        val sorted = rows.filter { it.kind == SportsRow.Kind.UPCOMING } +
+            rows.filter { it.kind != SportsRow.Kind.UPCOMING }.sortedBy { rank[it.key] ?: Int.MAX_VALUE }
+        return MyTeamsPage(heroes, sorted)
     }
 
     /** Games in date order: the last few results, then what's on and what's next. */

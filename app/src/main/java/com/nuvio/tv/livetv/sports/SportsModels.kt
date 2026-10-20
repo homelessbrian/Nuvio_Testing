@@ -169,7 +169,7 @@ data class SportsSettings(
     val remindMinutes: Int = 15,
     val scoringAlerts: Boolean = false,
     /** Leave out games none of your channels show (games of teams you follow always show). */
-    val onlyOnMyChannels: Boolean = true,
+    val onlyOnMyChannels: Boolean = false,
     /** The video window on the Sports page (games play there; off: the full-width layout). */
     val videoWindow: Boolean = true,
     /** Leagues taken off the Sports page. */
@@ -192,7 +192,7 @@ data class SportsSettings(
         .put("remindMyTeams", remindMyTeams)
         .put("remindMinutes", remindMinutes)
         .put("scoringAlerts", scoringAlerts)
-        .put("onlyOnMyChannels", onlyOnMyChannels)
+        .put("onlyMyChannels", onlyOnMyChannels)
         .put("videoWindow", videoWindow)
         .put("hiddenLeagues", JSONArray(hiddenLeagues.toList()))
         .put("networkChannels", JSONObject(networkChannels as Map<*, *>))
@@ -216,7 +216,8 @@ data class SportsSettings(
                     remindMyTeams = o.optBoolean("remindMyTeams", d.remindMyTeams),
                     remindMinutes = o.optInt("remindMinutes", d.remindMinutes),
                     scoringAlerts = o.optBoolean("scoringAlerts", d.scoringAlerts),
-                    onlyOnMyChannels = o.optBoolean("onlyOnMyChannels", d.onlyOnMyChannels),
+                    // Saved under a new name: the old one was on for everyone by default, so it starts off.
+                    onlyOnMyChannels = o.optBoolean("onlyMyChannels", d.onlyOnMyChannels),
                     videoWindow = o.optBoolean("videoWindow", d.videoWindow),
                     hiddenLeagues = o.optJSONArray("hiddenLeagues").strings().toSet(),
                     networkChannels = o.optJSONObject("networkChannels").stringMap(),
@@ -256,7 +257,12 @@ data class SportsFollows(
     /** Leagues with their own button in the Sports top bar (and a row under My Teams), in order. */
     val pins: List<String> = emptyList(),
     /** Leagues taken off the top bar (not added back by themselves when you follow a team there). */
-    val unpinned: Set<String> = emptySet()
+    val unpinned: Set<String> = emptySet(),
+    /**
+     * The order of My Sports' rows (Arrange My Sports): "t:" + a team's key, "l:" + a league id,
+     * "w:" + a name. Rows not in it (followed since) go after, in the order they were followed.
+     */
+    val order: List<String> = emptyList()
 ) {
     val isEmpty: Boolean get() = teams.isEmpty() && leagues.isEmpty() && words.isEmpty() && pins.isEmpty()
 
@@ -292,6 +298,7 @@ data class SportsFollows(
         .put("setUp", setUp)
         .put("pins", JSONArray(pins))
         .put("unpinned", JSONArray(unpinned.toList()))
+        .put("order", JSONArray(order))
         .toString()
 
     companion object {
@@ -324,7 +331,8 @@ data class SportsFollows(
                     setUp = o.optBoolean("setUp", false),
                     // "Every game" leagues (from before there was one Follow) are followed leagues now.
                     pins = (o.optJSONArray("pins").strings() + o.optJSONArray("leagues").strings()).distinct(),
-                    unpinned = o.optJSONArray("unpinned").strings().toSet()
+                    unpinned = o.optJSONArray("unpinned").strings().toSet(),
+                    order = o.optJSONArray("order").strings()
                 )
             }.getOrDefault(SportsFollows())
         }

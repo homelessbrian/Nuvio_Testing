@@ -41,6 +41,7 @@ import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.geometry.CornerRadius
 import androidx.compose.ui.geometry.Offset
@@ -81,6 +82,10 @@ object SportsLaunch {
     @Volatile private var openEvent: String? = null
 
     fun openPicker() { openPicker = true }
+    @Volatile private var openArrange = false
+    /** Open Follow Teams & Leagues straight on Arrange My Sports (from Sports settings). */
+    fun openArrange() { openArrange = true; openPicker = true }
+    fun takeOpenArrange(): Boolean = openArrange.also { openArrange = false }
     fun takeOpenPicker(): Boolean = openPicker.also { openPicker = false }
     fun openEvent(id: String) { openEvent = id }
     fun takeOpenEvent(): String? = openEvent.also { openEvent = null }
@@ -421,6 +426,11 @@ private fun SportsHub(
     val pinnedChip = chip?.takeIf { it.startsWith(CHIP_LEAGUE) }
     val followedSports = remember(follows, settings) { SportsRows.followedSports(follows, SportsCatalog.sportsOrder(settings)) }
     val sportChip = chip?.takeIf { it.startsWith(CHIP_SPORT) }
+    // Picking a filter puts the highlight on the page: All Events' first game (the first one on
+    // now), My Sports' big card.
+    var contentJump by remember { mutableIntStateOf(0) }
+    val pickChip: (String) -> Unit = { c -> onChip(c); contentJump++ }
+    val todayTab = remember { FocusRequester() }
     val effectiveChip = when {
         // League buttons and Live were folded into My Teams' rows and All Events: saved ones go home.
         pinnedChip != null || chip == CHIP_LIVE -> if (follows.isEmpty) CHIP_ALL else CHIP_MINE
@@ -506,6 +516,13 @@ private fun SportsHub(
 
     // Only a problem is worth a line (scores update quietly in the background), and it sits in
     // the bottom corner so nothing on the page moves when it comes and goes.
+    // A filter picked on All Events: down to its first game (LIVE NOW comes first).
+    LaunchedEffect(contentJump) {
+        if (contentJump == 0 || rowsPage) return@LaunchedEffect
+        delay(160)
+        focusedOnce = true
+        runCatching { firstContent.requestFocus() }
+    }
     val status: String? = problem
     val statusLine: @Composable androidx.compose.foundation.layout.BoxScope.() -> Unit = {
         status?.let {
@@ -524,7 +541,7 @@ private fun SportsHub(
                 val dayFmt = remember { SimpleDateFormat("EEE d", Locale.getDefault()) }
                 val tabsState = rememberLazyListState(initialFirstVisibleItemIndex = SportsRepository.DAYS_BACK - 1)
                 LazyRow(
-                    Modifier.weight(1f),
+                    Modifier.weight(1f).keepFocusWhileHeld(vertical = false),
                     state = tabsState,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -537,26 +554,28 @@ private fun SportsHub(
                             1 -> "Tomorrow"
                             else -> dayFmt.format(Date(viewModel.repo.dayStart(offset) + 12 * 3_600_000L))
                         }
-                        DayTab(label, selected = day == offset, onClick = { onDay(offset); focusedOnce = true })
+                        DayTab(label, selected = day == offset, modifier = if (offset == 0) Modifier.focusRequester(todayTab) else Modifier, onClick = { onDay(offset); focusedOnce = true })
                     }
                 }
             }
         }
     }
     val filters: @Composable (Modifier) -> Unit = { m ->
-        LazyRow(m, horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
-            item(key = CHIP_MINE) { FilterIcon("★", "My Sports", effectiveChip == CHIP_MINE, Modifier.focusRequester(firstChip), withLabel = true) { onChip(CHIP_MINE) } }
+        LazyRow(m.keepFocusWhileHeld(vertical = false), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
+            // ↑ from the filters on All Events: the day tabs (Today).
+            val upTo = if (!rowsPage) Modifier.focusProperties { up = todayTab } else Modifier
+            item(key = CHIP_MINE) { FilterIcon("★", "My Sports", effectiveChip == CHIP_MINE, Modifier.focusRequester(firstChip).then(upTo), withLabel = true) { pickChip(CHIP_MINE) } }
             // Everything on, day by day (live games first), with how many are on now.
             item(key = CHIP_ALL) {
                 FilterIcon(
                     "▦", if (sections.liveCount > 0) "All Events · ${sections.liveCount} live" else "All Events",
-                    effectiveChip == CHIP_ALL, withLabel = true
-                ) { onChip(CHIP_ALL) }
+                    effectiveChip == CHIP_ALL, upTo, withLabel = true
+                ) { pickChip(CHIP_ALL) }
             }
             // Sports you follow: My Teams for that sport only.
             if (followedSports.size > 1) {
                 item(key = "sep1") { ChipGap() }
-                items(followedSports, key = { CHIP_SPORT + it.name }) { s -> FilterIcon(s.icon, s.label, effectiveChip == CHIP_SPORT + s.name) { onChip(CHIP_SPORT + s.name) } }
+                items(followedSports, key = { CHIP_SPORT + it.name }) { s -> FilterIcon(s.icon, s.label, effectiveChip == CHIP_SPORT + s.name, upTo) { pickChip(CHIP_SPORT + s.name) } }
             }
         }
     }
@@ -619,6 +638,7 @@ private fun SportsHub(
                 autoFocus = !focusedOnce || rowsReturning,
                 returning = rowsReturning,
                 onReturned = { focusedOnce = true; onRowsReturned(); onReturned() },
+                jumpToHero = contentJump,
                 onOpen = onOpen,
                 onQuickWatch = onQuickWatch,
                 onPick = onPick
@@ -696,7 +716,7 @@ private fun GameList(
     fun playing(ev: SportsEvent) = playingKey != null && matches[ev.id]?.any { it.channel.key == playingKey } == true
     LazyColumn(
         state = listState,
-        modifier = modifier,
+        modifier = modifier.keepFocusWhileHeld(),
         // Room for the highlight's glow and bigger size at the edges.
         contentPadding = PaddingValues(start = 8.dp, end = 10.dp, top = 2.dp, bottom = 56.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
@@ -959,7 +979,7 @@ private fun GamePage(
         SectionHeader("WATCH ON YOUR CHANNELS")
         when {
             matches.isNotEmpty() -> LazyColumn(
-                Modifier.heightIn(max = 200.dp),
+                Modifier.heightIn(max = 200.dp).keepFocusWhileHeld(horizontal = false),
                 verticalArrangement = Arrangement.spacedBy(7.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
             ) {
@@ -1217,7 +1237,7 @@ private fun FixChannelDialog(ev: SportsEvent, matches: List<ChannelMatch>, hideS
         LiveText("Fix the channel", size = 18.sp, weight = FontWeight.Bold)
         LiveText("Take wrong channels off the list, or pick the right one.", color = SportsLook.Dim, size = 12.sp, maxLines = 2)
         Spacer(Modifier.height(8.dp))
-        LazyColumn(Modifier.heightIn(max = 260.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        LazyColumn(Modifier.heightIn(max = 260.dp).keepFocusWhileHeld(horizontal = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             itemsIndexed(matches, key = { _, m -> m.channel.key }) { i, m ->
                 ChannelLine(
                     channel = m.channel,
@@ -1292,7 +1312,7 @@ private fun ChannelPickerDialog(
         if (q.trim().length >= 2 && list.isEmpty()) {
             LiveText("No channel names match.", color = SportsLook.Dim, size = 12.sp)
         }
-        LazyColumn(Modifier.heightIn(max = 330.dp), verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        LazyColumn(Modifier.heightIn(max = 330.dp).keepFocusWhileHeld(horizontal = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             itemsIndexed(list, key = { _, ch -> ch.key }) { i, ch ->
                 ChannelLine(channel = ch, detail = ch.group, modifier = if (i == 0) Modifier.focusRequester(firstResult) else Modifier, onClick = { onPick(ch) })
             }

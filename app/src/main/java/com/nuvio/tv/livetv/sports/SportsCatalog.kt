@@ -223,14 +223,10 @@ object SportsCatalog {
     fun regionName(code: String): String = regions.firstOrNull { it.first == code }?.second ?: code
 
     /**
-     * Shown on the Sports page: the region's leagues, minus ones you took off, plus ones from
-     * elsewhere you added ("+id" in [SportsSettings.hiddenLeagues]).
+     * In All Events: the region's leagues (anything you follow is added on top, see
+     * SportsRepository.activeLeagues).
      */
-    fun shown(league: League, s: SportsSettings): Boolean {
-        if ("+${league.id}" in s.hiddenLeagues) return true
-        if (league.id in s.hiddenLeagues) return false
-        return regionOf(s) in league.regions
-    }
+    fun shown(league: League, s: SportsSettings): Boolean = regionOf(s) in league.regions
 
     /** Leagues in the order the region cares about them. */
     fun ordered(s: SportsSettings): List<League> {

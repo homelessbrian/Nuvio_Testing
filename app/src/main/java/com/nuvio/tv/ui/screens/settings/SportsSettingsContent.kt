@@ -81,10 +81,10 @@ fun SportsSettingsContent(
         ) {
             item(key = "teams") {
                 SettingsGroupCard(title = "Your Teams") {
-                    val names = (f.teams.map { it.name } + f.leagues.mapNotNull { SportsCatalog.league(it)?.let { l -> "all of ${l.name}" } } + f.words.map { "\"$it\"" })
+                    val names = (f.teams.map { it.name } + f.pins.mapNotNull { SportsCatalog.league(it)?.name } + f.words.map { "\"$it\"" })
                     SettingsActionRow(
                         title = "Teams and Leagues I Follow",
-                        subtitle = if (names.isEmpty()) "Nothing yet. Their games show first, with reminders before they start."
+                        subtitle = if (names.isEmpty()) "Nothing yet. Follow teams and leagues to see them on My Sports."
                         else names.take(6).joinToString(", ") + if (names.size > 6) " and ${names.size - 6} more" else "",
                         value = if (names.isEmpty()) null else names.size.toString(),
                         leadingIcon = Icons.Default.Star,
@@ -92,18 +92,17 @@ fun SportsSettingsContent(
                         modifier = if (initialFocusRequester != null) Modifier.focusRequester(initialFocusRequester) else Modifier
                     )
                     SettingsActionRow(
+                        title = "Arrange My Sports",
+                        subtitle = "The order of your teams' and leagues' rows on My Sports",
+                        leadingIcon = Icons.Default.Tune,
+                        onClick = { com.nuvio.tv.livetv.sports.SportsLaunch.openArrange(); onOpenTeams() }
+                    )
+                    SettingsActionRow(
                         title = "Your Region",
-                        subtitle = "Which leagues show on the Sports page, and in what order",
+                        subtitle = "All Events shows your region's leagues, plus anything you follow",
                         value = SportsCatalog.regionName(region) + if (s.region.isBlank()) " (this TV)" else "",
                         leadingIcon = Icons.Default.Public,
                         onClick = { dialog = "region" }
-                    )
-                    SettingsActionRow(
-                        title = "Leagues on the Sports Page",
-                        subtitle = "Add leagues from elsewhere, or take ones you never watch off",
-                        value = "$shownCount of ${SportsCatalog.leagues.size}",
-                        leadingIcon = Icons.Default.Tune,
-                        onClick = { dialog = "leagues" }
                     )
                     SettingsToggleRow(
                         "Show Sports in the Side Menu",

@@ -127,6 +127,8 @@ internal fun MyTeamsRows(
     autoFocus: Boolean,
     returning: Boolean,
     onReturned: () -> Unit,
+    /** Goes up each time My Sports (or a sport) is picked on the top bar: the highlight goes to the big card. */
+    jumpToHero: Int = 0,
     onOpen: (SportsEvent) -> Unit,
     onQuickWatch: (SportsEvent) -> Unit,
     onPick: () -> Unit
@@ -149,6 +151,13 @@ internal fun MyTeamsRows(
         onReturned()
         runCatching { (back ?: heroReq).requestFocus() }
             .onFailure { runCatching { heroReq.requestFocus() } }
+    }
+
+    LaunchedEffect(jumpToHero) {
+        if (jumpToHero == 0) return@LaunchedEffect
+        delay(160)
+        focusedOnce = true
+        runCatching { heroReq.requestFocus() }
     }
 
     // Scrolling like Home's rows: the highlighted row's heading stays near the top (two rows show
@@ -229,7 +238,7 @@ internal fun MyTeamsRows(
         androidx.compose.runtime.CompositionLocalProvider(androidx.compose.foundation.gestures.LocalBringIntoViewSpec provides verticalSpec) {
             LazyColumn(
                 state = columnState,
-                modifier = Modifier.weight(1f),
+                modifier = Modifier.weight(1f).keepFocusWhileHeld(horizontal = false),
                 contentPadding = PaddingValues(bottom = 160.dp)
             ) {
                 items(page.rows, key = { it.key }) { row ->

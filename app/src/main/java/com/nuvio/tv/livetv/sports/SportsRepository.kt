@@ -857,16 +857,19 @@ class SportsRepository @Inject constructor(
     fun toggleTeam(team: TeamInfo) = updateFollows { f ->
         val had = f.followedTeam(team)
         if (had != null) f.copy(teams = f.teams - had)
+        // Just the team (its league isn't followed with it: following the NFL is a separate choice).
+        else f.copy(teams = f.teams + FollowedTeam(team.leagueId, team.id, team.name, team.abbr, team.color, team.logo), setUp = true)
+    }
+
+    /** Moves a row of My Sports up ([by] -1) or down (+1). */
+    fun moveRow(key: String, by: Int) = updateFollows { f ->
+        val keys = SportsRows.rowKeys(f).toMutableList()
+        val i = keys.indexOf(key)
+        val j = i + by
+        if (i < 0 || j !in keys.indices) f
         else {
-            // The team's league goes on the top bar too (unless you took it off before). Not for
-            // countries: their games are spread over many competitions.
-            val league = SportsCatalog.league(team.leagueId)
-            val pin = team.leagueId.takeIf { league != null && !league.national && it !in f.pins && it !in f.unpinned }
-            f.copy(
-                teams = f.teams + FollowedTeam(team.leagueId, team.id, team.name, team.abbr, team.color, team.logo),
-                setUp = true,
-                pins = if (pin != null) f.pins + pin else f.pins
-            )
+            keys.add(j, keys.removeAt(i))
+            f.copy(order = keys)
         }
     }
 
