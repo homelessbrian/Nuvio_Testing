@@ -21,10 +21,13 @@ enum class Sport(val label: String, val icon: String) {
     DARTS("Darts", "🎯"),
     SNOOKER("Snooker", "🎱"),
     WRESTLING("Wrestling", "🤼"),
+    AUSSIE_RULES("Aussie Rules", "🏉"),
+    VOLLEYBALL("Volleyball", "🏐"),
+    LACROSSE("Lacrosse", "🥍"),
     OTHER("More Sports", "🏅");
 
     /** Home team first with "v" (UK style) instead of away team first with "at" (US style). */
-    val homeFirst: Boolean get() = this == FOOTBALL || this == RUGBY || this == CRICKET
+    val homeFirst: Boolean get() = this == FOOTBALL || this == RUGBY || this == CRICKET || this == AUSSIE_RULES
 }
 
 /** How a league's events look: two teams, or one event with many competitors (a race, a fight card). */
@@ -63,8 +66,13 @@ data class League(
      */
     val liveByDefault: Boolean = false,
     /** National teams (England, France, USA…): following one covers all their competitions. */
-    val national: Boolean = false
+    val national: Boolean = false,
+    /** Women's national teams: their own countries list (ESPN's England women aren't England men). */
+    val women: Boolean = false
 ) {
+    /** National leagues that share a countries list: same sport, men's or women's. */
+    val nationalGroup: String get() = sport.name + if (women) "|w" else ""
+
     companion object {
         val ALL_REGIONS = setOf("US", "UK", "IE", "CA", "AU", "OTHER")
     }

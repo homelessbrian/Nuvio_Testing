@@ -1002,6 +1002,8 @@ private fun GamePage(
                         finished = ev.state == GameState.POST,
                         playing = videoOn && playingKey == m.channel.key,
                         now = now,
+                        eventStartMs = ev.startMs,
+                        use24h = use24h,
                         modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
                         onClick = { onChoose(m) }
                     )

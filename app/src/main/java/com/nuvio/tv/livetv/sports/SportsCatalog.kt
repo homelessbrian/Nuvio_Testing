@@ -99,12 +99,117 @@ object SportsCatalog {
         League("rugby/180659", Sport.RUGBY, "Six Nations", "6N", "rugby/180659",
             guideWords = listOf("Six Nations", "6 Nations"), regions = setOf("UK", "IE", "OTHER"), minutes = 110, color = 0xFF0A2463, national = true),
         League("rugby/289234", Sport.RUGBY, "Rugby Test Matches", "TESTS", "rugby/289234",
-            guideWords = listOf("Autumn Nations", "Nations Championship", "Summer Tour", "Rugby Union", "Test Match"),
+            guideWords = listOf("Summer Tour", "Rugby Union", "Test Match", "Lions Tour"),
             regions = setOf("UK", "IE", "AU", "OTHER"), minutes = 110, color = 0xFF1B4332, national = true),
         League("rugby/244293", Sport.RUGBY, "The Rugby Championship", "TRC", "rugby/244293",
             guideWords = listOf("Rugby Championship"), regions = setOf("AU", "OTHER"), minutes = 110, color = 0xFF002B5C, national = true),
         League("rugby/164205", Sport.RUGBY, "Rugby World Cup", "RWC", "rugby/164205",
             guideWords = listOf("Rugby World Cup"), regions = setOf("UK", "IE", "AU", "US", "OTHER"), minutes = 110, color = 0xFF0B4F2E, national = true),
+        League("rugby/17567", Sport.RUGBY, "Nations Championship", "NATIONS", "rugby/17567",
+            guideWords = listOf("Nations Championship", "Autumn Nations", "Autumn Internationals"), regions = setOf("UK", "IE", "AU", "OTHER"), minutes = 110, color = 0xFF14213D, national = true),
+        rug("289237", "Women's Rugby World Cup", "WRWC", listOf("Women's Rugby World Cup"), color = 0xFF6A1B4D, women = true, national = true),
+        // ---- Rugby union clubs
+        rug("267979", "Premiership Rugby", "PREM", listOf("Premiership Rugby", "Gallagher Prem", "Gallagher Premiership"), setOf("UK", "IE"), 0xFF00205B),
+        rug("270557", "United Rugby Championship", "URC", listOf("United Rugby Championship", "URC"), setOf("UK", "IE"), 0xFF0E2A47),
+        rug("271937", "Champions Cup", "EPCR", listOf("Champions Cup", "Investec Champions Cup"), setOf("UK", "IE", "OTHER"), 0xFF0A1F44),
+        rug("272073", "Challenge Cup", "CHALL", listOf("Challenge Cup", "EPCR Challenge Cup"), color = 0xFF2E4057),
+        rug("270559", "Top 14", "TOP 14", listOf("Top 14"), setOf("OTHER"), 0xFF003F87),
+        rug("242041", "Super Rugby Pacific", "SUPER", listOf("Super Rugby"), setOf("AU"), 0xFF00395D),
+        rug("270563", "NPC (New Zealand)", "NPC", listOf("NPC", "Bunnings NPC", "Mitre 10 Cup"), setOf("AU"), 0xFF111111),
+        rug("270555", "Currie Cup", "CURRIE", listOf("Currie Cup"), color = 0xFF006400),
+        rug("289262", "Major League Rugby", "MLR", listOf("Major League Rugby", "MLR"), setOf("US"), 0xFF0B2545),
+        // ---- Aussie rules
+        League("australian-football/afl", Sport.AUSSIE_RULES, "AFL", "AFL", "australian-football/afl", guideWords = listOf("AFL", "Aussie Rules"),
+            regions = setOf("AU"), minutes = 150, color = 0xFF01285E),
+        // ---- More football (soccer): followable everywhere, in All Events where they're watched
+        soc("eng.5", "National League", "NL", listOf("National League", "Vanarama National League"), UK, 0xFF2C3E50),
+        soc("eng.trophy", "EFL Trophy", "EFL TR", listOf("EFL Trophy", "Vertu Trophy"), color = 0xFF1C2C5B),
+        soc("eng.w.fa", "Women's FA Cup", "WFA", listOf("Women's FA Cup"), color = 0xFF7A0019),
+        soc("eng.w.league_cup", "Women's League Cup", "WLC", listOf("Women's League Cup", "Subway Cup"), color = 0xFF2C1E5A),
+        soc("sco.2", "Scottish Championship", "SCO 2", listOf("Scottish Championship"), color = 0xFF2B2D7A),
+        soc("sco.tennents", "Scottish Cup", "SCO CUP", listOf("Scottish Cup"), UK, 0xFF1F3A93),
+        soc("sco.cis", "Scottish League Cup", "SCO LC", listOf("Scottish League Cup", "Premier Sports Cup"), UK, 0xFF2B2D7A),
+        soc("uefa.wchampions", "Women's Champions League", "UWCL", listOf("Women's Champions League", "UWCL"), setOf("UK", "IE", "US"), 0xFF0B1E5B),
+        soc("esp.2", "LaLiga 2", "LALIGA2", listOf("LaLiga 2", "LaLiga Hypermotion", "Segunda"), color = 0xFFEE3524),
+        soc("ita.2", "Serie B", "SERIE B", listOf("Serie B"), color = 0xFF024494),
+        soc("ger.2", "2. Bundesliga", "BUNDES2", listOf("2. Bundesliga", "Bundesliga 2"), color = 0xFFD20515),
+        soc("fra.2", "Ligue 2", "LIGUE 2", listOf("Ligue 2"), color = 0xFF091C3E),
+        soc("ned.1", "Eredivisie", "ERE", listOf("Eredivisie"), setOf("OTHER"), 0xFFE4002B),
+        soc("por.1", "Primeira Liga", "POR", listOf("Primeira Liga", "Liga Portugal"), setOf("OTHER"), 0xFF003D7C),
+        soc("bel.1", "Belgian Pro League", "BEL", listOf("Pro League", "Jupiler Pro League"), color = 0xFF1A1A1A),
+        soc("tur.1", "Süper Lig", "TUR", listOf("Super Lig", "Süper Lig"), color = 0xFFE30A17),
+        soc("gre.1", "Greek Super League", "GRE", listOf("Greek Super League"), color = 0xFF0D5EAF),
+        soc("aut.1", "Austrian Bundesliga", "AUT", listOf("Austrian Bundesliga"), color = 0xFFED2939),
+        soc("den.1", "Danish Superliga", "DEN", listOf("Superliga"), color = 0xFFC8102E),
+        soc("swe.1", "Allsvenskan", "SWE", listOf("Allsvenskan"), color = 0xFF005293),
+        soc("nor.1", "Eliteserien", "NOR", listOf("Eliteserien"), color = 0xFFBA0C2F),
+        soc("rus.1", "Russian Premier League", "RUS", listOf("Russian Premier League"), color = 0xFF2B2D7A),
+        soc("ksa.1", "Saudi Pro League", "SPL", listOf("Saudi Pro League", "Roshn Saudi League"), color = 0xFF006C35),
+        soc("esp.copa_del_rey", "Copa del Rey", "CDR", listOf("Copa del Rey"), color = 0xFFAA151B),
+        soc("ger.dfb_pokal", "DFB-Pokal", "POKAL", listOf("DFB-Pokal", "DFB Pokal", "German Cup"), color = 0xFF1A1A1A),
+        soc("ita.coppa_italia", "Coppa Italia", "COPPA", listOf("Coppa Italia"), color = 0xFF009246),
+        soc("fra.coupe_de_france", "Coupe de France", "CDF", listOf("Coupe de France"), color = 0xFF002395),
+        soc("ned.cup", "KNVB Cup", "KNVB", listOf("KNVB Cup", "KNVB Beker"), color = 0xFFE4002B),
+        soc("por.taca.portugal", "Taça de Portugal", "TACA", listOf("Taca de Portugal", "Taça de Portugal"), color = 0xFF003D7C),
+        soc("uefa.super_cup", "UEFA Super Cup", "SUPER C", listOf("UEFA Super Cup", "Super Cup"), color = 0xFF0B1E5B),
+        soc("eng.charity", "Community Shield", "SHIELD", listOf("Community Shield"), color = 0xFF7A0019),
+        soc("fifa.cwc", "Club World Cup", "CWC", listOf("Club World Cup"), color = 0xFF56042C),
+        soc("bra.1", "Brasileirão", "BRA", listOf("Brasileirao", "Brasileirão", "Serie A Brazil"), setOf("OTHER"), 0xFF009C3B),
+        soc("arg.1", "Liga Profesional (Argentina)", "ARG", listOf("Liga Profesional", "Argentine"), setOf("OTHER"), 0xFF75AADB),
+        soc("col.1", "Colombian Primera A", "COL", listOf("Primera A", "Liga BetPlay"), color = 0xFFFCD116),
+        soc("chi.1", "Chilean Primera", "CHI", listOf("Chilean Primera"), color = 0xFFD52B1E),
+        soc("conmebol.libertadores", "Copa Libertadores", "LIBERT", listOf("Copa Libertadores", "Libertadores"), setOf("US", "OTHER"), 0xFF1D1D1B),
+        soc("conmebol.sudamericana", "Copa Sudamericana", "SUDAM", listOf("Copa Sudamericana", "Sudamericana"), color = 0xFF1D3C8F),
+        soc("usa.usl.1", "USL Championship", "USL", listOf("USL Championship", "USL"), setOf("US"), 0xFF002F6C),
+        soc("usa.usl.l1", "USL League One", "USL1", listOf("USL League One"), color = 0xFF002F6C),
+        soc("usa.w.usl.1", "USL Super League", "USLS", listOf("USL Super League"), color = 0xFF5B2C6F),
+        soc("usa.open", "U.S. Open Cup", "USOC", listOf("U.S. Open Cup", "US Open Cup"), setOf("US"), 0xFFB22234),
+        soc("concacaf.champions", "CONCACAF Champions Cup", "CCC", listOf("Champions Cup", "Concacaf Champions"), setOf("US"), 0xFF002F6C),
+        soc("concacaf.leagues.cup", "Leagues Cup", "LGS CUP", listOf("Leagues Cup"), setOf("US"), 0xFF001F5B),
+        soc("mex.w.1", "Liga MX Femenil", "MX FEM", listOf("Liga MX Femenil"), color = 0xFF1A7F3C),
+        soc("jpn.1", "J1 League", "J1", listOf("J1 League", "J.League"), color = 0xFFC8102E),
+        soc("chn.1", "Chinese Super League", "CSL", listOf("Chinese Super League"), color = 0xFFDE2910),
+        soc("ind.1", "Indian Super League", "ISL", listOf("Indian Super League", "ISL"), color = 0xFFFF9933),
+        soc("aus.1", "A-League Men", "ALM", listOf("A-League"), setOf("AU"), 0xFF0E2D5A),
+        soc("aus.w.1", "A-League Women", "ALW", listOf("A-League Women"), setOf("AU"), 0xFF0E2D5A),
+        soc("afc.champions", "AFC Champions League Elite", "ACL", listOf("AFC Champions League"), color = 0xFF003876),
+        soc("caf.champions", "CAF Champions League", "CAF CL", listOf("CAF Champions League"), color = 0xFF006233),
+        soc("rsa.1", "South African Premiership", "PSL", listOf("Betway Premiership", "South African Premiership"), color = 0xFF007A4D),
+        // Women's internationals: their own countries list (the Lionesses, the USWNT…)
+        soc("fifa.wwc", "Women's World Cup", "WWC", listOf("Women's World Cup"), color = 0xFF56042C, women = true, national = true),
+        soc("uefa.weuro", "Women's Euro", "WEURO", listOf("Women's Euro", "Women's European Championship"), color = 0xFF143CDB, women = true, national = true),
+        soc("uefa.w.nations", "Women's Nations League", "WUNL", listOf("Women's Nations League"), color = 0xFF0E1B4D, women = true, national = true),
+        soc("fifa.friendly.w", "Women's International Friendlies", "W FRIEND", listOf("Women's International", "Women's Friendly"), color = 0xFF33415C, women = true, national = true),
+        // ---- More basketball, hockey, American football, baseball
+        League("basketball/nba-development", Sport.BASKETBALL, "NBA G League", "G LEAGUE", "basketball/nba-development",
+            guideWords = listOf("G League"), regions = emptySet(), minutes = 130, color = 0xFF002B5C),
+        League("basketball/nbl", Sport.BASKETBALL, "NBL (Australia)", "NBL", "basketball/nbl",
+            guideWords = listOf("NBL"), regions = setOf("AU"), minutes = 130, color = 0xFF1A1A1A),
+        League("hockey/mens-college-hockey", Sport.HOCKEY, "Men's College Hockey", "NCAAH", "hockey/mens-college-hockey",
+            guideWords = listOf("College Hockey", "NCAA Hockey"), regions = emptySet(), minutes = 160, schoolNames = true, color = 0xFF2B4C7E),
+        League("football/cfl", Sport.AMERICAN_FOOTBALL, "CFL", "CFL", "football/cfl",
+            guideWords = listOf("CFL", "Grey Cup"), regions = setOf("CA"), minutes = 195, color = 0xFFC8102E),
+        League("football/ufl", Sport.AMERICAN_FOOTBALL, "UFL", "UFL", "football/ufl",
+            guideWords = listOf("UFL"), regions = emptySet(), minutes = 190, color = 0xFF0B2545),
+        League("baseball/college-baseball", Sport.BASEBALL, "College Baseball", "NCAAB", "baseball/college-baseball",
+            guideWords = listOf("College Baseball", "NCAA Baseball"), regions = emptySet(), minutes = 190, schoolNames = true, color = 0xFF2B4C7E),
+        League("volleyball/womens-college-volleyball", Sport.VOLLEYBALL, "Women's College Volleyball", "NCAAV", "volleyball/womens-college-volleyball",
+            guideWords = listOf("College Volleyball", "NCAA Volleyball"), regions = emptySet(), minutes = 120, schoolNames = true, color = 0xFF5B3A8C),
+        League("lacrosse/pll", Sport.LACROSSE, "Premier Lacrosse League", "PLL", "lacrosse/pll",
+            guideWords = listOf("Premier Lacrosse", "PLL"), regions = emptySet(), minutes = 120, color = 0xFF111111),
+        League("lacrosse/nll", Sport.LACROSSE, "National Lacrosse League", "NLL", "lacrosse/nll",
+            guideWords = listOf("National Lacrosse League", "NLL"), regions = emptySet(), minutes = 150, color = 0xFF1D3C8F),
+        // ---- More events
+        League("mma/pfl", Sport.FIGHTING, "PFL", "PFL", "mma/pfl", LeagueKind.EVENT, guideWords = listOf("PFL", "Professional Fighters League"),
+            regions = emptySet(), minutes = 240, color = 0xFF111111),
+        League("racing/nascar-secondary", Sport.RACING, "NASCAR O'Reilly Series", "NXS", "racing/nascar-secondary", LeagueKind.EVENT,
+            guideWords = listOf("O'Reilly Auto Parts Series", "Xfinity Series"), regions = emptySet(), minutes = 150, color = 0xFF007AC2),
+        League("racing/nascar-truck", Sport.RACING, "NASCAR Truck Series", "TRUCKS", "racing/nascar-truck", LeagueKind.EVENT,
+            guideWords = listOf("Truck Series"), regions = emptySet(), minutes = 120, color = 0xFF007AC2),
+        League("golf/liv", Sport.GOLF, "LIV Golf", "LIV", "golf/liv", LeagueKind.EVENT, guideWords = listOf("LIV Golf"),
+            regions = emptySet(), minutes = 300, color = 0xFF111111),
+        League("golf/champions-tour", Sport.GOLF, "PGA Tour Champions", "CHAMPS", "golf/champions-tour", LeagueKind.EVENT,
+            guideWords = listOf("PGA Tour Champions"), regions = emptySet(), minutes = 300, color = 0xFF003865),
         // ---- Fighting
         League("mma/ufc", Sport.FIGHTING, "UFC", "UFC", "mma/ufc", LeagueKind.EVENT, guideWords = listOf("UFC"),
             regions = EVERYWHERE, minutes = 300, color = 0xFFD20A0A),
@@ -141,7 +246,7 @@ object SportsCatalog {
             regions = EVERYWHERE, minutes = 600, color = 0xFF6A1B9A),
         // ---- Found in your guide (ESPN doesn't cover these)
         League("guide/rugby-union", Sport.RUGBY, "Rugby Union", "RUGBY",
-            guideWords = listOf("Rugby Union", "Premiership Rugby", "Gallagher Premiership", "URC", "Champions Cup", "Top 14", "Super Rugby"),
+            guideWords = listOf("Rugby Union"),
             regions = setOf("UK", "IE", "AU", "OTHER"), guideOnly = true, fixtureSlug = "rugby-union", kind = LeagueKind.EVENT, color = 0xFF0B4F2E),
         League("guide/rugby-league", Sport.RUGBY, "Rugby League", "RL",
             guideWords = listOf("Rugby League", "Super League", "NRL", "Challenge Cup", "State of Origin"),
@@ -180,6 +285,27 @@ object SportsCatalog {
     val all: List<League> get() = leagues + extra
 
     private val UEFA_CLUB = listOf("soccer/uefa.champions", "soccer/uefa.europa", "soccer/uefa.europa.conf")
+    private val EURO_MORE = setOf("soccer/ned.1", "soccer/por.1", "soccer/bel.1", "soccer/tur.1", "soccer/gre.1", "soccer/aut.1", "soccer/den.1", "soccer/swe.1", "soccer/nor.1")
+    /** A club's own country's cups. */
+    private val DOMESTIC_CUPS = mapOf(
+        "soccer/esp.1" to listOf("soccer/esp.copa_del_rey"), "soccer/esp.2" to listOf("soccer/esp.copa_del_rey"),
+        "soccer/ger.1" to listOf("soccer/ger.dfb_pokal"), "soccer/ger.2" to listOf("soccer/ger.dfb_pokal"),
+        "soccer/ita.1" to listOf("soccer/ita.coppa_italia"), "soccer/ita.2" to listOf("soccer/ita.coppa_italia"),
+        "soccer/fra.1" to listOf("soccer/fra.coupe_de_france"), "soccer/fra.2" to listOf("soccer/fra.coupe_de_france"),
+        "soccer/ned.1" to listOf("soccer/ned.cup"), "soccer/por.1" to listOf("soccer/por.taca.portugal"),
+        "soccer/usa.1" to listOf("soccer/usa.open", "soccer/concacaf.champions", "soccer/concacaf.leagues.cup"),
+        "soccer/mex.1" to listOf("soccer/concacaf.champions", "soccer/concacaf.leagues.cup"),
+        "soccer/usa.usl.1" to listOf("soccer/usa.open"), "soccer/usa.usl.l1" to listOf("soccer/usa.open"),
+        "soccer/bra.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
+        "soccer/arg.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
+        "soccer/col.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
+        "soccer/chi.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
+        "soccer/jpn.1" to listOf("soccer/afc.champions"), "soccer/ksa.1" to listOf("soccer/afc.champions"),
+        "soccer/chn.1" to listOf("soccer/afc.champions"), "soccer/aus.1" to listOf("soccer/afc.champions"),
+        "soccer/rsa.1" to listOf("soccer/caf.champions"),
+        "rugby/267979" to listOf("rugby/271937", "rugby/272073"), "rugby/270557" to listOf("rugby/271937", "rugby/272073"),
+        "rugby/270559" to listOf("rugby/271937", "rugby/272073")
+    )
     private val EURO_TOP = setOf("soccer/esp.1", "soccer/ita.1", "soccer/ger.1", "soccer/fra.1", "soccer/sco.1") + UEFA_CLUB
 
     /**
@@ -190,11 +316,15 @@ object SportsCatalog {
     fun relatedLeagues(leagueId: String): List<String> {
         val l = league(leagueId) ?: return emptyList()
         val out = when {
-            l.national -> leagues.filter { it.national && it.sport == l.sport }.map { it.id }
-            leagueId.startsWith("soccer/eng.") && !leagueId.startsWith("soccer/eng.w") ->
-                UEFA_CLUB + listOf("soccer/eng.fa", "soccer/eng.league_cup")
-            leagueId in EURO_TOP -> UEFA_CLUB
-            else -> emptyList()
+            l.national -> leagues.filter { it.national && it.nationalGroup == l.nationalGroup }.map { it.id }
+            leagueId.startsWith("soccer/eng.w") -> listOf("soccer/eng.w.fa", "soccer/eng.w.league_cup", "soccer/uefa.wchampions")
+            leagueId in setOf("soccer/eng.2", "soccer/eng.3", "soccer/eng.4", "soccer/eng.5") ->
+                listOf("soccer/eng.fa", "soccer/eng.league_cup", "soccer/eng.trophy")
+            leagueId.startsWith("soccer/eng.") ->
+                UEFA_CLUB + listOf("soccer/eng.fa", "soccer/eng.league_cup", "soccer/uefa.super_cup", "soccer/eng.charity", "soccer/fifa.cwc")
+            leagueId.startsWith("soccer/sco.") -> UEFA_CLUB + listOf("soccer/sco.tennents", "soccer/sco.cis")
+            else -> (if (leagueId in EURO_TOP || leagueId in EURO_MORE) UEFA_CLUB + listOf("soccer/uefa.super_cup", "soccer/fifa.cwc") else emptyList()) +
+                DOMESTIC_CUPS[leagueId].orEmpty()
         }
         return out.filter { it != leagueId }
     }
@@ -208,6 +338,7 @@ object SportsCatalog {
         leagueId.startsWith("soccer/") -> "soccer"
         // ESPN's rugby competitions share team ids too (England is 1 in all of them).
         leagueId.startsWith("rugby/") -> "rugby"
+        leagueId.startsWith("lacrosse/") -> "lacrosse"
         else -> leagueId
     }
 
@@ -245,7 +376,7 @@ object SportsCatalog {
         val region = regionOf(s)
         val first: List<Sport> = when (region) {
             "UK", "IE" -> listOf(Sport.FOOTBALL, Sport.RUGBY, Sport.CRICKET, Sport.DARTS, Sport.SNOOKER, Sport.RACING, Sport.FIGHTING, Sport.WRESTLING, Sport.GOLF, Sport.TENNIS)
-            "AU" -> listOf(Sport.RUGBY, Sport.CRICKET, Sport.FOOTBALL, Sport.BASKETBALL)
+            "AU" -> listOf(Sport.AUSSIE_RULES, Sport.RUGBY, Sport.CRICKET, Sport.FOOTBALL, Sport.BASKETBALL)
             "CA" -> listOf(Sport.HOCKEY, Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL)
             else -> listOf(Sport.AMERICAN_FOOTBALL, Sport.BASKETBALL, Sport.BASEBALL, Sport.HOCKEY, Sport.FOOTBALL)
         }
@@ -361,3 +492,10 @@ internal fun wrestlingHeadline(title: String): String {
     val out = if (m != null) m.groupValues[2].trim().ifBlank { m.groupValues[1].trim() } else t
     return out.ifBlank { title }
 }
+
+private fun soc(path: String, name: String, short: String, words: List<String>, regions: Set<String> = emptySet(), color: Long = 0xFF2A2F3A, women: Boolean = false, national: Boolean = false) =
+    League("soccer/$path", Sport.FOOTBALL, name, short, "soccer/$path", guideWords = words, regions = regions, minutes = if (path.contains("cup") || path.contains("copa") || path.contains("pokal") || path.contains("taca") || path.contains("coupe")) 125 else 115,
+        color = color, women = women, national = national)
+
+private fun rug(id: String, name: String, short: String, words: List<String>, regions: Set<String> = emptySet(), color: Long = 0xFF1B4332, women: Boolean = false, national: Boolean = false) =
+    League("rugby/$id", Sport.RUGBY, name, short, "rugby/$id", guideWords = words, regions = regions, minutes = 110, color = color, women = women, national = national)

@@ -90,7 +90,7 @@ class SportsRepository @Inject constructor(
 
     /** Every game and event on the page's days (yesterday to a week ahead). */
     val events: StateFlow<List<SportsEvent>> = combine(leagueData, weekData, fixtureData, guideData, tsdbData) { l, w, f, g, t ->
-        val guide = g.values.flatten()
+        val guide = mergeWrestlingAirings(g.values.flatten())
         val from = dayStart(-DAYS_BACK - 1)
         val to = dayStart(DAYS_AHEAD + 2)
         val tsdb = t.values.flatMap { it.events }.filter { it.startMs in from until to }
@@ -100,7 +100,7 @@ class SportsRepository @Inject constructor(
         val guideByLeague = guide.groupBy { it.leagueId }
         val fixtures = f.values.flatMap { it.events }.filter { fx ->
             val same = guideByLeague[fx.leagueId].orEmpty()
-            if (fx.hasTime) same.none { kotlin.math.abs(it.startMs - fx.startMs) <= 3 * HOUR }
+            if (fx.hasTime) same.none { kotlin.math.abs(it.startMs - fx.startMs) <= 3 * HOUR || sameShowShifted(it, fx) }
             else same.none { dayOf(it.startMs) == dayOf(fx.startMs) }
         }
         val espn = l.values.flatMap { it.events } + w.values.flatMap { it.events }
@@ -132,6 +132,54 @@ class SportsRepository @Inject constructor(
         val extra = (a.values.flatMap { it.events } + s.values.flatMap { it.events } + t.values.flatMap { it.events }).filter { seen.add(dedupeKey(it)) }
         ev + extra
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
+
+    /**
+     * The same weekly wrestling show in the schedule file and in your guide, up to a day and a
+     * bit apart: TheSportsDB sometimes files a US evening show under the wrong day (SmackDown,
+     * Friday 8 pm Eastern, listed as Thursday 8 pm: midnight UTC put on the Friday date).
+     * Your guide's airing is the real one, so the schedule's copy gives way to it.
+     */
+    private fun sameShowShifted(guide: SportsEvent, fx: SportsEvent): Boolean {
+        if (SportsCatalog.league(fx.leagueId)?.sport != Sport.WRESTLING) return false
+        if (kotlin.math.abs(guide.startMs - fx.startMs) > 30 * HOUR) return false
+        val a = SportsCatalog.norm(wrestlingHeadline(guide.title)).trim()
+        val b = SportsCatalog.norm(wrestlingHeadline(fx.title)).trim()
+        return a.length >= 3 && b.length >= 3 && (a == b || a.contains(b) || b.contains(a))
+    }
+
+    /**
+     * One wrestling show aired at different times (USA at 8 pm, a later or overseas feed at 1 am):
+     * one entry, at the earliest airing, with every channel and its time. Airings of the same show
+     * within 12 hours of the first count as one; next week's episode never does.
+     */
+    private fun mergeWrestlingAirings(guide: List<SportsEvent>): List<SportsEvent> {
+        val (wrestling, rest) = guide.partition { SportsCatalog.league(it.leagueId)?.sport == Sport.WRESTLING }
+        if (wrestling.size < 2) return guide
+        val out = ArrayList<SportsEvent>(wrestling.size)
+        val byShow = wrestling.groupBy { it.leagueId + "|" + SportsCatalog.norm(wrestlingHeadline(it.title)).trim() }
+        for ((_, airings) in byShow) {
+            var run = ArrayList<SportsEvent>()
+            fun flush() {
+                if (run.isEmpty()) return
+                val first = run.first()
+                out += if (run.size == 1) first else first.copy(
+                    // On now if any airing is; otherwise the first airing's state.
+                    state = if (run.any { it.state == GameState.LIVE }) GameState.LIVE else first.state,
+                    guideHits = run.flatMap { it.guideHits }.distinctBy { (key, p) -> key + "|" + p.startMs },
+                    endMs = run.mapNotNull { it.endMs }.maxOrNull() ?: first.endMs,
+                    subtitle = first.subtitle ?: run.firstNotNullOfOrNull { it.subtitle },
+                    word = first.word ?: run.firstNotNullOfOrNull { it.word }
+                )
+                run = ArrayList()
+            }
+            for (ev in airings.sortedBy { it.startMs }) {
+                if (run.isNotEmpty() && ev.startMs - run.first().startMs > 12 * HOUR) flush()
+                run += ev
+            }
+            flush()
+        }
+        return rest + out
+    }
 
     private fun dedupeKey(ev: SportsEvent): String = ev.espnId?.let { "e:$it" } ?: ev.id
 
@@ -355,7 +403,11 @@ class SportsRepository @Inject constructor(
      */
     private suspend fun updateAhead(now: Long, force: Boolean) {
         val f = follows.value
-        val ids = (f.pins + f.leagues).toSet()
+        // Plus your teams' competitions where ESPN gives no team schedule (rugby): their games
+        // further ahead come from the league's months instead.
+        val noSchedule = f.teams.flatMap { listOf(it.leagueId) + SportsCatalog.relatedLeagues(it.leagueId) }
+            .filter { it.startsWith("rugby/") || it.startsWith("australian-football/") }
+        val ids = (f.pins + f.leagues + noSchedule).toSet()
         if (aheadData.value.keys.any { it !in ids }) aheadData.update { m -> m.filterKeys { it in ids } }
         val due = ids.mapNotNull { SportsCatalog.league(it) }.filter { l ->
             l.espnPath != null && now - (aheadData.value[l.id]?.fetchedAt ?: 0L) > (if (force) HOUR else 6 * HOUR)
@@ -812,7 +864,7 @@ class SportsRepository @Inject constructor(
         // ESPN lists in any of them), so England is there even between tournaments.
         if (league.national) {
             val all = LinkedHashMap<String, TeamInfo>()
-            for (l in SportsCatalog.leagues.filter { it.national && it.sport == league.sport }) {
+            for (l in SportsCatalog.leagues.filter { it.national && it.nationalGroup == league.nationalGroup }) {
                 leagueTeams(l).forEach { t -> all.putIfAbsent(t.id, if (l.id == league.id) t else t.copy(leagueId = league.id)) }
             }
             return@withContext all.values.sortedBy { it.fullName.lowercase(Locale.ROOT) }

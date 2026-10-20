@@ -57,6 +57,7 @@ import com.nuvio.tv.livetv.ui.LiveText
 import com.nuvio.tv.livetv.ui.LiveTextField
 import com.nuvio.tv.livetv.ui.TextInputDialog
 import com.nuvio.tv.ui.theme.NuvioTheme
+import kotlinx.coroutines.async
 import kotlinx.coroutines.delay
 import java.util.Locale
 
@@ -115,13 +116,21 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
         fun teamLeague(l: League) = l.espnPath != null && l.kind == LeagueKind.TEAMS && !l.national
         val searchIn = (viewModel.repo.activeLeagues().filter(::teamLeague) +
             SportsCatalog.ordered(settings).filter(::teamLeague) +
-            SportsCatalog.leagues.filter { it.national }.distinctBy { it.sport } + SportsCatalog.extra).distinctBy { it.id }
-        for (l in searchIn) {
-            all += viewModel.teams(l).filter { t ->
-                listOfNotNull(t.fullName, t.name, t.location, t.abbr).any { SportsCatalog.norm(it).contains(q) }
+            SportsCatalog.leagues.filter { it.national }.distinctBy { it.nationalGroup } + SportsCatalog.extra).distinctBy { it.id }
+        // Eight leagues at a time (there are well over a hundred; each list is saved for a week
+        // after the first look), keeping the order: a club in more than one competition
+        // (Arsenal: Premier League and Champions League) shows once, under its own league.
+        for (batch in searchIn.chunked(8)) {
+            val found = kotlinx.coroutines.coroutineScope {
+                batch.map { l ->
+                    async {
+                        runCatching { viewModel.teams(l) }.getOrDefault(emptyList()).filter { t ->
+                            listOfNotNull(t.fullName, t.name, t.location, t.abbr).any { SportsCatalog.norm(it).contains(q) }
+                        }
+                    }
+                }.map { it.await() }
             }
-            // A club in more than one competition (Arsenal: Premier League and Champions League)
-            // shows once, under its own league (found first).
+            found.forEach { all += it }
             value = all.distinctBy { SportsCatalog.teamFamily(it.leagueId) + "|" + it.id }
         }
         value = all.distinctBy { SportsCatalog.teamFamily(it.leagueId) + "|" + it.id }
@@ -252,7 +261,8 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                             teams == null -> LiveText("Getting the teams…", color = colors.TextSecondary, size = 13.sp)
                             league.national && teams.orEmpty().isNotEmpty() -> Column(Modifier.weight(1f)) {
                                 LiveText(
-                                    if (league.sport == Sport.RUGBY) "Countries: follow one to see all its games, from the Six Nations and test matches to the World Cup."
+                                    if (league.women) "Countries: follow one to see all its games, from friendlies and the Nations League to the Euros and the World Cup."
+                                    else if (league.sport == Sport.RUGBY) "Countries: follow one to see all its games, from the Six Nations and the Nations Championship to the World Cup."
                                     else "Countries: follow one to see all its games, from qualifiers and the Nations League to friendlies, the World Cup and the Euros.",
                                     color = colors.TextSecondary, size = 12.sp, maxLines = 2
                                 )
