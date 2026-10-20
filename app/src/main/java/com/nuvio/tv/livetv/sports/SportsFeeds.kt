@@ -457,7 +457,14 @@ internal class SportsFeeds {
                     espnId = espnId,
                     endMs = end,
                     note = if (multiDay && end != null) "Until " + SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(java.util.Date(end)) else null,
-                    standings = runCatching { if (league.sport == Sport.TENNIS) matchesOf(ev) else if (state == GameState.PRE) emptyList() else standingsOf(ev) }.getOrDefault(emptyList())
+                    standings = runCatching {
+                        when {
+                            // Tennis matches, a fight card's bouts: two at a time.
+                            league.sport == Sport.TENNIS || league.sport == Sport.FIGHTING -> matchesOf(ev, mainFirst = league.sport == Sport.FIGHTING)
+                            state == GameState.PRE -> emptyList()
+                            else -> standingsOf(ev)
+                        }
+                    }.getOrDefault(emptyList())
                 )
             }
 
@@ -563,7 +570,7 @@ internal class SportsFeeds {
          * A tennis tournament's matches (the feed groups them by draw: men's singles, women's…):
          * the ones on now, then today's results, then the next ones. "Sinner def. Rune", "6-4 6-3".
          */
-        private fun matchesOf(ev: JSONObject): List<Standing> {
+        private fun matchesOf(ev: JSONObject, mainFirst: Boolean = false): List<Standing> {
             val comps = ArrayList<JSONObject>()
             ev.optJSONArray("groupings")?.let { g ->
                 for (i in 0 until g.length()) {
@@ -616,6 +623,8 @@ internal class SportsFeeds {
             }
             val live = all.filter { it.state == "in" }
             val done = all.filter { it.state == "post" && now - it.at < 30 * 3_600_000L }.sortedByDescending { it.at }
+            // A fight card: the main event first (it's the last bout in the feed).
+            if (mainFirst) return (live + all.filter { it.state != "in" }.reversed()).map { it.line }.take(14)
             val next = all.filter { it.state == "pre" && it.at >= now - 3_600_000L }.sortedBy { it.at }
             return (live + done + next).map { it.line }.take(12)
         }
@@ -655,6 +664,33 @@ internal class SportsFeeds {
                         clock = listOfNotNull(if (period > 0) periodLabel(period) else null, clock).joinToString(" "),
                         teamAbbr = p.optJSONObject("team")?.let { it.str("abbreviation") ?: it.str("displayName") },
                         text = listOfNotNull(type, p.str("text")).joinToString(" · "),
+                        awayScore = p.opt("awayScore")?.toString(),
+                        homeScore = p.opt("homeScore")?.toString()
+                    )
+                }
+            }
+            // Hockey, baseball, basketball: no scoring list, but every play, with scoring ones marked.
+            if (out.isEmpty()) root.optJSONArray("plays")?.let { a ->
+                val abbrs = HashMap<String, String>()
+                root.optJSONObject("header")?.optJSONArray("competitions")?.optJSONObject(0)?.optJSONArray("competitors")?.let { cs ->
+                    for (i in 0 until cs.length()) {
+                        val t = cs.optJSONObject(i)?.optJSONObject("team") ?: continue
+                        val id = t.str("id") ?: continue
+                        abbrs[id] = t.str("abbreviation") ?: t.str("shortDisplayName") ?: continue
+                    }
+                }
+                for (i in 0 until a.length()) {
+                    val p = a.optJSONObject(i) ?: continue
+                    if (!p.optBoolean("scoringPlay", false)) continue
+                    val per = p.optJSONObject("period")
+                    val periodText = (per?.str("displayValue")?.replace(Regex("""\s*(Period|Quarter|Half)$""", RegexOption.IGNORE_CASE), ""))
+                        ?: per?.optInt("number", 0)?.takeIf { it > 0 }?.let { periodLabel(it) }
+                    val clock = p.optJSONObject("clock")?.str("displayValue")
+                    val team = p.optJSONObject("team")?.let { it.str("abbreviation") ?: it.str("id")?.let { id -> abbrs[id] } }
+                    out += ScoringPlay(
+                        clock = listOfNotNull(periodText, clock?.takeIf { it != "0:00" || periodText == null }).joinToString(" "),
+                        teamAbbr = team,
+                        text = p.str("text") ?: p.optJSONObject("type")?.str("text") ?: "Score",
                         awayScore = p.opt("awayScore")?.toString(),
                         homeScore = p.opt("homeScore")?.toString()
                     )

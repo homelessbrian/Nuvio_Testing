@@ -1047,6 +1047,7 @@ private fun GamePage(
                         LiveText(
                             when {
                                 sport == Sport.TENNIS -> "MATCHES"
+                                sport == Sport.FIGHTING -> if (ev.state == GameState.PRE) "FIGHT CARD" else "RESULTS"
                                 sport == Sport.GOLF -> if (ev.state == GameState.LIVE) "LEADERBOARD" else "FINAL LEADERBOARD"
                                 ev.state == GameState.LIVE -> "RUNNING ORDER"
                                 else -> "RESULTS"
