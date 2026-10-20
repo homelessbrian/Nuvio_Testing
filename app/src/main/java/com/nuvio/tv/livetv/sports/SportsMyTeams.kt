@@ -208,7 +208,8 @@ internal fun MyTeamsRows(
                     playing = playing(hero),
                     reminded = follows.reminders.any { it.eventId == hero.id },
                     modifier = Modifier.weight(1f).fillMaxHeight().focusRequester(heroReq).onFocusChanged { if (it.isFocused) onFocusKey("hero") },
-                    onStep = { d -> heroIndex = (heroAt + d).coerceIn(0, heroes.size - 1) },
+                    // Round and round: past the last game back to the first (and left from the first to the last).
+                    onStep = { d -> heroIndex = Math.floorMod(heroAt + d, heroes.size) },
                     onClick = { onOpen(hero) },
                     onLongClick = { onQuickWatch(hero) }
                 )
@@ -355,7 +356,7 @@ internal fun RowCard(
         modifier
             .width(222.dp)
             .height(96.dp)
-            .sportsFrame(focused, playing || premium, if (playing) accent else Color(0xFFFFCE54), radius = 12.dp)
+            .sportsFrame(focused, premium, Color(0xFFFFCE54), radius = 12.dp)
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -478,13 +479,13 @@ private fun HeroCard(
     val (round, place) = remember(ev.subtitle) { splitSubtitle(ev) }
     Box(
         modifier
-            .sportsFrame(focused, playing, accent, radius = 16.dp)
+            .sportsFrame(focused, false, accent, radius = 16.dp)
             .onFocusChanged { focused = it.isFocused }
             .onPreviewKeyEvent { e ->
                 if (e.type != androidx.compose.ui.input.key.KeyEventType.KeyDown) return@onPreviewKeyEvent false
                 when (e.key) {
-                    androidx.compose.ui.input.key.Key.DirectionLeft -> if (index > 0) { onStep(-1); true } else false
-                    androidx.compose.ui.input.key.Key.DirectionRight -> if (index < count - 1) { onStep(1); true } else false
+                    androidx.compose.ui.input.key.Key.DirectionLeft -> if (count > 1) { onStep(-1); true } else false
+                    androidx.compose.ui.input.key.Key.DirectionRight -> if (count > 1) { onStep(1); true } else false
                     else -> false
                 }
             }

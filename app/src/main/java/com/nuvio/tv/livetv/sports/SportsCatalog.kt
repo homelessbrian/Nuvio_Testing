@@ -95,6 +95,16 @@ object SportsCatalog {
             guideWords = listOf("Gold Cup"), regions = NA, minutes = 120, color = 0xFFB8860B, national = true),
         League("soccer/conmebol.america", Sport.FOOTBALL, "Copa América", "COPA", "soccer/conmebol.america",
             guideWords = listOf("Copa America"), regions = setOf("US", "OTHER"), minutes = 120, color = 0xFF003DA5, national = true),
+        // ---- Rugby union internationals (ESPN; national teams: following England covers all of these)
+        League("rugby/180659", Sport.RUGBY, "Six Nations", "6N", "rugby/180659",
+            guideWords = listOf("Six Nations", "6 Nations"), regions = setOf("UK", "IE", "OTHER"), minutes = 110, color = 0xFF0A2463, national = true),
+        League("rugby/289234", Sport.RUGBY, "Rugby Test Matches", "TESTS", "rugby/289234",
+            guideWords = listOf("Autumn Nations", "Nations Championship", "Summer Tour", "Rugby Union", "Test Match"),
+            regions = setOf("UK", "IE", "AU", "OTHER"), minutes = 110, color = 0xFF1B4332, national = true),
+        League("rugby/244293", Sport.RUGBY, "The Rugby Championship", "TRC", "rugby/244293",
+            guideWords = listOf("Rugby Championship"), regions = setOf("AU", "OTHER"), minutes = 110, color = 0xFF002B5C, national = true),
+        League("rugby/164205", Sport.RUGBY, "Rugby World Cup", "RWC", "rugby/164205",
+            guideWords = listOf("Rugby World Cup"), regions = setOf("UK", "IE", "AU", "US", "OTHER"), minutes = 110, color = 0xFF0B4F2E, national = true),
         // ---- Fighting
         League("mma/ufc", Sport.FIGHTING, "UFC", "UFC", "mma/ufc", LeagueKind.EVENT, guideWords = listOf("UFC"),
             regions = EVERYWHERE, minutes = 300, color = 0xFFD20A0A),
@@ -131,7 +141,7 @@ object SportsCatalog {
             regions = EVERYWHERE, minutes = 600, color = 0xFF6A1B9A),
         // ---- Found in your guide (ESPN doesn't cover these)
         League("guide/rugby-union", Sport.RUGBY, "Rugby Union", "RUGBY",
-            guideWords = listOf("Rugby Union", "Six Nations", "Premiership Rugby", "Gallagher Premiership", "URC", "Champions Cup", "Rugby World Cup", "Autumn Nations"),
+            guideWords = listOf("Rugby Union", "Premiership Rugby", "Gallagher Premiership", "URC", "Champions Cup", "Top 14", "Super Rugby"),
             regions = setOf("UK", "IE", "AU", "OTHER"), guideOnly = true, fixtureSlug = "rugby-union", kind = LeagueKind.EVENT, color = 0xFF0B4F2E),
         League("guide/rugby-league", Sport.RUGBY, "Rugby League", "RL",
             guideWords = listOf("Rugby League", "Super League", "NRL", "Challenge Cup", "State of Origin"),
@@ -180,7 +190,7 @@ object SportsCatalog {
     fun relatedLeagues(leagueId: String): List<String> {
         val l = league(leagueId) ?: return emptyList()
         val out = when {
-            l.national -> leagues.filter { it.national }.map { it.id }
+            l.national -> leagues.filter { it.national && it.sport == l.sport }.map { it.id }
             leagueId.startsWith("soccer/eng.") && !leagueId.startsWith("soccer/eng.w") ->
                 UEFA_CLUB + listOf("soccer/eng.fa", "soccer/eng.league_cup")
             leagueId in EURO_TOP -> UEFA_CLUB
@@ -196,6 +206,8 @@ object SportsCatalog {
     fun teamFamily(leagueId: String): String = when {
         leagueId.startsWith("tsdb/") -> "tsdb"
         leagueId.startsWith("soccer/") -> "soccer"
+        // ESPN's rugby competitions share team ids too (England is 1 in all of them).
+        leagueId.startsWith("rugby/") -> "rugby"
         else -> leagueId
     }
 

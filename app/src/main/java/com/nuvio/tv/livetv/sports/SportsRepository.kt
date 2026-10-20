@@ -103,7 +103,23 @@ class SportsRepository @Inject constructor(
             if (fx.hasTime) same.none { kotlin.math.abs(it.startMs - fx.startMs) <= 3 * HOUR }
             else same.none { dayOf(it.startMs) == dayOf(fx.startMs) }
         }
-        (l.values.flatMap { it.events } + w.values.flatMap { it.events } + fixtures + tsdb + guide).distinctBy { it.id }
+        val espn = l.values.flatMap { it.events } + w.values.flatMap { it.events }
+        // A match ESPN lists, found again in the guide (or a schedule file) under a guide-only
+        // league of the same sport, shows once: the ESPN one, with its score. "The same match":
+        // within 3 hours, with one of ESPN's team names in the title. Any sport, not just rugby.
+        val espnBySport = espn.filter { it.away != null && it.home != null }
+            .groupBy { SportsCatalog.league(it.leagueId)?.sport }
+        fun coveredByEspn(ev: SportsEvent): Boolean {
+            val league = SportsCatalog.league(ev.leagueId) ?: return false
+            if (league.espnPath != null) return false
+            val same = espnBySport[league.sport] ?: return false
+            val t = SportsCatalog.norm(ev.title + " " + (ev.subtitle ?: ""))
+            return same.any { r ->
+                kotlin.math.abs(r.startMs - ev.startMs) <= 3 * HOUR &&
+                    listOfNotNull(r.away, r.home).any { sd -> SportsCatalog.norm(sd.team.name).trim().let { it.length >= 3 && t.contains(it) } }
+            }
+        }
+        (espn + (fixtures + guide).filterNot(::coveredByEspn) + tsdb).distinctBy { it.id }
     }.stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -411,7 +427,7 @@ class SportsRepository @Inject constructor(
             if (cur != null && now - cur.fetchedAt < (if (force) HOUR else 6 * HOUR)) continue
             val raws = ArrayList<Pair<League, String>>()
             runCatching { feeds.teamScheduleRaw(path, t.teamId, fixtures = false) }.getOrNull()?.let { raws += l to it }
-            if (path.startsWith("soccer/")) {
+            if (path.startsWith("soccer/") || l.national) {
                 runCatching { feeds.teamScheduleRaw(path, t.teamId, fixtures = true) }.getOrNull()?.let { raws += l to it }
                 for (rid in SportsCatalog.relatedLeagues(l.id)) {
                     val rl = SportsCatalog.league(rid) ?: continue
@@ -796,7 +812,7 @@ class SportsRepository @Inject constructor(
         // ESPN lists in any of them), so England is there even between tournaments.
         if (league.national) {
             val all = LinkedHashMap<String, TeamInfo>()
-            for (l in SportsCatalog.leagues.filter { it.national }) {
+            for (l in SportsCatalog.leagues.filter { it.national && it.sport == league.sport }) {
                 leagueTeams(l).forEach { t -> all.putIfAbsent(t.id, if (l.id == league.id) t else t.copy(leagueId = league.id)) }
             }
             return@withContext all.values.sortedBy { it.fullName.lowercase(Locale.ROOT) }

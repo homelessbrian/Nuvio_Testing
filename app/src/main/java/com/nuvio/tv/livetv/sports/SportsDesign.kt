@@ -365,7 +365,7 @@ internal fun GameCard(
             .fillMaxWidth()
             .height(86.dp)
             // Big events (WrestleMania…): a gold border, same size as every other card.
-            .sportsFrame(focused, playing || premium, if (playing) accent else Color(0xFFFFCE54))
+            .sportsFrame(focused, premium, Color(0xFFFFCE54))
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -522,7 +522,7 @@ internal fun UpcomingRow(
         modifier
             .fillMaxWidth()
             .height(50.dp)
-            .sportsFrame(focused, playing, accent, radius = 12.dp)
+            .sportsFrame(focused, false, accent, radius = 12.dp)
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(
                 interactionSource = remember { MutableInteractionSource() },
@@ -785,7 +785,7 @@ internal fun SportsChannelRow(
         modifier
             .fillMaxWidth()
             .height(56.dp)
-            .sportsFrame(focused, playing, accent, radius = 12.dp, background = if (focused) Color.White else SportsLook.Card)
+            .sportsFrame(focused, false, accent, radius = 12.dp, background = if (focused) Color.White else SportsLook.Card)
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) {
@@ -797,7 +797,20 @@ internal fun SportsChannelRow(
             ) { ChannelLogo(m.channel.logo, 24.dp) }
             Spacer(Modifier.width(11.dp))
             Column(Modifier.weight(1f)) {
-                LiveText(m.channel.name, color = ink, size = 13.sp, weight = FontWeight.ExtraBold)
+                // The channel, and which of your playlists (providers) it comes from.
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LiveText(m.channel.name, modifier = Modifier.weight(1f, fill = false), color = ink, size = 13.sp, weight = FontWeight.ExtraBold, maxLines = 1)
+                    m.channel.sourceName.takeIf { it.isNotBlank() }?.let { src ->
+                        Spacer(Modifier.width(7.dp))
+                        LiveText(
+                            src,
+                            modifier = Modifier.widthIn(max = 150.dp)
+                                .background(if (focused) Color(0xFFE3E5EB) else Color.White.copy(alpha = 0.10f), RoundedCornerShape(5.dp))
+                                .padding(horizontal = 6.dp, vertical = 1.dp),
+                            color = if (focused) Color(0xFF3A3E48) else Color(0xFFC9CCD6), size = 9.sp, weight = FontWeight.Bold, maxLines = 1
+                        )
+                    }
+                }
                 val line = when {
                     focused && !m.sure -> "Guess: ${m.how}"
                     finished -> if (m.catchup) "Replay from the start" else "No replay on this channel"

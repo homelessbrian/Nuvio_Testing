@@ -115,7 +115,7 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
         fun teamLeague(l: League) = l.espnPath != null && l.kind == LeagueKind.TEAMS && !l.national
         val searchIn = (viewModel.repo.activeLeagues().filter(::teamLeague) +
             SportsCatalog.ordered(settings).filter(::teamLeague) +
-            SportsCatalog.leagues.firstOrNull { it.national }.let { listOfNotNull(it) } + SportsCatalog.extra).distinctBy { it.id }
+            SportsCatalog.leagues.filter { it.national }.distinctBy { it.sport } + SportsCatalog.extra).distinctBy { it.id }
         for (l in searchIn) {
             all += viewModel.teams(l).filter { t ->
                 listOfNotNull(t.fullName, t.name, t.location, t.abbr).any { SportsCatalog.norm(it).contains(q) }
@@ -178,6 +178,22 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                             color = colors.TextSecondary, size = 12.sp, weight = FontWeight.Bold
                         )
                         Spacer(Modifier.height(8.dp))
+                        if (results != null && results.isEmpty()) {
+                            // Not a dead end: follow the words, and any show in your guide that
+                            // mentions them turns up on My Sports.
+                            val q = query.trim()
+                            val already = follows.words.any { it.equals(q, ignoreCase = true) }
+                            LiveText(
+                                "\"$q\" isn't in the leagues we list yet. You can still follow it as a name: " +
+                                    "any show in your TV guide with \"$q\" in the title will show on My Sports.",
+                                color = colors.TextSecondary, size = 13.sp, maxLines = 3
+                            )
+                            Spacer(Modifier.height(12.dp))
+                            SportsPill(if (already) "✓ Following \"$q\"" else "★ Follow \"$q\" as a name", selected = already) {
+                                if (!already) viewModel.repo.addWord(q)
+                            }
+                            return@Column
+                        }
                         TeamGrid(results.orEmpty(), follows, viewModel, showLeague = true, modifier = Modifier.weight(1f))
                         return@Column
                     }
@@ -236,7 +252,8 @@ fun SportsPicker(viewModel: SportsViewModel, onClose: () -> Unit) {
                             teams == null -> LiveText("Getting the teams…", color = colors.TextSecondary, size = 13.sp)
                             league.national && teams.orEmpty().isNotEmpty() -> Column(Modifier.weight(1f)) {
                                 LiveText(
-                                    "Countries: follow one to see all its games, from qualifiers and the Nations League to friendlies, the World Cup and the Euros.",
+                                    if (league.sport == Sport.RUGBY) "Countries: follow one to see all its games, from the Six Nations and test matches to the World Cup."
+                                    else "Countries: follow one to see all its games, from qualifiers and the Nations League to friendlies, the World Cup and the Euros.",
                                     color = colors.TextSecondary, size = 12.sp, maxLines = 2
                                 )
                                 Spacer(Modifier.height(8.dp))

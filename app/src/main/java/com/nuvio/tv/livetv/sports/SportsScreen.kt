@@ -1334,7 +1334,7 @@ private fun ChannelPickerDialog(
         }
         LazyColumn(Modifier.heightIn(max = 330.dp).keepFocusWhileHeld(horizontal = false), verticalArrangement = Arrangement.spacedBy(2.dp)) {
             itemsIndexed(list, key = { _, ch -> ch.key }) { i, ch ->
-                ChannelLine(channel = ch, detail = ch.group, modifier = if (i == 0) Modifier.focusRequester(firstResult) else Modifier, onClick = { onPick(ch) })
+                ChannelLine(channel = ch, detail = listOf(ch.sourceName, ch.group).filter { it.isNotBlank() }.joinToString(" · "), modifier = if (i == 0) Modifier.focusRequester(firstResult) else Modifier, onClick = { onPick(ch) })
             }
         }
     }
