@@ -337,3 +337,15 @@ object SportsCatalog {
         return strong.toList() to weak.toList()
     }
 }
+
+/**
+ * A wrestling show's headline: without the promotion in front (its logo is beside it) and without
+ * the episode number. A special episode's own name wins: "Collision #168 Fright Night Collision"
+ * -> "Fright Night Collision", "RAW #1743" -> "RAW", "WWE Friday Night SmackDown" -> "Friday Night SmackDown".
+ */
+internal fun wrestlingHeadline(title: String): String {
+    val t = title.replace(Regex("""(?i)^\s*(wwe|aew|tna|njpw)\s*[:\-–]?\s*"""), "").trim()
+    val m = Regex("""^(.*?)\s*#\s*\d+\s*(.*)$""").find(t)
+    val out = if (m != null) m.groupValues[2].trim().ifBlank { m.groupValues[1].trim() } else t
+    return out.ifBlank { title }
+}

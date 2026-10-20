@@ -356,6 +356,13 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             fun ab(t: TeamInfo) = norm(t.abbr).trim().takeIf { it.length in 2..4 }
             return Terms(a, aw, b, bw, ab(away.team), ab(home.team), leagueWords, emptyList(), (a + b).distinct())
         }
+        // A wrestling show: its own name ("RAW #1743" -> "raw", "SmackDown", "NXT"), so a channel
+        // called "LIVE EVENT 01 - WWE Monday Night RAW" is found.
+        if (league?.sport == Sport.WRESTLING) {
+            val show = norm(wrestlingHeadline(ev.title)).trim()
+            val words = listOf(show).filter { it.length >= 3 }
+            if (words.isNotEmpty()) return Terms(emptyList(), emptyList(), emptyList(), emptyList(), null, null, leagueWords, words, (words + leagueWords).distinct())
+        }
         // One event (a race, a fight card, a tournament): its own words ("mexico city", "pantoja").
         val core = norm(ev.title).trim()
             .split(" vs ", " v ", " at ")

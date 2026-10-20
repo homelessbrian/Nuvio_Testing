@@ -253,7 +253,8 @@ internal class SportsFeeds {
                     away = null, home = null,
                     source = EventSource.FIXTURES,
                     endMs = end,
-                    note = if (!hasTime) "Time to be confirmed" else listOfNotNull(e.str("venue"), e.str("city")).joinToString(" · ").ifBlank { null }
+                    note = if (!hasTime) "Time to be confirmed" else listOfNotNull(e.str("venue"), e.str("city")).joinToString(" · ").ifBlank { null },
+                    about = e.str("about")
                 )
             }
             return out
@@ -442,7 +443,11 @@ internal class SportsFeeds {
                 val multiDay = end != null && end - start > 20 * 3_600_000L
                 // A tournament that runs for days: the feed says "final" once a day's play is
                 // done (tennis does every evening). It isn't over until its last day.
-                val evState = if (multiDay && state == GameState.POST && end != null && end > System.currentTimeMillis()) GameState.LIVE else state
+                // Likewise "not started" between a tournament's first day and its last (no match on
+                // yet that day): it's under way.
+                val nowMs = System.currentTimeMillis()
+                val underWay = multiDay && end != null && end > nowMs && start <= nowMs
+                val evState = if (underWay && (state == GameState.POST || state == GameState.PRE)) GameState.LIVE else state
                 return SportsEvent(
                     id = "espn:${league.id}:$espnId",
                     leagueId = league.id,

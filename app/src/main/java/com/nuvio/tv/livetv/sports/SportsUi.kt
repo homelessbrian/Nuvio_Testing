@@ -22,8 +22,12 @@ internal fun leagueColor(l: League?): Color = Color(l?.color ?: 0xFF2A2F3A)
 
 // ------------------------------------------------------------------ words for times and states
 
-internal fun startLabel(ev: SportsEvent, use24h: Boolean): String =
-    if (!ev.hasTime) "All day" else formatClock(ev.startMs, use24h)
+internal fun startLabel(ev: SportsEvent, use24h: Boolean): String = when {
+    ev.hasTime -> formatClock(ev.startMs, use24h)
+    // Several days (a tournament, a race weekend): when it begins, not "All day".
+    ev.endMs != null && ev.endMs - ev.startMs > 20 * 3_600_000L -> "Starts"
+    else -> "All day"
+}
 
 /** "in 1 h 51", "in 12 min", "Tonight", "Tomorrow". */
 internal fun untilLabel(startMs: Long, now: Long, dayEnd: Long): String {

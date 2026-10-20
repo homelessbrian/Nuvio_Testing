@@ -2292,7 +2292,12 @@ private fun GuideRow(
                 Icon(
                     imageVector = if (visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                     contentDescription = if (visible) "Shown" else "Hidden",
-                    tint = if (visible) NuvioTheme.colors.Secondary else NuvioTheme.colors.TextTertiary,
+                    // On the highlight, the highlight's text color (the accent color vanished on it).
+                    tint = when {
+                        channelFocused || nameFocused -> cell.text.copy(alpha = if (visible) 1f else 0.6f)
+                        visible -> NuvioTheme.colors.Secondary
+                        else -> NuvioTheme.colors.TextTertiary
+                    },
                     modifier = Modifier.size(gdp(18f))
                 )
             }
@@ -2872,7 +2877,11 @@ private fun GroupItem(
             Icon(
                 imageVector = if (visible) Icons.Default.Visibility else Icons.Default.VisibilityOff,
                 contentDescription = if (visible) "Shown" else "Hidden",
-                tint = if (visible) NuvioTheme.colors.Secondary else NuvioTheme.colors.TextTertiary,
+                tint = when {
+                    focused -> colors.text.copy(alpha = if (visible) 1f else 0.6f)
+                    visible -> NuvioTheme.colors.Secondary
+                    else -> NuvioTheme.colors.TextTertiary
+                },
                 modifier = Modifier.size(gdp(16f))
             )
         } else if (group.locked) {

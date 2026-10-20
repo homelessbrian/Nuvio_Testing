@@ -72,6 +72,7 @@ import com.nuvio.tv.livetv.ui.drawThemeGlow
 import com.nuvio.tv.livetv.ui.formatClock
 import com.nuvio.tv.ui.theme.NuvioTheme
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -431,6 +432,15 @@ private fun SportsHub(
     var contentJump by remember { mutableIntStateOf(0) }
     val pickChip: (String) -> Unit = { c -> onChip(c); contentJump++ }
     val dayTabReqs = remember { HashMap<Int, FocusRequester>() }
+    // The day tabs' row: kept so the day you're on is on screen whenever the row isn't in use
+    // (Up from the buttons below goes to it; a day scrolled off the row can't be reached).
+    val tabsState = rememberLazyListState(initialFirstVisibleItemIndex = SportsRepository.DAYS_BACK - 1)
+    val tabsScope = androidx.compose.runtime.rememberCoroutineScope()
+    fun showPickedDay() {
+        val i = (day + SportsRepository.DAYS_BACK - 1).coerceAtLeast(0)
+        tabsScope.launch { runCatching { tabsState.animateScrollToItem(i) } }
+    }
+    LaunchedEffect(day) { showPickedDay() }
     fun dayTabReq(offset: Int) = dayTabReqs.getOrPut(offset) { FocusRequester() }
     val effectiveChip = when {
         // League buttons and Live were folded into My Teams' rows and All Events: saved ones go home.
@@ -460,7 +470,10 @@ private fun SportsHub(
                     finished in dayStart until dayEnd
                 }
                 ev.hasTime -> ev.startMs in dayStart until dayEnd
-                else -> ev.startMs < dayEnd && (ev.endMs ?: (ev.startMs + 1)) >= dayStart
+                // A tournament or race weekend still to come: on the day it starts only.
+                ev.state == GameState.PRE -> ev.startMs in dayStart until dayEnd
+                // One under way: today and the days ahead it still runs (not the days before today).
+                else -> dayEnd > now && ev.startMs < dayEnd && (ev.endMs ?: (ev.startMs + 1)) >= dayStart
             }
             ev.leagueId in active && onDay &&
                 (!filterToChannels || ev.state == GameState.POST || isMine(ev, follows) || matches[ev.id]?.isNotEmpty() == true)
@@ -540,9 +553,10 @@ private fun SportsHub(
             } else {
                 // A week back to a week ahead; opens on Yesterday and Today, and scrolls.
                 val dayFmt = remember { SimpleDateFormat("EEE d", Locale.getDefault()) }
-                val tabsState = rememberLazyListState(initialFirstVisibleItemIndex = SportsRepository.DAYS_BACK - 1)
                 LazyRow(
-                    Modifier.weight(1f).keepFocusWhileHeld(vertical = false),
+                    Modifier.weight(1f)
+                        .onFocusChanged { if (!it.hasFocus) showPickedDay() }
+                        .keepFocusWhileHeld(vertical = false),
                     state = tabsState,
                     horizontalArrangement = Arrangement.spacedBy(4.dp),
                     verticalAlignment = Alignment.CenterVertically,
@@ -564,7 +578,9 @@ private fun SportsHub(
     val filters: @Composable (Modifier) -> Unit = { m ->
         LazyRow(m.keepFocusWhileHeld(vertical = false), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
             // ↑ from the filters on All Events: the day you're looking at (on screen: it's the one picked).
-            val upTo = if (!rowsPage) Modifier.focusProperties { up = dayTabReq(day) } else Modifier
+            val upTo = if (!rowsPage) Modifier.focusProperties {
+                up = if (tabsState.layoutInfo.visibleItemsInfo.any { it.key == day }) dayTabReq(day) else FocusRequester.Default
+            } else Modifier
             item(key = CHIP_MINE) { FilterIcon("★", "My Sports", effectiveChip == CHIP_MINE, Modifier.focusRequester(firstChip).then(upTo), withLabel = true) { pickChip(CHIP_MINE) } }
             // Everything on, day by day (live games first), with how many are on now.
             item(key = CHIP_ALL) {
@@ -656,7 +672,8 @@ private fun SportsHub(
 
     Box(Modifier.fillMaxSize()) {
     if (videoOn) {
-        Row(Modifier.fillMaxSize().padding(start = 56.dp, end = 28.dp, top = 20.dp)) {
+        // Stops above the hint line at the bottom, so no game sits behind it.
+        Row(Modifier.fillMaxSize().padding(start = 56.dp, end = 28.dp, top = 20.dp, bottom = 26.dp)) {
             Column(Modifier.width(LIST_WIDTH).fillMaxHeight()) {
                 header(Modifier.fillMaxWidth())
                 Spacer(Modifier.height(8.dp))
@@ -671,7 +688,7 @@ private fun SportsHub(
             }
         }
     } else {
-        Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 36.dp, top = 20.dp)) {
+        Column(Modifier.fillMaxSize().padding(start = 56.dp, end = 36.dp, top = 20.dp, bottom = 26.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 header(Modifier.weight(1f))
                 filters(Modifier.width(470.dp))
@@ -717,9 +734,11 @@ private fun GameList(
     fun playing(ev: SportsEvent) = playingKey != null && matches[ev.id]?.any { it.channel.key == playingKey } == true
     LazyColumn(
         state = listState,
-        modifier = modifier.keepFocusWhileHeld(),
+        // Nothing to the right of the list (the video window isn't a button): Right stays put
+        // instead of jumping up to the day tabs.
+        modifier = modifier.keepFocusWhileHeld(neverRight = true),
         // Room for the highlight's glow and bigger size at the edges.
-        contentPadding = PaddingValues(start = 8.dp, end = 10.dp, top = 2.dp, bottom = 56.dp),
+        contentPadding = PaddingValues(start = 8.dp, end = 10.dp, top = 2.dp, bottom = 12.dp),
         verticalArrangement = Arrangement.spacedBy(8.dp)
     ) {
         if (!hasChannels) item(key = "nochannels") {
@@ -1074,6 +1093,11 @@ private fun GamePage(
                         color = SportsLook.Dim, size = 12.sp, maxLines = 2
                     )
                     else -> LiveText(ev.note ?: ev.subtitle ?: league?.name.orEmpty(), color = SportsLook.Dim, size = 12.sp, maxLines = 3)
+                }
+                // What the show or event is (wrestling: from TheSportsDB).
+                ev.about?.let {
+                    Spacer(Modifier.height(6.dp))
+                    LiveText(it, color = Color.White.copy(alpha = 0.85f), size = 12.sp, maxLines = 5)
                 }
             }
         }

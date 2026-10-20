@@ -141,6 +141,15 @@ internal fun LeagueMark(league: League?, size: Dp) {
             model = logo, contentDescription = league?.name, contentScale = ContentScale.Fit,
             modifier = Modifier.size(size)
         )
+        // A wrestling promotion without an approved logo (AEW, TNA): its name in its colour,
+        // lettering only (like the NXT tile), rather than the sport's symbol.
+        league != null && league.sport == Sport.WRESTLING && league.short.length <= 4 -> Box(
+            Modifier.size(size).clip(RoundedCornerShape(size * 0.22f)).background(leagueColor(league))
+                .border(1.dp, Color.White.copy(alpha = 0.25f), RoundedCornerShape(size * 0.22f)),
+            contentAlignment = Alignment.Center
+        ) {
+            LiveText(league.short.take(4), color = Color.White, size = (size.value * (if (league.short.length > 3) 0.24f else 0.3f)).coerceAtLeast(6f).sp, weight = FontWeight.Black)
+        }
         league == null || league.guideOnly -> Box(
             Modifier.size(size).clip(RoundedCornerShape(size * 0.25f)).background(Color.White.copy(alpha = 0.06f)),
             contentAlignment = Alignment.Center
@@ -406,17 +415,6 @@ private val PREMIUM_EVENTS = listOf(
     "halloween havoc", "wargames", "dynasty", "great american bash", "stand and deliver", "vengeance day"
 )
 
-/**
- * A wrestling show's headline: without the promotion in front (its logo is beside it) and without
- * the episode number. A special episode's own name wins: "Collision #168 Fright Night Collision"
- * -> "Fright Night Collision", "RAW #1743" -> "RAW", "WWE Friday Night SmackDown" -> "Friday Night SmackDown".
- */
-internal fun wrestlingHeadline(title: String): String {
-    val t = title.replace(Regex("""(?i)^\s*(wwe|aew|tna|njpw)\s*[:\-–]?\s*"""), "").trim()
-    val m = Regex("""^(.*?)\s*#\s*\d+\s*(.*)$""").find(t)
-    val out = if (m != null) m.groupValues[2].trim().ifBlank { m.groupValues[1].trim() } else t
-    return out.ifBlank { title }
-}
 
 /**
  * Wrestling shows in their own colours (just colours, no logos): Raw red, SmackDown blue, NXT
@@ -879,7 +877,7 @@ internal fun Modifier.steadyRowKeys(
  * A single press still moves out, as usual. [horizontal] / [vertical]: which directions it holds.
  */
 @Composable
-internal fun Modifier.keepFocusWhileHeld(horizontal: Boolean = true, vertical: Boolean = true): Modifier {
+internal fun Modifier.keepFocusWhileHeld(horizontal: Boolean = true, vertical: Boolean = true, neverRight: Boolean = false): Modifier {
     val held = remember { BooleanArray(1) }
     return this
         .onPreviewKeyEvent { e ->
@@ -894,7 +892,9 @@ internal fun Modifier.keepFocusWhileHeld(horizontal: Boolean = true, vertical: B
                 val d = requestedFocusDirection
                 val sideways = d == androidx.compose.ui.focus.FocusDirection.Left || d == androidx.compose.ui.focus.FocusDirection.Right
                 val upDown = d == androidx.compose.ui.focus.FocusDirection.Up || d == androidx.compose.ui.focus.FocusDirection.Down
-                if (held[0] && ((horizontal && sideways) || (vertical && upDown))) cancelFocusChange()
+                // [neverRight]: nothing belongs to the right (a list beside the video window).
+                if (neverRight && d == androidx.compose.ui.focus.FocusDirection.Right) cancelFocusChange()
+                else if (held[0] && ((horizontal && sideways) || (vertical && upDown))) cancelFocusChange()
             }
         }
         .focusGroup()

@@ -134,7 +134,9 @@ data class SportsEvent(
     /** A name you follow that this show mentions ("Luke Littler"). */
     val word: String? = null,
     /** A race's finishing (or running) order, a golf leaderboard: position, name, detail. */
-    val standings: List<Standing> = emptyList()
+    val standings: List<Standing> = emptyList(),
+    /** A few lines about the event (wrestling shows, from TheSportsDB). */
+    val about: String? = null
 ) {
     val sides: List<Side> get() = listOfNotNull(away, home)
     val hasScore: Boolean get() = (state == GameState.LIVE || state == GameState.POST) && sides.size == 2 && sides.all { !it.score.isNullOrBlank() }
