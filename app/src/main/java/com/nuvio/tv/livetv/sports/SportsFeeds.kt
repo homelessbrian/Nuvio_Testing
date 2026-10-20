@@ -440,12 +440,15 @@ internal class SportsFeeds {
 
             if (league.kind == LeagueKind.EVENT) {
                 val multiDay = end != null && end - start > 20 * 3_600_000L
+                // A tournament that runs for days: the feed says "final" once a day's play is
+                // done (tennis does every evening). It isn't over until its last day.
+                val evState = if (multiDay && state == GameState.POST && end != null && end > System.currentTimeMillis()) GameState.LIVE else state
                 return SportsEvent(
                     id = "espn:${league.id}:$espnId",
                     leagueId = league.id,
                     startMs = start,
                     hasTime = !multiDay,
-                    state = state,
+                    state = evState,
                     title = ev.str("name") ?: ev.str("shortName") ?: league.name,
                     subtitle = listOfNotNull(headline, venue).joinToString(" · ").ifBlank { null },
                     status = status,
@@ -454,7 +457,7 @@ internal class SportsFeeds {
                     espnId = espnId,
                     endMs = end,
                     note = if (multiDay && end != null) "Until " + SimpleDateFormat("EEE d MMM", Locale.getDefault()).format(java.util.Date(end)) else null,
-                    standings = if (state == GameState.PRE) emptyList() else runCatching { standingsOf(ev) }.getOrDefault(emptyList())
+                    standings = runCatching { if (league.sport == Sport.TENNIS) matchesOf(ev) else if (state == GameState.PRE) emptyList() else standingsOf(ev) }.getOrDefault(emptyList())
                 )
             }
 
@@ -554,6 +557,67 @@ internal class SportsFeeds {
                 order to Standing(order.toString(), name, score)
             }
             return rows.sortedBy { it.first }.map { it.second }.take(20)
+        }
+
+        /**
+         * A tennis tournament's matches (the feed groups them by draw: men's singles, women's…):
+         * the ones on now, then today's results, then the next ones. "Sinner def. Rune", "6-4 6-3".
+         */
+        private fun matchesOf(ev: JSONObject): List<Standing> {
+            val comps = ArrayList<JSONObject>()
+            ev.optJSONArray("groupings")?.let { g ->
+                for (i in 0 until g.length()) {
+                    val cs = g.optJSONObject(i)?.optJSONArray("competitions") ?: continue
+                    for (j in 0 until cs.length()) cs.optJSONObject(j)?.let { comps += it }
+                }
+            }
+            ev.optJSONArray("competitions")?.let { cs -> for (j in 0 until cs.length()) cs.optJSONObject(j)?.let { comps += it } }
+            class M(val state: String, val at: Long, val line: Standing)
+            val now = System.currentTimeMillis()
+            val all = comps.mapNotNull { c ->
+                val cos = c.optJSONArray("competitors") ?: return@mapNotNull null
+                if (cos.length() != 2) return@mapNotNull null
+                fun name(co: JSONObject?) = co?.optJSONObject("athlete")?.let { it.str("shortName") ?: it.str("displayName") }
+                    ?: co?.optJSONObject("team")?.str("displayName")
+                val a = cos.optJSONObject(0)
+                val b = cos.optJSONObject(1)
+                val an = name(a) ?: return@mapNotNull null
+                val bn = name(b) ?: return@mapNotNull null
+                val st = c.optJSONObject("status")?.optJSONObject("type")
+                val state = st?.str("state") ?: "pre"
+                val at = parseIso(c.str("date") ?: c.str("startDate")) ?: 0L
+                fun sets(x: JSONObject?) = x?.optJSONArray("linescores")?.let { ls ->
+                    (0 until ls.length()).mapNotNull { k -> ls.optJSONObject(k)?.optDouble("value", Double.NaN)?.takeIf { !it.isNaN() }?.toInt() }
+                }.orEmpty()
+                val aw = a?.optBoolean("winner", false) == true
+                val bw = b?.optBoolean("winner", false) == true
+                // The winner first: "Sinner def. Rune 6-4 6-3".
+                val first = if (bw) bn else an
+                val second = if (bw) an else bn
+                val fs = if (bw) sets(b) else sets(a)
+                val ss = if (bw) sets(a) else sets(b)
+                val score = fs.zip(ss).joinToString(" ") { (x, y) -> "$x-$y" }
+                val round = (c.optJSONObject("round")?.str("displayName") ?: c.optJSONObject("type")?.str("abbreviation"))?.let { r ->
+                    // Short, for the narrow column: "Quarterfinal" -> "QF", "Round of 16" -> "R16".
+                    when {
+                        r.contains("quarter", true) -> "QF"
+                        r.contains("semi", true) -> "SF"
+                        r.equals("final", true) || r.equals("finals", true) -> "F"
+                        Regex("""(\d+)""").find(r) != null && r.length > 4 -> "R" + Regex("""(\d+)""").find(r)!!.value
+                        else -> r.take(4)
+                    }
+                }
+                val line = when (state) {
+                    "post" -> Standing(round.orEmpty(), if (aw || bw) "$first def. $second" else "$first v $second", score.ifBlank { st?.str("shortDetail") })
+                    "in" -> Standing("LIVE", "$an v $bn", score.ifBlank { st?.str("shortDetail") })
+                    else -> Standing(round.orEmpty(), "$an v $bn", if (at > 0) SimpleDateFormat("EEE", Locale.getDefault()).format(java.util.Date(at)) + " " + java.text.DateFormat.getTimeInstance(java.text.DateFormat.SHORT).format(java.util.Date(at)) else null)
+                }
+                M(state, at, line)
+            }
+            val live = all.filter { it.state == "in" }
+            val done = all.filter { it.state == "post" && now - it.at < 30 * 3_600_000L }.sortedByDescending { it.at }
+            val next = all.filter { it.state == "pre" && it.at >= now - 3_600_000L }.sortedBy { it.at }
+            return (live + done + next).map { it.line }.take(12)
         }
 
         /** How far through the game the clock is (0..1), from the period and the clock. */

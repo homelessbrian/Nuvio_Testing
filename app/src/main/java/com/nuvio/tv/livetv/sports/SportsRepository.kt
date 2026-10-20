@@ -826,18 +826,20 @@ class SportsRepository @Inject constructor(
         return list
     }
 
-    private val playsCache = HashMap<String, Pair<Long, List<ScoringPlay>>>()
+    /** Event id -> when asked, the score then, the plays. A new score asks again straight away. */
+    private val playsCache = HashMap<String, Triple<Long, String, List<ScoringPlay>>>()
 
     /** The game's scoring plays (touchdowns, goals…), when ESPN has them. */
     suspend fun scoringPlays(ev: SportsEvent): List<ScoringPlay> = withContext(Dispatchers.IO) {
         val league = SportsCatalog.league(ev.leagueId) ?: return@withContext emptyList()
         val id = ev.espnId ?: return@withContext emptyList()
         if (ev.state == GameState.PRE || league.kind != LeagueKind.TEAMS) return@withContext emptyList()
-        synchronized(playsCache) { playsCache[ev.id] }?.let { (at, list) ->
-            if (System.currentTimeMillis() - at < (if (ev.state == GameState.LIVE) 30_000 else 30 * MINUTE)) return@withContext list
+        val sig = "${ev.away?.score}-${ev.home?.score}-${ev.state}"
+        synchronized(playsCache) { playsCache[ev.id] }?.let { (at, was, list) ->
+            if (was == sig && System.currentTimeMillis() - at < (if (ev.state == GameState.LIVE) 25_000 else 30 * MINUTE)) return@withContext list
         }
-        val list = runCatching { feeds.summary(league, id) }.getOrNull() ?: return@withContext synchronized(playsCache) { playsCache[ev.id]?.second }.orEmpty()
-        synchronized(playsCache) { playsCache[ev.id] = System.currentTimeMillis() to list }
+        val list = runCatching { feeds.summary(league, id) }.getOrNull() ?: return@withContext synchronized(playsCache) { playsCache[ev.id]?.third }.orEmpty()
+        synchronized(playsCache) { playsCache[ev.id] = Triple(System.currentTimeMillis(), sig, list) }
         list
     }
 

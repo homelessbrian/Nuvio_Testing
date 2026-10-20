@@ -430,7 +430,8 @@ private fun SportsHub(
     // now), My Sports' big card.
     var contentJump by remember { mutableIntStateOf(0) }
     val pickChip: (String) -> Unit = { c -> onChip(c); contentJump++ }
-    val todayTab = remember { FocusRequester() }
+    val dayTabReqs = remember { HashMap<Int, FocusRequester>() }
+    fun dayTabReq(offset: Int) = dayTabReqs.getOrPut(offset) { FocusRequester() }
     val effectiveChip = when {
         // League buttons and Live were folded into My Teams' rows and All Events: saved ones go home.
         pinnedChip != null || chip == CHIP_LIVE -> if (follows.isEmpty) CHIP_ALL else CHIP_MINE
@@ -554,7 +555,7 @@ private fun SportsHub(
                             1 -> "Tomorrow"
                             else -> dayFmt.format(Date(viewModel.repo.dayStart(offset) + 12 * 3_600_000L))
                         }
-                        DayTab(label, selected = day == offset, modifier = if (offset == 0) Modifier.focusRequester(todayTab) else Modifier, onClick = { onDay(offset); focusedOnce = true })
+                        DayTab(label, selected = day == offset, modifier = Modifier.focusRequester(dayTabReq(offset)), onClick = { onDay(offset); focusedOnce = true })
                     }
                 }
             }
@@ -562,8 +563,8 @@ private fun SportsHub(
     }
     val filters: @Composable (Modifier) -> Unit = { m ->
         LazyRow(m.keepFocusWhileHeld(vertical = false), horizontalArrangement = Arrangement.spacedBy(7.dp), verticalAlignment = Alignment.CenterVertically, contentPadding = PaddingValues(horizontal = 4.dp, vertical = 4.dp)) {
-            // ↑ from the filters on All Events: the day tabs (Today).
-            val upTo = if (!rowsPage) Modifier.focusProperties { up = todayTab } else Modifier
+            // ↑ from the filters on All Events: the day you're looking at (on screen: it's the one picked).
+            val upTo = if (!rowsPage) Modifier.focusProperties { up = dayTabReq(day) } else Modifier
             item(key = CHIP_MINE) { FilterIcon("★", "My Sports", effectiveChip == CHIP_MINE, Modifier.focusRequester(firstChip).then(upTo), withLabel = true) { pickChip(CHIP_MINE) } }
             // Everything on, day by day (live games first), with how many are on now.
             item(key = CHIP_ALL) {
@@ -840,10 +841,7 @@ private fun NowPlayingPanel(
     }
     ScoreboardStrip(ev, settings.hideScores, now, use24h, height = 88.dp)
     Spacer(Modifier.height(8.dp))
-    var plays by remember(ev.id) { mutableStateOf<List<ScoringPlay>>(emptyList()) }
-    LaunchedEffect(ev.id, ev.away?.score, ev.home?.score) {
-        if (!settings.hideScores && ev.hasScore) plays = viewModel.plays(ev)
-    }
+    val plays = rememberScoringPlays(ev, settings.hideScores, viewModel)
     val sport = SportsCatalog.league(ev.leagueId)?.sport ?: Sport.OTHER
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         Column(Modifier.weight(1f).sportsFrame(false, accent = NuvioTheme.colors.Secondary).padding(horizontal = 11.dp, vertical = 9.dp)) {
@@ -957,11 +955,7 @@ private fun GamePage(
     val showScore = ev.hasScore && !settings.hideScores
     val first = remember(ev.id) { FocusRequester() }
     val firstAction = remember(ev.id) { FocusRequester() }
-    var plays by remember(ev.id) { mutableStateOf<List<ScoringPlay>>(emptyList()) }
-    LaunchedEffect(ev.id, ev.state, ev.away?.score, ev.home?.score) {
-        if (settings.hideScores) return@LaunchedEffect
-        plays = viewModel.plays(ev)
-    }
+    val plays = rememberScoringPlays(ev, settings.hideScores, viewModel)
     LaunchedEffect(ev.id) {
         delay(120)
         runCatching { if (matches.isNotEmpty()) first.requestFocus() else firstAction.requestFocus() }
@@ -1052,6 +1046,7 @@ private fun GamePage(
                         // A race's finishing order (running order while it's on), a golf leaderboard.
                         LiveText(
                             when {
+                                sport == Sport.TENNIS -> "MATCHES"
                                 sport == Sport.GOLF -> if (ev.state == GameState.LIVE) "LEADERBOARD" else "FINAL LEADERBOARD"
                                 ev.state == GameState.LIVE -> "RUNNING ORDER"
                                 else -> "RESULTS"
@@ -1332,3 +1327,24 @@ private class DaySections(
     val finished: List<SportsEvent>,
     val liveCount: Int
 )
+
+/**
+ * A game's scoring plays, kept up to date: asked again when the score changes, and every 30
+ * seconds while it's on. (ESPN's play list can lag a little behind the score, so asking only
+ * when the score changed could leave the newest goal out until the next one.)
+ */
+@Composable
+private fun rememberScoringPlays(ev: SportsEvent, hideScores: Boolean, viewModel: SportsViewModel): List<ScoringPlay> {
+    var plays by remember(ev.id) { mutableStateOf<List<ScoringPlay>>(emptyList()) }
+    val latest = androidx.compose.runtime.rememberUpdatedState(ev)
+    LaunchedEffect(ev.id, ev.state, ev.away?.score, ev.home?.score, hideScores) {
+        if (hideScores) return@LaunchedEffect
+        while (true) {
+            val e = latest.value
+            if (e.state != GameState.PRE) plays = viewModel.plays(e)
+            if (e.state != GameState.LIVE) break
+            delay(30_000)
+        }
+    }
+    return plays
+}

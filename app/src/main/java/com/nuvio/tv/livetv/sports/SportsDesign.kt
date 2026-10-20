@@ -386,7 +386,7 @@ internal fun GameCard(
                         )
                     }
                 } else {
-                    EventBand(ev, league, sport, Modifier.fillMaxSize())
+                    EventBand(ev, league, sport, Modifier.fillMaxSize(), scroll = focused)
                 }
             }
             StatusColumn(ev, playing, now, use24h, hideScores, Modifier.width(118.dp))
@@ -452,7 +452,7 @@ internal fun eventLook(ev: SportsEvent, league: League?): EventLook {
  * team bands, so cards always line up.
  */
 @Composable
-internal fun EventBand(ev: SportsEvent, league: League?, sport: Sport, modifier: Modifier = Modifier, big: Boolean = false) {
+internal fun EventBand(ev: SportsEvent, league: League?, sport: Sport, modifier: Modifier = Modifier, big: Boolean = false, scroll: Boolean = big) {
     val look = eventLook(ev, league)
     val c = bandColor(look.color)
     val gold = Color(0xFFFFCE54)
@@ -481,7 +481,8 @@ internal fun EventBand(ev: SportsEvent, league: League?, sport: Sport, modifier:
                 )
                 Spacer(Modifier.height(2.dp))
             }
-            LiveText(look.headline, color = look.text, size = if (big) 28.sp else 19.sp, weight = FontWeight.Black, maxLines = 1)
+            // A long name scrolls (on the highlighted card, and on the game page) so all of it can be read.
+            LiveText(look.headline, color = look.text, size = if (big) 28.sp else 19.sp, weight = FontWeight.Black, maxLines = 1, marquee = scroll)
             (ev.note ?: ev.word?.let { "Mentions $it" } ?: ev.subtitle)?.let {
                 OneLine(it, Color.White.copy(alpha = 0.72f), if (big) 13.sp else 10.sp)
             }
@@ -549,7 +550,7 @@ internal fun UpcomingRow(
         } else {
             LiveText(sport.icon, size = 15.sp)
             Spacer(Modifier.width(8.dp))
-            LiveText(ev.title, color = Color.White, size = 12.sp, weight = FontWeight.ExtraBold, modifier = Modifier.weight(1f))
+            LiveText(ev.title, color = Color.White, size = 12.sp, weight = FontWeight.ExtraBold, modifier = Modifier.weight(1f), marquee = focused)
         }
         if (reminded) {
             LiveText("🔔", size = 12.sp, modifier = Modifier.padding(horizontal = 6.dp))

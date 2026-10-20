@@ -394,7 +394,7 @@ internal fun RowCard(
             ) {
                 Column {
                     look.label?.let { LiveText(it, color = if (premium) Color(0xFFFFCE54) else Color.White.copy(alpha = 0.7f), size = 7.sp, weight = FontWeight.Black) }
-                    LiveText(look.headline, color = look.text, size = 15.sp, weight = FontWeight.Black, maxLines = 1)
+                    LiveText(look.headline, color = look.text, size = 15.sp, weight = FontWeight.Black, maxLines = 1, marquee = focused)
                 }
             }
         }
@@ -548,7 +548,7 @@ private fun HeroCard(
                 }
             } else if (look != null) {
                 look.label?.let { LiveText(it, color = if (look.premium) Color(0xFFFFCE54) else Color.White.copy(alpha = 0.75f), size = 10.sp, weight = FontWeight.Black) }
-                LiveText(look.headline, color = look.text, size = 30.sp, weight = FontWeight.Black, maxLines = 1)
+                LiveText(look.headline, color = look.text, size = 30.sp, weight = FontWeight.Black, maxLines = 1, marquee = focused)
             }
             Spacer(Modifier.weight(1f))
             Row(verticalAlignment = Alignment.CenterVertically) {

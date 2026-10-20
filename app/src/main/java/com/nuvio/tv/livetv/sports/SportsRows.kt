@@ -104,7 +104,8 @@ internal object SportsRows {
             rows += timeline("w:$w", "“$w”", SportsRow.Kind.WORD, games, now)
         }
 
-        val heroes = soon.filter { it.state == GameState.LIVE || (it.state == GameState.PRE && it.startMs >= now - HOUR) }.take(8)
+        // The big card: games and events at a set time (not a week-long tournament).
+        val heroes = soon.filter { it.hasTime && (it.state == GameState.LIVE || (it.state == GameState.PRE && it.startMs >= now - HOUR)) }.take(8)
         // Your order (Arrange My Sports); Live & Upcoming always first.
         val rank = rowKeys(follows).withIndex().associate { (i, k) -> k to i }
         val sorted = rows.filter { it.kind == SportsRow.Kind.UPCOMING } +
