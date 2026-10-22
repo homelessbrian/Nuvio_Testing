@@ -1059,7 +1059,7 @@ internal fun SportsPill(
     selected: Boolean = false,
     @Suppress("UNUSED_PARAMETER") small: Boolean = false,
     onClick: () -> Unit
-) = SportsAction(text, modifier, selected, onClick)
+) = SportsAction(text, modifier, selected, onClick = onClick)
 
 // ------------------------------------------------------------------ the game page
 
