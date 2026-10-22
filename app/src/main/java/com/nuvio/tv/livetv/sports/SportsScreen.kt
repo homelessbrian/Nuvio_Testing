@@ -1,3 +1,5 @@
+@file:OptIn(androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+
 package com.nuvio.tv.livetv.sports
 
 import androidx.activity.compose.BackHandler
@@ -73,6 +75,11 @@ import com.nuvio.tv.livetv.ui.formatClock
 import com.nuvio.tv.ui.theme.NuvioTheme
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
@@ -120,6 +127,8 @@ private const val CHIP_ALL = "all"
 private const val CHIP_LEAGUE = "lg:"
 /** A sport you follow: My Teams' rows for that sport only ("sp:" + the sport's name). */
 private const val CHIP_SPORT = "sp:"
+/** Tables: your leagues' tables (see SportsTables). */
+private const val CHIP_TABLES = "tables"
 
 /** Width of the game list next to the video window. */
 private val LIST_WIDTH = 470.dp
@@ -160,6 +169,8 @@ fun SportsScreen(
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
     var picker by rememberSaveable { mutableStateOf(false) }
     var fixFor by remember { mutableStateOf<SportsEvent?>(null) }
+    // A league's whole table, opened from a game page (Back goes back to the game).
+    var tableReq by remember { mutableStateOf<TableRequest?>(null) }
     // Back from a game (or Pick Your Teams): the highlight goes back to where you were.
     val requesters = remember { HashMap<String, FocusRequester>() }
     fun requesterFor(id: String) = requesters.getOrPut(id) { FocusRequester() }
@@ -242,11 +253,44 @@ fun SportsScreen(
         }
     }
 
+    // Hold Back: full screen on what's playing in the window (like Live TV's guide). Nothing
+    // playing: Back works as usual.
+    val hostActivity = androidx.compose.ui.platform.LocalContext.current as? com.nuvio.tv.MainActivity
+    var backStartedHere by remember { mutableStateOf(false) }
+    fun backToFullscreen() {
+        val key = playingKey ?: return
+        events.firstOrNull { ev -> matches[ev.id]?.any { it.channel.key == key } == true }?.let { SportsLaunch.openedFromSports(it.id) }
+        onOpenLive()
+    }
     Box(
         Modifier
             .fillMaxSize()
             .background(NuvioTheme.colors.Background)
             .onGloballyPositioned { root = it.boundsInRoot() }
+            .onPreviewKeyEvent { e ->
+                if (e.key != Key.Back) return@onPreviewKeyEvent false
+                val native = e.nativeKeyEvent
+                val canGo = videoOn && playingKey != null && playingNow
+                when {
+                    e.type == KeyEventType.KeyDown && native.repeatCount == 0 && !native.isLongPress -> { backStartedHere = true; false }
+                    // Remotes that repeat a held button: go while it's still held.
+                    e.type == KeyEventType.KeyDown -> {
+                        if (!backStartedHere || !canGo) return@onPreviewKeyEvent false
+                        backStartedHere = false
+                        // The rest of this press is swallowed (letting go isn't also a Back).
+                        hostActivity?.longPressBackHeld?.value = true
+                        backToFullscreen()
+                        true
+                    }
+                    // Remotes that don't repeat: held half a second or more, judged on release.
+                    e.type == KeyEventType.KeyUp -> {
+                        val started = backStartedHere
+                        backStartedHere = false
+                        if (started && canGo && native.eventTime - native.downTime >= 500) { backToFullscreen(); true } else false
+                    }
+                    else -> false
+                }
+            }
     ) {
         // The same soft glow in the theme colour as the top of the guide.
         ThemeGlow(Modifier.fillMaxWidth().height(SPORTS_GLOW_HEIGHT))
@@ -254,6 +298,29 @@ fun SportsScreen(
         if (openId != null && opened == null && known.isNotEmpty()) openId = null
         when {
             picker -> SportsPicker(viewModel = viewModel, onClose = { picker = false; returnTo = null; rowsReturning = false; viewModel.repo.markSetUp() })
+            tableReq != null -> {
+                BackHandler { tableReq = null }
+                TablesPage(
+                    viewModel = viewModel,
+                    follows = follows,
+                    settings = settings,
+                    now = now,
+                    use24h = use24h,
+                    videoOn = videoOn,
+                    videoSlot = videoSlot,
+                    header = {
+                        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 2.dp)) {
+                            LiveText("‹  " + (opened?.title ?: "Sports"), color = SportsLook.Dim, size = 12.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f, fill = false))
+                            Spacer(Modifier.width(10.dp))
+                            LiveText("Tables", size = 22.sp, weight = FontWeight.Black)
+                        }
+                    },
+                    request = tableReq,
+                    focusTable = true,
+                    onOpen = { ev -> tableReq = null; openId = ev.id },
+                    onQuickWatch = ::quickWatch
+                )
+            }
             opened != null -> GamePage(
                 ev = opened,
                 matches = matches[opened.id].orEmpty(),
@@ -270,6 +337,9 @@ fun SportsScreen(
                 onChoose = { m -> choose(opened, m) },
                 onFromStart = { m -> fromStart(opened, m) },
                 onFix = { fixFor = opened },
+                onTable = { tableReq = TableRequest(opened.leagueId, opened.sides.map { it.team.id }.toSet()) },
+                onOpenGame = { ev -> openId = ev.id },
+                onQuickWatch = ::quickWatch,
                 onClose = { returnTo = opened.id; rowsReturning = true; openId = null }
             )
             else -> SportsHub(
@@ -589,6 +659,8 @@ private fun SportsHub(
                     effectiveChip == CHIP_ALL, upTo, withLabel = true
                 ) { pickChip(CHIP_ALL) }
             }
+            // Your leagues' tables.
+            item(key = CHIP_TABLES) { FilterIcon("🏆", "Tables", effectiveChip == CHIP_TABLES, upTo, withLabel = true) { pickChip(CHIP_TABLES) } }
             // Sports you follow: My Teams for that sport only.
             if (followedSports.size > 1) {
                 item(key = "sep1") { ChipGap() }
@@ -623,6 +695,39 @@ private fun SportsHub(
         )
     }
 
+    // Where your teams stand ("2nd in Premier League", by their rows' names): their leagues' tables.
+    val tables by viewModel.repo.standings.collectAsStateWithLifecycle()
+    LaunchedEffect(follows.teams, settings.hideScores) { if (!settings.hideScores) viewModel.repo.loadTeamTables() }
+    val places = remember(tables, follows, settings.hideScores) {
+        if (settings.hideScores) emptyMap()
+        else follows.teams.mapNotNull { t -> tables[t.leagueId]?.placeText(t.teamId)?.let { t.key to it } }.toMap()
+    }
+
+    // ---- Tables: your leagues' tables
+    if (effectiveChip == CHIP_TABLES) {
+        TablesPage(
+            viewModel = viewModel,
+            follows = follows,
+            settings = settings,
+            now = now,
+            use24h = use24h,
+            videoOn = videoOn,
+            videoSlot = videoSlot,
+            header = {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    LiveText("Sports", size = 26.sp, weight = FontWeight.Black)
+                    Spacer(Modifier.width(14.dp))
+                    filters(Modifier.weight(1f))
+                }
+            },
+            request = null,
+            focusTable = false,
+            onOpen = onOpen,
+            onQuickWatch = onQuickWatch
+        )
+        return
+    }
+
     // ---- My Teams: rows (the next big game, Live & Upcoming, a row per team and league)
     if (rowsPage) {
         val minute = now / 60_000L
@@ -630,6 +735,7 @@ private fun SportsHub(
         Box(Modifier.fillMaxSize()) {
             MyTeamsRows(
                 page = page,
+                places = places,
                 sport = rowsSport,
                 follows = follows,
                 settings = settings,
@@ -890,7 +996,16 @@ private fun NowPlayingPanel(
 
 /** A game's two bands with the status column: the info under the video, the top of the game page. */
 @Composable
-private fun ScoreboardStrip(ev: SportsEvent, hideScores: Boolean, now: Long, use24h: Boolean, height: androidx.compose.ui.unit.Dp, big: Boolean = false) {
+private fun ScoreboardStrip(
+    ev: SportsEvent,
+    hideScores: Boolean,
+    now: Long,
+    use24h: Boolean,
+    height: androidx.compose.ui.unit.Dp,
+    big: Boolean = false,
+    /** The teams can be highlighted: OK on one opens its card. */
+    onTeam: ((Side) -> Unit)? = null
+) {
     val league = SportsCatalog.league(ev.leagueId)
     val sport = league?.sport ?: Sport.OTHER
     val sides = ev.ordered(sport)
@@ -903,7 +1018,7 @@ private fun ScoreboardStrip(ev: SportsEvent, hideScores: Boolean, now: Long, use
                 sides.forEach { s ->
                     TeamBand(
                         side = s, showScore = showScore, dim = showScore && !tied && s != lead, followed = false,
-                        modifier = Modifier.weight(1f),
+                        modifier = Modifier.weight(1f).then(if (onTeam != null) Modifier.teamSelectable { onTeam(s) } else Modifier),
                         logo = if (big) 44.dp else 30.dp, name = if (big) 19.sp else 13.sp, score = if (big) 34.sp else 22.sp,
                         extra = listOfNotNull(s.record, if (s.home) "Home" else "Away").joinToString(" · ")
                     )
@@ -965,14 +1080,39 @@ private fun GamePage(
     onChoose: (ChannelMatch) -> Unit,
     onFromStart: (ChannelMatch) -> Unit,
     onFix: () -> Unit,
+    /** OK on the Table panel: the league's whole table. */
+    onTable: () -> Unit,
+    /** A game picked on a team's card. */
+    onOpenGame: (SportsEvent) -> Unit,
+    onQuickWatch: (SportsEvent) -> Unit,
     onClose: () -> Unit
 ) {
     BackHandler(onBack = onClose)
+    // A team's card: Up to the teams at the top, OK on one.
+    var cardTeam by remember(ev.id) { mutableStateOf<TeamInfo?>(null) }
+    cardTeam?.let { t ->
+        TeamCard(
+            team = t, row = null, table = null, viewModel = viewModel, follows = follows, settings = settings,
+            now = now, use24h = use24h,
+            onOpen = { g -> cardTeam = null; if (g.id != ev.id) onOpenGame(g) },
+            onWatch = { g -> cardTeam = null; onQuickWatch(g) },
+            onDismiss = { cardTeam = null }
+        )
+    }
     val league = SportsCatalog.league(ev.leagueId)
     val sport = league?.sport ?: Sport.OTHER
     val sides = ev.ordered(sport)
     val showScore = ev.hasScore && !settings.hideScores
     val first = remember(ev.id) { FocusRequester() }
+    var askRecord by remember(ev.id) { mutableStateOf(false) }
+    if (askRecord) {
+        val pad by viewModel.recordPadding.collectAsStateWithLifecycle()
+        RecordDialog(
+            ev = ev, matches = matches, padding = pad, use24h = use24h, hideScores = settings.hideScores,
+            onRecord = { m, minutes -> askRecord = false; LiveTvNotice.show(viewModel.record(ev, m, minutes)) },
+            onDismiss = { askRecord = false }
+        )
+    }
     val firstAction = remember(ev.id) { FocusRequester() }
     val plays = rememberScoringPlays(ev, settings.hideScores, viewModel)
     LaunchedEffect(ev.id) {
@@ -986,7 +1126,7 @@ private fun GamePage(
             Spacer(Modifier.width(10.dp))
             LiveText(listOfNotNull(league?.name, ev.subtitle?.takeIf { sides.size == 2 }).joinToString(" · "), color = SportsLook.Dim, size = 12.sp)
         }
-        ScoreboardStrip(ev, settings.hideScores, now, use24h, height = if (sides.size == 2) 124.dp else 100.dp, big = true)
+        ScoreboardStrip(ev, settings.hideScores, now, use24h, height = if (sides.size == 2) 124.dp else 100.dp, big = true, onTeam = { cardTeam = it.team })
     }
     val channels: @Composable () -> Unit = {
         SectionHeader("WATCH ON YOUR CHANNELS")
@@ -1011,33 +1151,67 @@ private fun GamePage(
             }
             matching -> LiveText("Looking through your channels…", color = SportsLook.Dim, size = 12.sp)
             !hasChannels -> LiveText("Add a playlist in Live TV settings to watch from here.", color = SportsLook.Dim, size = 12.sp)
+            // Too far off to have been looked for yet: say when it will be.
+            ev.startMs - System.currentTimeMillis() > SportsMatcher.AHEAD_MS -> LiveText(
+                "Your channels are checked for this game from " +
+                    java.text.SimpleDateFormat(if (use24h) "EEE HH:mm" else "EEE h:mm a", java.util.Locale.getDefault())
+                        .format(java.util.Date(ev.startMs - SportsMatcher.AHEAD_MS)) +
+                    ". Know where it's on? Pick a channel now and it's remembered.",
+                color = SportsLook.Dim, size = 12.sp, maxLines = 3
+            )
             else -> LiveText(
-                "Not found in your channels yet. If you know where it's on, pick the channel with Fix Channel and it's remembered.",
+                "Not in your channels' guides right now. Guides update during the day, so check back closer to the start. " +
+                    "Know where it's on? Pick a channel and it's remembered.",
                 color = SportsLook.Dim, size = 12.sp, maxLines = 3
             )
         }
         Spacer(Modifier.height(10.dp))
-        LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)) {
+        // Wraps onto a second line instead of running off the side.
+        androidx.compose.foundation.layout.FlowRow(
+            Modifier.fillMaxWidth().padding(horizontal = 6.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(8.dp),
+            verticalArrangement = Arrangement.spacedBy(8.dp)
+        ) {
             var firstSet = false
             fun f(): Modifier = if (!firstSet) { firstSet = true; Modifier.focusRequester(firstAction) } else Modifier
             val replay = matches.firstOrNull { it.catchup }
             if (replay != null && (ev.state == GameState.LIVE || ev.state == GameState.POST)) {
                 val m = f()
-                item { SportsAction("⏮  From the start", modifier = m, onClick = { onFromStart(replay) }) }
+                run { SportsAction("⏮  From the start", modifier = m, onClick = { onFromStart(replay) }) }
             }
             if (ev.state == GameState.PRE && ev.hasTime) {
                 val m = f()
-                item {
+                run {
                     val on = follows.reminders.any { it.eventId == ev.id }
                     SportsAction(if (on) "🔔  Reminder set" else "🔔  Remind me", modifier = m, selected = on, onClick = {
                         viewModel.repo.toggleReminder(ev)
                         LiveTvNotice.show(if (on) "Reminder cancelled" else "We'll remind you before it starts")
                     })
                 }
+                // With a reminder: switch to the game by itself just before it starts.
+                if (follows.reminders.any { it.eventId == ev.id }) {
+                    run {
+                        val auto = follows.reminders.firstOrNull { it.eventId == ev.id }?.autoSwitch ?: settings.autoSwitch
+                        SportsAction(if (auto) "⏩  Switches automatically" else "⏩  Switch automatically", selected = auto, onClick = {
+                            viewModel.repo.setAutoSwitch(ev, !auto)
+                            LiveTvNotice.show(if (auto) "It'll ask before switching" else "It'll switch to the game a minute before it starts")
+                        })
+                    }
+                }
+            }
+            // Record: pick the channel and how long.
+            if (ev.hasTime && (ev.state == GameState.PRE || ev.state == GameState.LIVE) && matches.isNotEmpty()) {
+                val m = f()
+                run {
+                    val rec = isRecording(ev)
+                    SportsAction(if (rec) "Recording set" else "Record", modifier = m, selected = rec, dot = Color(0xFFE53935), onClick = {
+                        if (rec) { viewModel.cancelRecording(ev); LiveTvNotice.show("Recording cancelled") } else askRecord = true
+                    })
+                }
             }
             sides.forEach { side ->
                 val m = f()
-                item(key = "follow_" + side.team.id) {
+                run {
                     val following = follows.followsTeam(ev.leagueId, side.team.id)
                     SportsAction(
                         if (following) "★  ${side.team.name}" else "☆  Follow ${side.team.name}",
@@ -1047,7 +1221,7 @@ private fun GamePage(
                 }
             }
             val m = f()
-            item { SportsAction(if (matches.isEmpty()) "Pick a channel" else "Fix channel", modifier = m, onClick = onFix) }
+            run { SportsAction(if (matches.isEmpty()) "Pick a channel" else "Fix channel", modifier = m, onClick = onFix) }
         }
     }
     val details: @Composable () -> Unit = {
@@ -1105,18 +1279,24 @@ private fun GamePage(
         }
     }
 
+    // More about the game, in the space under it all (see SportsGameExtras).
+    val extras = rememberGameExtras(ev, viewModel)
+    val panels = gameExtrasPanels(ev, extras, settings, onTable = onTable)
     if (videoOn) {
+        // Two under the channels, the third under the video and the score.
         Row(Modifier.fillMaxSize().padding(start = 56.dp, end = 28.dp, top = 20.dp)) {
             Column(Modifier.width(LIST_WIDTH).fillMaxHeight()) {
                 top()
                 Spacer(Modifier.height(4.dp))
                 channels()
+                ExtrasRow(panels.take(2), Modifier.weight(1f).fillMaxWidth().padding(start = 6.dp, top = 8.dp, bottom = 14.dp))
             }
             Spacer(Modifier.width(18.dp))
             Column(Modifier.weight(1f).fillMaxHeight().padding(top = 4.dp)) {
                 videoSlot(Modifier.fillMaxWidth().aspectRatio(16f / 9f))
                 Spacer(Modifier.height(10.dp))
                 details()
+                ExtrasRow(panels.drop(2), Modifier.weight(1f).fillMaxWidth().padding(top = 8.dp, bottom = 14.dp))
             }
         }
     } else {
@@ -1128,6 +1308,8 @@ private fun GamePage(
                 Spacer(Modifier.width(24.dp))
                 Column(Modifier.weight(1f).padding(top = 12.dp)) { details() }
             }
+            // All of them in one row across the bottom.
+            ExtrasRow(panels, Modifier.weight(1f).fillMaxWidth().padding(start = 6.dp, top = 10.dp, bottom = 14.dp))
         }
     }
 }

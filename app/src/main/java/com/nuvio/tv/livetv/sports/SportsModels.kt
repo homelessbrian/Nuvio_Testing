@@ -20,10 +20,12 @@ enum class Sport(val label: String, val icon: String) {
     CRICKET("Cricket", "🏏"),
     DARTS("Darts", "🎯"),
     SNOOKER("Snooker", "🎱"),
-    WRESTLING("Wrestling", "🤼"),
+    WRESTLING("Wrestling", "💪"),
     AUSSIE_RULES("Aussie Rules", "🏉"),
     VOLLEYBALL("Volleyball", "🏐"),
     LACROSSE("Lacrosse", "🥍"),
+    GAELIC("Gaelic Games", "☘️"),
+    NETBALL("Netball", "🤾"),
     OTHER("More Sports", "🏅");
 
     /** Home team first with "v" (UK style) instead of away team first with "at" (US style). */
@@ -177,6 +179,8 @@ data class SportsSettings(
     val remindMyTeams: Boolean = true,
     /** Minutes before the start (0 = at the start). */
     val remindMinutes: Int = 15,
+    /** When a reminder goes off: switch to the game by itself, about a minute before it starts. */
+    val autoSwitch: Boolean = false,
     val scoringAlerts: Boolean = false,
     /** Leave out games none of your channels show (games of teams you follow always show). */
     val onlyOnMyChannels: Boolean = false,
@@ -201,6 +205,7 @@ data class SportsSettings(
         .put("bestChannelFirst", bestChannelFirst)
         .put("remindMyTeams", remindMyTeams)
         .put("remindMinutes", remindMinutes)
+        .put("autoSwitch", autoSwitch)
         .put("scoringAlerts", scoringAlerts)
         .put("onlyMyChannels", onlyOnMyChannels)
         .put("videoWindow", videoWindow)
@@ -225,6 +230,7 @@ data class SportsSettings(
                     bestChannelFirst = o.optBoolean("bestChannelFirst", d.bestChannelFirst),
                     remindMyTeams = o.optBoolean("remindMyTeams", d.remindMyTeams),
                     remindMinutes = o.optInt("remindMinutes", d.remindMinutes),
+                    autoSwitch = o.optBoolean("autoSwitch", d.autoSwitch),
                     scoringAlerts = o.optBoolean("scoringAlerts", d.scoringAlerts),
                     // Saved under a new name: the old one was on for everyone by default, so it starts off.
                     onlyOnMyChannels = o.optBoolean("onlyMyChannels", d.onlyOnMyChannels),
@@ -253,7 +259,8 @@ data class FollowedTeam(
 }
 
 /** "Remind me" on a game. */
-data class SportsReminder(val eventId: String, val title: String, val startMs: Long)
+/** [autoSwitch]: switch to the game when it starts (null: as Sports settings say). */
+data class SportsReminder(val eventId: String, val title: String, val startMs: Long, val autoSwitch: Boolean? = null)
 
 data class SportsFollows(
     val teams: List<FollowedTeam> = emptyList(),
@@ -303,7 +310,7 @@ data class SportsFollows(
         .put("leagues", JSONArray(leagues.toList()))
         .put("words", JSONArray(words))
         .put("reminders", JSONArray().also { a ->
-            reminders.forEach { r -> a.put(JSONObject().put("e", r.eventId).put("t", r.title).put("s", r.startMs)) }
+            reminders.forEach { r -> a.put(JSONObject().put("e", r.eventId).put("t", r.title).put("s", r.startMs).also { o -> r.autoSwitch?.let { o.put("a", it) } }) }
         })
         .put("setUp", setUp)
         .put("pins", JSONArray(pins))
@@ -330,7 +337,7 @@ data class SportsFollows(
                 val reminders = o.optJSONArray("reminders")?.let { a ->
                     (0 until a.length()).mapNotNull { i ->
                         val r = a.optJSONObject(i) ?: return@mapNotNull null
-                        SportsReminder(r.optString("e"), r.optString("t"), r.optLong("s"))
+                        SportsReminder(r.optString("e"), r.optString("t"), r.optLong("s"), if (r.has("a")) r.optBoolean("a") else null)
                     }
                 }.orEmpty()
                 SportsFollows(

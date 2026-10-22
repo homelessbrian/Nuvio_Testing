@@ -1280,58 +1280,60 @@ open class MainActivity : ComponentActivity() {
                             hasSelectedProfileThisSession = false
                         }
                         Box(modifier = Modifier.fillMaxSize()) {
-                            if (modernSidebarEnabled) {
-                                ModernSidebarScaffold(
-                                    longPressBackHeld = longPressBackHeld,
-                                    navController = navController,
-                                    startDestination = startDestination,
-                                    currentRoute = currentRoute,
-                                    rootRoutes = rootRoutes,
-                                    drawerItems = drawerItems,
-                                    selectedDrawerRoute = selectedDrawerRoute,
-                                    selectedDrawerItem = selectedDrawerItem,
-                                    sidebarCollapsed = sidebarCollapsed,
-                                    modernSidebarBlurEnabled = modernSidebarBlurEnabled,
-                                    hideBuiltInHeaders = hideBuiltInHeadersForFloatingPill,
-                                    activeProfileName = activeProfile?.name ?: "",
-                                    activeProfileColorHex = activeProfile?.avatarColorHex ?: "#1E88E5",
-                                    activeProfileAvatarImageUrl = activeProfileAvatarImageUrl,
-                                    showProfileSelector = profiles.size > 1,
-                                    onSwitchProfile = handleSwitchProfile,
-                                    onNavigate = { optimisticRoute = it },
-                                    onExitApp = handleExitApp,
-                                    onToggleLiveTvGroup = { liveTvGroupOpen = !liveTvGroupOpen },
-                                    onSidebarExpandedChange = { expanded ->
-                                        sidebarOpenNow = expanded
-                                        // Closed: ready for next time (unchanged when opening).
-                                        if (!expanded) liveTvGroupOpen = false
-                                    }
-                                )
-                            } else {
-                                LegacySidebarScaffold(
-                                    longPressBackHeld = longPressBackHeld,
-                                    navController = navController,
-                                    startDestination = startDestination,
-                                    currentRoute = currentRoute,
-                                    rootRoutes = rootRoutes,
-                                    drawerItems = drawerItems,
-                                    selectedDrawerRoute = selectedDrawerRoute,
-                                    sidebarCollapsed = sidebarCollapsed,
-                                    hideBuiltInHeaders = false,
-                                    activeProfileName = activeProfile?.name ?: "",
-                                    activeProfileColorHex = activeProfile?.avatarColorHex ?: "#1E88E5",
-                                    activeProfileAvatarImageUrl = activeProfileAvatarImageUrl,
-                                    showProfileSelector = profiles.size > 1,
-                                    onSwitchProfile = handleSwitchProfile,
-                                    onNavigate = { optimisticRoute = it },
-                                    onExitApp = handleExitApp,
-                                    onToggleLiveTvGroup = { liveTvGroupOpen = !liveTvGroupOpen },
-                                    onSidebarExpandedChange = { expanded ->
-                                        sidebarOpenNow = expanded
-                                        // Closed: ready for next time (unchanged when opening).
-                                        if (!expanded) liveTvGroupOpen = false
-                                    }
-                                )
+                            CompositionLocalProvider(LocalNavViewModelStoreOwner provides navViewModelStoreOwner) {
+                                if (modernSidebarEnabled) {
+                                    ModernSidebarScaffold(
+                                        longPressBackHeld = longPressBackHeld,
+                                        navController = navController,
+                                        startDestination = startDestination,
+                                        currentRoute = currentRoute,
+                                        rootRoutes = rootRoutes,
+                                        drawerItems = drawerItems,
+                                        selectedDrawerRoute = selectedDrawerRoute,
+                                        selectedDrawerItem = selectedDrawerItem,
+                                        sidebarCollapsed = sidebarCollapsed,
+                                        modernSidebarBlurEnabled = modernSidebarBlurEnabled,
+                                        hideBuiltInHeaders = hideBuiltInHeadersForFloatingPill,
+                                        activeProfileName = activeProfile?.name ?: "",
+                                        activeProfileColorHex = activeProfile?.avatarColorHex ?: "#1E88E5",
+                                        activeProfileAvatarImageUrl = activeProfileAvatarImageUrl,
+                                        showProfileSelector = profiles.size > 1,
+                                        onSwitchProfile = handleSwitchProfile,
+                                        onNavigate = { optimisticRoute = it },
+                                        onExitApp = handleExitApp,
+                                        onToggleLiveTvGroup = { liveTvGroupOpen = !liveTvGroupOpen },
+                                        onSidebarExpandedChange = { expanded ->
+                                            sidebarOpenNow = expanded
+                                            // Closed: ready for next time (unchanged when opening).
+                                            if (!expanded) liveTvGroupOpen = false
+                                        }
+                                    )
+                                } else {
+                                    LegacySidebarScaffold(
+                                        longPressBackHeld = longPressBackHeld,
+                                        navController = navController,
+                                        startDestination = startDestination,
+                                        currentRoute = currentRoute,
+                                        rootRoutes = rootRoutes,
+                                        drawerItems = drawerItems,
+                                        selectedDrawerRoute = selectedDrawerRoute,
+                                        sidebarCollapsed = sidebarCollapsed,
+                                        hideBuiltInHeaders = false,
+                                        activeProfileName = activeProfile?.name ?: "",
+                                        activeProfileColorHex = activeProfile?.avatarColorHex ?: "#1E88E5",
+                                        activeProfileAvatarImageUrl = activeProfileAvatarImageUrl,
+                                        showProfileSelector = profiles.size > 1,
+                                        onSwitchProfile = handleSwitchProfile,
+                                        onNavigate = { optimisticRoute = it },
+                                        onExitApp = handleExitApp,
+                                        onToggleLiveTvGroup = { liveTvGroupOpen = !liveTvGroupOpen },
+                                        onSidebarExpandedChange = { expanded ->
+                                            sidebarOpenNow = expanded
+                                            // Closed: ready for next time (unchanged when opening).
+                                            if (!expanded) liveTvGroupOpen = false
+                                        }
+                                    )
+                                }
                             }
 
                             val autoNextOverlay by externalPlaybackTracker.autoNextOverlay.collectAsState()
@@ -1877,8 +1879,10 @@ private fun LegacySidebarScaffold(
                             showSidebar &&
                             drawerState.currentValue == DrawerValue.Closed &&
                             currentRoute in rootRoutes &&
-                            // Live TV fork: in the guide, holding Back returns to full screen.
+                            // Live TV fork: in the guide and on Sports, holding Back returns to
+                            // full screen (Sports opens the menu itself when nothing's playing).
                             currentRoute != Screen.LiveTv.route &&
+                            currentRoute != Screen.Sports.route &&
                             keyEvent.nativeKeyEvent.isLongPress
                         ) {
                             if (!longPressBackHeld.value) {
@@ -2324,8 +2328,10 @@ private fun ModernSidebarScaffold(
                             !isSidebarExpanded &&
                             !sidebarCollapsePending &&
                             currentRoute in rootRoutes &&
-                            // Live TV fork: in the guide, holding Back returns to full screen.
+                            // Live TV fork: in the guide and on Sports, holding Back returns to
+                            // full screen (Sports opens the menu itself when nothing's playing).
                             currentRoute != Screen.LiveTv.route &&
+                            currentRoute != Screen.Sports.route &&
                             keyEvent.nativeKeyEvent.isLongPress
                         ) {
                             if (!longPressBackHeld.value) {

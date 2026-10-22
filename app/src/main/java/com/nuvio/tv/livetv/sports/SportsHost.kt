@@ -96,6 +96,24 @@ fun SportsHost(navController: NavController) {
 
     // ---- reminders
     var due by remember { mutableStateOf<Pair<SportsEvent, String>?>(null) }
+    // Switch automatically: the game and channel to switch to, and the countdown showing.
+    var armed by remember { mutableStateOf<Pair<SportsEvent, ChannelMatch>?>(null) }
+    var countdown by remember { mutableStateOf<Pair<SportsEvent, ChannelMatch>?>(null) }
+    fun switchNow(ev: SportsEvent, m: ChannelMatch) {
+        armed = null; countdown = null; due = null
+        repo.dropReminder(ev.id)
+        entry.sportsPlayback().play(m.channel)
+        openLiveTvFullscreen(navController)
+    }
+    // A minute before the start: ten seconds' warning (Cancel stops it), then the switch.
+    LaunchedEffect(armed) {
+        val (ev, m) = armed ?: return@LaunchedEffect
+        val at = maxOf(ev.startMs - 60_000L, System.currentTimeMillis() + 10_000L)
+        delay((at - 10_000L - System.currentTimeMillis()).coerceAtLeast(0L))
+        if (armed?.first?.id != ev.id) return@LaunchedEffect
+        due = null
+        countdown = ev to m
+    }
     val shown = remember { HashSet<String>() }
     LaunchedEffect(Unit) {
         while (true) {
@@ -123,6 +141,9 @@ fun SportsHost(navController: NavController) {
             }
             if (next != null) {
                 shown += next.id
+                // Switches by itself (this game's choice, or the setting) to a channel we're sure of.
+                val best = repo.bestChannel(next.id)?.takeIf { it.sure }
+                if (best != null && repo.switchesFor(next)) armed = next to best
                 val mins = ((next.startMs - now) / 60_000L).toInt()
                 due = next to when {
                     mins <= 0 -> "Starting now"
@@ -137,19 +158,26 @@ fun SportsHost(navController: NavController) {
             }
         }
     }
+    countdown?.let { (ev, m) ->
+        SwitchCountdown(
+            ev = ev, match = m,
+            onSwitch = { switchNow(ev, m) },
+            onCancel = { armed = null; countdown = null; repo.dropReminder(ev.id) }
+        )
+    }
     due?.let { (ev, heading) ->
+        val switching = armed?.takeIf { it.first.id == ev.id }
         ReminderDialog(
             ev = ev,
             heading = heading,
             best = repo.bestChannel(ev.id),
-            onWatch = { m ->
-                due = null
-                repo.dropReminder(ev.id)
-                entry.sportsPlayback().play(m.channel)
-                openLiveTvFullscreen(navController)
-            },
+            switchingTo = switching?.second,
+            switchAt = switching?.let { maxOf(ev.startMs - 60_000L, System.currentTimeMillis() + 10_000L) },
+            onDontSwitch = { armed = null },
+            onWatch = { m -> switchNow(ev, m) },
             onOpen = {
                 due = null
+                armed = null
                 repo.dropReminder(ev.id)
                 SportsLaunch.openEvent(ev.id)
                 navController.navigate(Screen.Sports.route) {
@@ -159,7 +187,8 @@ fun SportsHost(navController: NavController) {
             },
             onDismiss = {
                 due = null
-                repo.dropReminder(ev.id)
+                // Still switching (closing the message doesn't cancel that): keep the reminder until then.
+                if (armed?.first?.id != ev.id) repo.dropReminder(ev.id)
             }
         )
     }
@@ -187,12 +216,16 @@ private fun ReminderDialog(
     ev: SportsEvent,
     heading: String,
     best: ChannelMatch?,
+    switchingTo: ChannelMatch? = null,
+    switchAt: Long? = null,
+    onDontSwitch: () -> Unit = {},
     onWatch: (ChannelMatch) -> Unit,
     onOpen: () -> Unit,
     onDismiss: () -> Unit
 ) {
     val first = remember(ev.id) { FocusRequester() }
     LaunchedEffect(ev.id) { delay(120_000); onDismiss() }
+    val use24h = android.text.format.DateFormat.is24HourFormat(LocalContext.current)
     SportsDialog(onDismiss = onDismiss, width = 480.dp, header = { GameHeaderBands(ev, hideScores = true) }) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             SportsBadge(heading.uppercase(), NuvioTheme.colors.Secondary, NuvioTheme.colors.OnSecondary)
@@ -202,11 +235,43 @@ private fun ReminderDialog(
                 color = SportsLook.Dim, size = 12.sp
             )
         }
+        if (switchingTo != null && switchAt != null) {
+            Spacer(Modifier.height(6.dp))
+            LiveText(
+                "Switches to ${switchingTo.channel.name} by itself at ${com.nuvio.tv.livetv.ui.formatClock(switchAt, use24h)}.",
+                color = Color.White, size = 13.sp
+            )
+        }
         Spacer(Modifier.height(10.dp))
         Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-            if (best != null) SportsMenuRow("Watch on ${best.channel.name}", Modifier.focusRequester(first)) { onWatch(best) }
+            if (best != null) SportsMenuRow("Watch on ${best.channel.name}" + if (switchingTo != null) " now" else "", Modifier.focusRequester(first)) { onWatch(best) }
+            if (switchingTo != null) SportsMenuRow("Don't switch to it") { onDontSwitch(); onDismiss() }
             SportsMenuRow("Open in Sports", if (best == null) Modifier.focusRequester(first) else Modifier) { onOpen() }
-            SportsMenuRow("Dismiss") { onDismiss() }
+            SportsMenuRow(if (switchingTo != null) "Close (it still switches)" else "Dismiss") { onDismiss() }
+        }
+    }
+    LaunchedEffect(ev.id) { delay(80); runCatching { first.requestFocus() } }
+}
+
+/** Ten seconds before switching to the game: Switch now, or Cancel. */
+@Composable
+private fun SwitchCountdown(ev: SportsEvent, match: ChannelMatch, onSwitch: () -> Unit, onCancel: () -> Unit) {
+    var left by remember(ev.id) { mutableStateOf(10) }
+    val first = remember(ev.id) { FocusRequester() }
+    LaunchedEffect(ev.id) {
+        while (left > 0) { delay(1_000); left-- }
+        onSwitch()
+    }
+    SportsDialog(onDismiss = onCancel, width = 480.dp, header = { GameHeaderBands(ev, hideScores = true) }) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SportsBadge("SWITCHING IN $left", NuvioTheme.colors.Secondary, NuvioTheme.colors.OnSecondary)
+            Spacer(Modifier.width(8.dp))
+            LiveText(match.channel.name, color = SportsLook.Dim, size = 12.sp)
+        }
+        Spacer(Modifier.height(10.dp))
+        Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+            SportsMenuRow("Switch now", Modifier.focusRequester(first)) { onSwitch() }
+            SportsMenuRow("Cancel") { onCancel() }
         }
     }
     LaunchedEffect(ev.id) { delay(80); runCatching { first.requestFocus() } }

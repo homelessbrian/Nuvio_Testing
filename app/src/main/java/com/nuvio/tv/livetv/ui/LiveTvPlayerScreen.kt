@@ -310,6 +310,24 @@ fun LiveTvPlayerScreen(
                 }
                 val archive = playback.catchupTitle != null
                 val shifting = shiftStartedAt != null
+                // ---- the remote's Fast Forward and Rewind: 30 seconds on (or back) in catch-up
+                // and in Rewind Anytime, wherever the highlight is.
+                val mediaCode = e.nativeKeyEvent.keyCode
+                if (mediaCode == AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD || mediaCode == AndroidKeyEvent.KEYCODE_MEDIA_REWIND ||
+                    mediaCode == AndroidKeyEvent.KEYCODE_MEDIA_SKIP_FORWARD || mediaCode == AndroidKeyEvent.KEYCODE_MEDIA_SKIP_BACKWARD
+                ) {
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent true
+                    val forward = mediaCode == AndroidKeyEvent.KEYCODE_MEDIA_FAST_FORWARD || mediaCode == AndroidKeyEvent.KEYCODE_MEDIA_SKIP_FORWARD
+                    when {
+                        // Each press 30 seconds; held, faster (as with ◀ / ▶).
+                        archive -> scrub(forward = forward, repeat = e.nativeKeyEvent.repeatCount)
+                        shifting && viewModel.playback.shiftCanSeek() -> {
+                            viewModel.playback.shiftSeekBy(if (forward) 30_000L else -30_000L); showBanner()
+                        }
+                        else -> Unit
+                    }
+                    return@onPreviewKeyEvent true
+                }
                 // ---- the Recent row (Down from the panel's buttons)
                 val rf = recentFocus
                 if (rf != null && controlFocus != null) {

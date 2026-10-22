@@ -23,7 +23,8 @@ class SportsViewModel @Inject constructor(
     val repo: SportsRepository,
     private val playback: LiveTvPlaybackController,
     private val livePrefs: LiveTvPreferences,
-    liveRepo: LiveTvRepository
+    liveRepo: LiveTvRepository,
+    private val recordings: com.nuvio.tv.livetv.record.LiveTvRecordingScheduler
 ) : ViewModel() {
     val settings = repo.settings
     val follows = repo.follows
@@ -45,7 +46,13 @@ class SportsViewModel @Inject constructor(
     private val _now = MutableStateFlow(System.currentTimeMillis())
     val now: StateFlow<Long> = _now
 
+    /** Live TV's "record early" and "record late" minutes (Settings → Live TV → Recordings). */
+    val recordPadding: StateFlow<Pair<Int, Int>> = livePrefs.settings.map { it.recordPreMinutes to it.recordPostMinutes }
+        .distinctUntilChanged()
+        .stateIn(viewModelScope, SharingStarted.Eagerly, 2 to 5)
+
     init {
+        viewModelScope.launch { recordings.schedules.collect { SportsRecordings.update(it) } }
         repo.start()
         viewModelScope.launch {
             while (true) {
@@ -109,6 +116,29 @@ class SportsViewModel @Inject constructor(
         return !f.setUp && f.isEmpty
     }
 
+    /**
+     * Records [ev] on [m]'s channel: from 5 minutes before the start (or Live TV's own "record
+     * early", if that's more) for [minutes] from the start, plus Live TV's "record late".
+     * Returns the message to show.
+     */
+    fun record(ev: SportsEvent, m: ChannelMatch, minutes: Int): String {
+        val pre = recordPadding.value.first * 60_000L
+        val extraEarly = (SportsRecordings.EARLY_MS - pre).coerceAtLeast(0L)
+        val league = SportsCatalog.league(ev.leagueId)
+        val program = EpgProgram(
+            startMs = ev.startMs - extraEarly,
+            stopMs = ev.startMs + minutes * 60_000L,
+            title = ev.title,
+            description = listOfNotNull(league?.name, ev.subtitle).joinToString(" · ").ifBlank { null }
+        )
+        return recordings.add(m.channel, program)
+    }
+
+    fun cancelRecording(ev: SportsEvent) {
+        SportsRecordings.forEvent(ev)?.let { recordings.cancel(it.id) }
+    }
+
     suspend fun teams(league: League): List<TeamInfo> = repo.teams(league)
     suspend fun plays(ev: SportsEvent): List<ScoringPlay> = repo.scoringPlays(ev)
+    suspend fun extras(ev: SportsEvent): GameExtras? = repo.gameExtras(ev)
 }

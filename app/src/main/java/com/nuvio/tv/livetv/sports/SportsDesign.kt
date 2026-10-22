@@ -293,6 +293,12 @@ internal fun StateBadge(ev: SportsEvent, playing: Boolean, use24h: Boolean) {
         ev.state == GameState.LIVE -> SportsBadge("● LIVE", SportsLook.Live, Color.White)
         ev.state == GameState.POST -> SportsBadge("FINAL", Color.White.copy(alpha = 0.12f), Color.White)
         ev.state == GameState.OFF -> SportsBadge((ev.status ?: "POSTPONED").uppercase(), Color(0x33FF8A80), Color(0xFFFF8A80))
+        // Set to record: the start time, and REC under it.
+        isRecording(ev) -> Column(horizontalAlignment = Alignment.End) {
+            SportsBadge(startLabel(ev, use24h), Color.White.copy(alpha = 0.10f), Color.White)
+            Spacer(Modifier.height(3.dp))
+            RecBadge()
+        }
         else -> SportsBadge(startLabel(ev, use24h), Color.White.copy(alpha = 0.10f), Color.White)
     }
 }
@@ -665,10 +671,29 @@ internal fun SportsAction(
     text: String,
     modifier: Modifier = Modifier,
     selected: Boolean = false,
+    /** A coloured dot before the text (Record's red one). */
+    dot: Color? = null,
     onClick: () -> Unit
 ) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
+    if (dot != null) {
+        Row(
+            modifier
+                .clip(shape)
+                .background(if (focused) Color.White else if (selected) Color.White.copy(alpha = 0.14f) else SportsLook.Card)
+                .border(1.dp, if (focused) Color.White else if (selected) Color.White.copy(alpha = 0.35f) else SportsLook.Border, shape)
+                .onFocusChanged { focused = it.isFocused }
+                .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+                .padding(horizontal = 14.dp, vertical = 7.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            Box(Modifier.size(10.dp).clip(RoundedCornerShape(50)).background(dot))
+            Spacer(Modifier.width(7.dp))
+            LiveText(text, color = if (focused) SportsLook.Ink else Color.White, size = 12.sp, weight = FontWeight.ExtraBold)
+        }
+        return
+    }
     LiveText(
         text,
         modifier = modifier

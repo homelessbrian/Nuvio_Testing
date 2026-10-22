@@ -61,8 +61,13 @@ internal class SportsFeeds {
     fun teamScheduleRaw(leaguePath: String, teamId: String, fixtures: Boolean): String =
         get("$ESPN$leaguePath/teams/$teamId/schedule" + if (fixtures) "?fixture=true" else "")
 
-    fun summary(league: League, espnId: String): List<ScoringPlay> =
-        parseSummary(JSONObject(get("$ESPN${league.espnPath}/summary?event=$espnId")))
+    fun summary(league: League, espnId: String): List<ScoringPlay> = parseSummary(summaryJson(league, espnId))
+
+    /** A game's whole summary (scoring, stats, leaders, standings, venue…). */
+    fun summaryJson(league: League, espnId: String): JSONObject = JSONObject(get("$ESPN${league.espnPath}/summary?event=$espnId"))
+
+    /** A league table (ESPN's standings address, see [Standings.espnUrl]). */
+    fun standingsRaw(url: String): String = get(url)
 
     // ------------------------------------------------------------------ sporting-events.org
 
@@ -111,9 +116,15 @@ internal class SportsFeeds {
                 val o = arr.optJSONObject(i) ?: continue
                 val tid = o.str("id") ?: continue
                 val name = o.str("name") ?: continue
+                // Other sports from the same files (rugby league, cricket…): the sport, where it's
+                // watched, how guides name it and how long a game runs come with the league.
+                val sport = o.str("sport")?.let { s -> Sport.entries.firstOrNull { it.name == s } } ?: Sport.FOOTBALL
+                val words = o.optJSONArray("words")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } } }.orEmpty()
+                val regions = o.optJSONArray("regions")?.let { a -> (0 until a.length()).mapNotNull { a.optString(it).ifBlank { null } }.toSet() }.orEmpty()
                 val league = League(
-                    id = "tsdb/$tid", sport = Sport.FOOTBALL, name = name, short = o.str("short") ?: name.take(6).uppercase(Locale.ROOT),
-                    guideWords = listOf(name), regions = emptySet(), minutes = 115, color = 0xFF2E3B4E
+                    id = "tsdb/$tid", sport = sport, name = name, short = o.str("short") ?: name.take(6).uppercase(Locale.ROOT),
+                    guideWords = (listOf(name) + words).distinct(), regions = regions,
+                    minutes = o.optInt("minutes", 115).takeIf { it > 0 } ?: 115, color = 0xFF2E3B4E
                 )
                 o.str("badge")?.takeIf { it.startsWith("https://") }?.let { leagueLogos[league.id] = it }
                 val teams = o.optJSONArray("teams")?.let { ta ->
@@ -225,7 +236,8 @@ internal class SportsFeeds {
             val arr = root.optJSONArray("events") ?: return out
             for (i in 0 until arr.length()) {
                 val e = arr.optJSONObject(i) ?: continue
-                val name = e.str("name") ?: continue
+                // "NXT - October 20th 2026" -> "NXT" (the card shows the date).
+                val name = e.str("name")?.let { withoutAirDate(it) } ?: continue
                 val leagueId = wrestlingLeague(e.str("league"))
                 val league = SportsCatalog.league(leagueId)
                 val hasTime = e.optBoolean("hasTime", true)

@@ -989,8 +989,8 @@ fun LiveTvSettingsContent(
                     )
                     if (homeRowOn) {
                         SettingsActionRow(
-                            title = "Row Shows",
-                            subtitle = "Favorites, Recently Watched, or one of your own groups",
+                            title = "Channels in the Row",
+                            subtitle = "Which channels appear: Favorites, Recently Watched, or one of your own groups",
                             value = when (s.homeRowSource) {
                                 "favorites", "" -> "Favorites"
                                 "recent" -> "Recently watched"
@@ -1483,7 +1483,7 @@ fun LiveTvSettingsContent(
             onConfirm = { if (it.trim() == s.parentalPin) { update { st -> st.copy(parentalPin = "") }; close() } else pinWrong = true }
         )
         LiveDialog.HomeRowSource -> SettingsSingleChoiceDialog(
-            title = "Home row shows",
+            title = "Channels in the row",
             options = buildList {
                 add(SettingsPickerOption("favorites", "Favorites"))
                 add(SettingsPickerOption("recent", "Recently watched"))
@@ -1574,13 +1574,23 @@ fun LiveTvSettingsContent(
             onConfirm = { d.action(); close() },
             confirmLabel = d.label
         )
-        LiveDialog.ConfirmRestore -> ConfirmDeleteDialog(
-            title = "Restore from Google Drive?",
-            message = "This TV's Live TV setup (playlists, guides, favorites and settings) is replaced with the copy in your Google Drive.",
-            onDismiss = close,
-            onConfirm = { viewModel.driveSync.restoreNow(); close() },
-            confirmLabel = "Restore"
-        )
+        LiveDialog.ConfirmRestore -> {
+            // When the saved copy was made, and on which TV: restoring an old copy puts back old
+            // playlists and logins (a provider's old address, an old password).
+            var loaded by remember { mutableStateOf(false) }
+            var info by remember { mutableStateOf<com.nuvio.tv.livetv.sync.LiveTvDriveSync.BackupInfo?>(null) }
+            LaunchedEffect(Unit) {
+                info = runCatching { viewModel.driveSync.backupInfo() }.getOrNull()
+                loaded = true
+            }
+            ConfirmDeleteDialog(
+                title = "Restore from Google Drive?",
+                message = restoreMessage(loaded, info, viewModel.driveSync.localChangedAt()),
+                onDismiss = close,
+                onConfirm = { viewModel.driveSync.restoreNow(); close() },
+                confirmLabel = "Restore"
+            )
+        }
         is LiveDialog.ConfirmDeletePlaylist -> ConfirmDeleteDialog(
             title = "Delete \"${d.source.name}\"?",
             message = "Its ${d.source.channelCount} channels leave the guide. Favorites, hidden channels and EPG assignments for them are kept in case you add it back.",
@@ -2036,6 +2046,34 @@ private fun ConfirmDeleteDialog(
             SettingsDialogActionButton(text = confirmLabel, onClick = onConfirm, primary = true)
         }
     }
+}
+
+/** The restore prompt's text: what's replaced, when the saved copy was made and where, and a warning when it's old. */
+private fun restoreMessage(loaded: Boolean, info: com.nuvio.tv.livetv.sync.LiveTvDriveSync.BackupInfo?, localChangedAt: Long): String {
+    val base = "This TV's Live TV setup (playlists, guides, favorites and settings) is replaced with the copy in your Google Drive."
+    if (!loaded) return "$base\n\nChecking when it was saved…"
+    if (info == null || info.savedAtMs <= 0L) return base
+    val now = System.currentTimeMillis()
+    val days = ((now - info.savedAtMs) / (24 * 60 * 60_000L)).toInt()
+    val ago = when {
+        now - info.savedAtMs < 60 * 60_000L -> "less than an hour ago"
+        days < 1 -> "today"
+        days == 1 -> "yesterday"
+        days < 14 -> "$days days ago"
+        days < 60 -> "${days / 7} weeks ago"
+        else -> "${days / 30} months ago"
+    }
+    val stamp = java.text.SimpleDateFormat("EEE d MMM, h:mm a", java.util.Locale.getDefault()).format(java.util.Date(info.savedAtMs))
+    val where = if (info.fromThisTv) "this TV" else info.device
+    val saved = "Saved $stamp on $where ($ago)."
+    val warning = when {
+        localChangedAt > info.savedAtMs + 60_000L ->
+            "This TV has changes made after that copy was saved. Restoring puts back the older playlists and logins. If this TV has the latest, press Back Up Now here instead."
+        days >= 7 ->
+            "That copy is $ago. If your playlists or logins have changed since (a new server address or password), press Back Up Now on a TV that has the latest first."
+        else -> null
+    }
+    return listOfNotNull(base, saved, warning).joinToString("\n\n")
 }
 
 @Composable

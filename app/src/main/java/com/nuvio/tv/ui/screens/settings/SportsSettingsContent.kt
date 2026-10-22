@@ -162,6 +162,12 @@ fun SportsSettingsContent(
                         onClick = { dialog = "remind" }
                     )
                     SettingsToggleRow(
+                        "Switch to the Game Automatically",
+                        "When a reminder goes off, Nuvio switches to the game a minute before it starts (with 10 seconds to cancel). Only while Nuvio is open. Each game's own choice on its page comes first",
+                        s.autoSwitch,
+                        { update { it.copy(autoSwitch = !it.autoSwitch) } }
+                    )
+                    SettingsToggleRow(
                         "Scoring Alerts for My Teams",
                         "A small card in the corner when one of your teams scores, wherever you are in the app",
                         s.scoringAlerts,
