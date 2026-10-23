@@ -932,6 +932,9 @@ class LiveTvViewModel @Inject constructor(
     /** Past listings from the Xtream catch-up archive for these channels (browsing back). */
     fun loadCatchupArchive(channels: List<LiveChannel>) = repository.loadXtreamArchive(channels)
 
+    /** Listings from the Xtream API for channels the guide file has nothing for. */
+    fun loadMissingListings(channels: List<LiveChannel>) = repository.loadXtreamArchive(channels, missingOnly = true)
+
     /** Assign EPG: make sure the full guide-channel lists are loaded (the saved guide skips them). */
     fun ensureEpgDetails() = repository.ensureEpgDetails()
     val epgAutoMatches: StateFlow<Map<String, com.nuvio.tv.livetv.model.EpgAssignment>> = repository.autoMatches

@@ -85,6 +85,13 @@ fun LiveTvSettingsScreen(
     }
 }
 
+/** Match Frame Rate's choices, worded as in Nuvio's own Playback settings. */
+private val FRAME_RATE_MODES = listOf(
+    Triple("OFF", "Off", "Don't change display refresh rate."),
+    Triple("START", "On start", "Switch when playback starts."),
+    Triple("START_STOP", "On start/stop", "Switch on start and restore on stop.")
+)
+
 private val CLOCK_MODES = listOf(
     "always" to "Always",
     "panel" to "With player controls",
@@ -113,6 +120,7 @@ private sealed interface LiveDialog {
     data object EpgShift : LiveDialog
     data object CatchupShift : LiveDialog
     data object ClockMode : LiveDialog
+    data object FrameRate : LiveDialog
     data object RecordPre : LiveDialog
     data object RecordPost : LiveDialog
     data object ClockPosition : LiveDialog
@@ -836,11 +844,11 @@ fun LiveTvSettingsContent(
                         s.audioPassthrough,
                         { update { it.copy(audioPassthrough = !it.audioPassthrough) } }
                     )
-                    SettingsToggleRow(
-                        "Match Frame Rate",
-                        "Switches the TV to the video's frame rate (for example 50 Hz for UK and European channels) for smoother motion, on TVs that support it",
-                        s.matchFrameRate,
-                        { update { it.copy(matchFrameRate = !it.matchFrameRate) } }
+                    SettingsActionRow(
+                        title = "Match Frame Rate",
+                        subtitle = "Switches the TV to the video's frame rate (for example 50 Hz for UK and European channels) for smoother motion, on TVs that support it",
+                        value = FRAME_RATE_MODES.firstOrNull { it.first == s.frameRateMode }?.second ?: "Off",
+                        onClick = { dialog = LiveDialog.FrameRate }
                     )
                     SubHeading("Pause & Catch-Up")
                     SettingsToggleRow(
@@ -1642,6 +1650,13 @@ fun LiveTvSettingsContent(
             options = listOf(0, 2, 5, 10, 15, 30).map { SettingsPickerOption(it, padLabel(it)) },
             selectedValue = s.recordPostMinutes,
             onOptionSelected = { v -> update { it.copy(recordPostMinutes = v) }; close() },
+            onDismiss = close
+        )
+        LiveDialog.FrameRate -> SettingsSingleChoiceDialog(
+            title = "Match Frame Rate",
+            options = FRAME_RATE_MODES.map { (v, t, d) -> SettingsPickerOption(v, t, description = d) },
+            selectedValue = s.frameRateMode,
+            onOptionSelected = { v -> update { it.copy(frameRateMode = v) }; close() },
             onDismiss = close
         )
         LiveDialog.ClockMode -> SettingsSingleChoiceDialog(

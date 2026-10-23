@@ -229,13 +229,9 @@ fun LiveTvGuideScreen(
     val status by viewModel.status.collectAsStateWithLifecycle()
     val playback by viewModel.playbackState.collectAsStateWithLifecycle()
     // A channel playing in the preview window: keep the TV awake (no screen saver), like full
-    // screen does. Also set again when full screen closes (it clears it on the way out).
-    val awakeView = androidx.compose.ui.platform.LocalView.current
+    // screen does (full screen keeps it awake too; see KeepScreenAwake).
     val previewPlaying = playback.channelKey != null && (playback.isPlaying || playback.isBuffering) && !playback.userPaused
-    DisposableEffect(previewPlaying, fullscreen) {
-        if (previewPlaying) awakeView.keepScreenOn = true
-        onDispose { if (!fullscreen) awakeView.keepScreenOn = false }
-    }
+    KeepScreenAwake(previewPlaying)
     val now by viewModel.now.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
@@ -486,6 +482,14 @@ fun LiveTvGuideScreen(
         val from = (row - 6).coerceAtLeast(0)
         val to = (row + 14).coerceAtMost(channels.size)
         viewModel.loadCatchupArchive(channels.subList(from, to))
+    }
+    // Channels on screen with nothing from the guide file: ask the provider's API for them.
+    LaunchedEffect(row / 6, channels.size) {
+        if (channels.isEmpty()) return@LaunchedEffect
+        delay(600)
+        val from = (row - 6).coerceAtLeast(0)
+        val to = (row + 14).coerceAtMost(channels.size)
+        viewModel.loadMissingListings(channels.subList(from, to))
     }
     // Leaving full screen: the guide lands on the channel you were watching (in its group,
     // at the current time), not where you'd been browsing before going full screen.
@@ -1497,9 +1501,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.96f))
-                    .border(1.dp, NuvioTheme.colors.Border, RoundedCornerShape(10.dp))
+                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Manage group visibility", size = 15.sp, weight = FontWeight.Bold)
@@ -1515,9 +1517,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.96f))
-                    .border(1.dp, NuvioTheme.colors.Border, RoundedCornerShape(10.dp))
+                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Reorder groups", size = 15.sp, weight = FontWeight.Bold)
@@ -1531,9 +1531,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.96f))
-                    .border(1.dp, NuvioTheme.colors.Border, RoundedCornerShape(10.dp))
+                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Reorder channels", size = 15.sp, weight = FontWeight.Bold)
@@ -1554,9 +1552,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .clip(RoundedCornerShape(10.dp))
-                    .background(NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.96f))
-                    .border(1.dp, NuvioTheme.colors.Border, RoundedCornerShape(10.dp))
+                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Manage visibility", size = 15.sp, weight = FontWeight.Bold)
@@ -1921,6 +1917,7 @@ fun LiveTvGuideScreen(
                 onFindInNuvio = { com.nuvio.tv.livetv.sports.SportsLaunch.clearReturn(); fullscreenComing = false; fullscreen = false; exitFullscreenTick++; onFindInNuvio() },
                 onBackToGroups = { com.nuvio.tv.livetv.sports.SportsLaunch.clearReturn(); fullscreenComing = false; fullscreen = false; savedSpot = null; exitFullscreenTick++; focusGroups() },
                 embedded = true,
+                onOpenSettings = onOpenSettings,
                 viewModel = viewModel
             )
         }
@@ -1971,7 +1968,13 @@ private fun GuideHeader(
             LiveText("Live TV", size = 16.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
             status?.let { LiveText(it, color = NuvioTheme.colors.TextSecondary, size = 13.sp) }
             Spacer(Modifier.width(16.dp))
-            LiveText(formatClock(now, settings.use24HourClock), size = 16.sp, weight = FontWeight.SemiBold)
+            Row(
+                modifier = Modifier.glass(glassColor(settings.panelBackground), RoundedCornerShape(12.dp))
+                    .padding(horizontal = 14.dp, vertical = 6.dp),
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                LiveText(formatClock(now, settings.use24HourClock), size = 16.sp, weight = FontWeight.SemiBold)
+            }
         }
         return
     }
@@ -1981,7 +1984,9 @@ private fun GuideHeader(
         modifier = Modifier
             .fillMaxWidth()
             .height(if (small) 110.dp else 176.dp)
-            .padding(start = 64.dp, end = 32.dp, top = if (small) 12.dp else 20.dp, bottom = if (small) 4.dp else 6.dp),
+            .padding(start = 64.dp, end = 32.dp, top = if (small) 12.dp else 20.dp, bottom = if (small) 4.dp else 6.dp)
+            .glass(glassColor(settings.panelBackground), RoundedCornerShape(if (small) 16.dp else 20.dp))
+            .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(if (small) 16.dp else 20.dp)
     ) {
         // Posters off: just the channel logo, in a logo-shaped space (not a poster box).
@@ -2006,12 +2011,7 @@ private fun GuideHeader(
                 contentAlignment = Alignment.Center
             ) {
                 if (!poster.isNullOrBlank()) {
-                    coil3.compose.AsyncImage(
-                        model = poster,
-                        contentDescription = null,
-                        contentScale = androidx.compose.ui.layout.ContentScale.Crop,
-                        modifier = Modifier.fillMaxSize()
-                    )
+                    LivePosterImage(poster, Modifier.fillMaxSize())
                 } else {
                     ChannelLogo(channel.logo, if (small) 24.dp else 34.dp)
                 }
@@ -2080,13 +2080,20 @@ private fun GuideHeader(
                         Spacer(Modifier.height(if (small) 2.dp else 4.dp))
                     }
                 }
-                LiveText(
-                    text = about?.description?.takeIf { it.isNotBlank() }
-                        ?: p?.description ?: if (p == null) "No program information" else "",
-                    color = NuvioTheme.colors.TextSecondary,
-                    size = if (small) 13.sp else 14.sp,
-                    maxLines = if (small) 1 else 2
-                )
+                // As many lines as fit in the space left (it was one line on the small panel and
+                // two on the standard one, however much room there was).
+                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                    val textSize = if (small) 13.sp else 14.sp
+                    val lineHeight = with(androidx.compose.ui.platform.LocalDensity.current) { textSize.toDp() } * 1.45f
+                    val lines = (maxHeight / lineHeight).toInt().coerceIn(1, 8)
+                    LiveText(
+                        text = about?.description?.takeIf { it.isNotBlank() }
+                            ?: p?.description ?: if (p == null) "No program information" else "",
+                        color = NuvioTheme.colors.TextSecondary,
+                        size = textSize,
+                        maxLines = lines
+                    )
+                }
             } else if (status != null) {
                 LiveText(status, color = NuvioTheme.colors.TextSecondary)
             }
@@ -3060,6 +3067,9 @@ private fun EpgSidePanel(
             val i = rows.indexOfFirst { it.source.sourceId == a.sourceId && it.entry.id == a.xmltvId }
             if (i >= 0) return i
         }
+        // The closest name (or id): the same name ignoring case, spaces, symbols, "BR:", "HD"
+        // and ".br" first, then the longest shared start. Only then alphabetical.
+        epgClosestRow(rows.map { it.entry }, channel.name, channel.tvgName)?.let { return it }
         val key = seed.lowercase()
         val i = rows.indexOfFirst { it.entry.displayName.lowercase() >= key }
         return if (i >= 0) i else rows.lastIndex
@@ -3481,6 +3491,35 @@ private fun EpgPanelButton(
 }
 
 private const val EPG_PICKER_LIMIT = 300
+
+/** A name or guide id reduced for comparing: "BR: Globo SP FHD" and "GloboSP.br" -> "globosp". */
+private fun epgKey(s: String): String = s.lowercase().trim()
+    .replace(Regex("""^[a-z]{2,3}\s*[:|]\s*"""), "")
+    .replace(Regex("""\[.*?]|\(.*?\)"""), " ")
+    .replace(Regex("""\b(fhd|uhd|hd|sd|4k|8k|hevc|h265|h264|1080p|720p|backup|raw)\b"""), " ")
+    .replace(Regex("""(\.(com|co|net|tv))?\.[a-z]{2}$"""), "")
+    .filter { it.isLetterOrDigit() }
+
+/** The guide channel whose name or id is closest to the playlist channel's, or null if none is close. */
+internal fun epgClosestRow(entries: List<com.nuvio.tv.livetv.model.EpgChannelEntry>, name: String, tvgName: String?): Int? {
+    val keys = listOfNotNull(name, tvgName).map { epgKey(it) }.filter { it.isNotEmpty() }.distinct()
+    if (keys.isEmpty()) return null
+    var best = -1
+    var bestScore = 0
+    entries.forEachIndexed { i, e ->
+        for (c in (e.names + e.id).map { epgKey(it) }) {
+            if (c.isEmpty()) continue
+            for (k in keys) {
+                val score = if (c == k) 100_000 else {
+                    val common = c.commonPrefixWith(k).length
+                    if (common < minOf(3, k.length)) 0 else common * 100 - kotlin.math.abs(c.length - k.length)
+                }
+                if (score > bestScore) { bestScore = score; best = i }
+            }
+        }
+    }
+    return best.takeIf { it >= 0 }
+}
 
 private fun epgSearchSeed(name: String): String =
     name.replace(Regex("""^[A-Za-z]{2,3}\s*[:|]\s*"""), "")

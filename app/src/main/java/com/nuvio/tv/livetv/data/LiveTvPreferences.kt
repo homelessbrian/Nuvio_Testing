@@ -12,6 +12,7 @@ import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.core.stringSetPreferencesKey
 import androidx.datastore.preferences.preferencesDataStoreFile
 import com.nuvio.tv.livetv.model.ChannelSort
+import com.nuvio.tv.livetv.model.matchFrameRate
 import com.nuvio.tv.livetv.model.CustomGroup
 import com.nuvio.tv.livetv.model.EpgSource
 import com.nuvio.tv.livetv.model.LiveTvSettings
@@ -109,6 +110,7 @@ class LiveTvPreferences @Inject constructor(
         val showQualityBadges = booleanPreferencesKey("show_quality_badges")
         val showFrameRate = booleanPreferencesKey("show_frame_rate")
         val matchFrameRate = booleanPreferencesKey("match_frame_rate")
+        val frameRateMode = stringPreferencesKey("frame_rate_mode")
         val onDemandInSidebar = booleanPreferencesKey("on_demand_in_sidebar")
         val recordingsInSidebar = booleanPreferencesKey("recordings_in_sidebar")
         val onDemandInStreams = booleanPreferencesKey("on_demand_in_streams")
@@ -161,6 +163,7 @@ class LiveTvPreferences @Inject constructor(
         val recentInPanel = booleanPreferencesKey("recent_in_panel")
         val panelRow = stringPreferencesKey("panel_row")
         val channelSurf = booleanPreferencesKey("channel_surf")
+        val barHidden = stringPreferencesKey("bar_hidden")
         val lockedGroups = stringSetPreferencesKey("locked_groups")
         val reminders = stringPreferencesKey("reminders")
         val channelQuality = stringPreferencesKey("channel_quality")
@@ -338,7 +341,8 @@ class LiveTvPreferences @Inject constructor(
             lockAdultContent = p[Keys.lockAdultContent] ?: d.lockAdultContent,
             showQualityBadges = p[Keys.showQualityBadges] ?: d.showQualityBadges,
             showFrameRate = p[Keys.showFrameRate] ?: d.showFrameRate,
-            matchFrameRate = p[Keys.matchFrameRate] ?: d.matchFrameRate,
+            // Before the three choices it was on or off; on worked like "On start/stop".
+            frameRateMode = p[Keys.frameRateMode] ?: if (p[Keys.matchFrameRate] == true) "START_STOP" else d.frameRateMode,
             onDemandInSidebar = p[Keys.onDemandInSidebar] ?: d.onDemandInSidebar,
             recordingsInSidebar = p[Keys.recordingsInSidebar] ?: d.recordingsInSidebar,
             onDemandInStreams = p[Keys.onDemandInStreams] ?: d.onDemandInStreams,
@@ -390,7 +394,8 @@ class LiveTvPreferences @Inject constructor(
             recentInPanel = p[Keys.recentInPanel] ?: d.recentInPanel,
             // Before the choice existed it was an on / off switch for Recent.
             panelRow = p[Keys.panelRow] ?: if (p[Keys.recentInPanel] == false) "OFF" else d.panelRow,
-            channelSurf = p[Keys.channelSurf] ?: d.channelSurf
+            channelSurf = p[Keys.channelSurf] ?: d.channelSurf,
+            barHidden = p[Keys.barHidden] ?: d.barHidden
         )
     }.distinctUntilChanged()
 
@@ -525,6 +530,7 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.lockAdultContent] = s.lockAdultContent
         p[Keys.showQualityBadges] = s.showQualityBadges
         p[Keys.showFrameRate] = s.showFrameRate
+        p[Keys.frameRateMode] = s.frameRateMode
         p[Keys.matchFrameRate] = s.matchFrameRate
         p[Keys.onDemandInSidebar] = s.onDemandInSidebar
         p[Keys.recordingsInSidebar] = s.recordingsInSidebar
@@ -574,6 +580,7 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.recentInPanel] = s.recentInPanel
         p[Keys.panelRow] = s.panelRow
         p[Keys.channelSurf] = s.channelSurf
+        p[Keys.barHidden] = s.barHidden
     }
 
     // ---------- channel management ----------
@@ -1032,6 +1039,14 @@ class LiveTvPreferences @Inject constructor(
             out.put(name, entry)
         }
         return out
+    }
+
+    /** Whether a setup from [exportForSync] has any playlist or guide in it. */
+    fun syncHasSources(data: JSONObject?): Boolean {
+        if (data == null) return false
+        fun raw(key: String) = data.optJSONObject(key)?.optString("v")
+        return runCatching { decodePlaylists(raw(Keys.playlists.name)).isNotEmpty() }.getOrDefault(false) ||
+            runCatching { decodeEpgs(raw(Keys.epgs.name)).isNotEmpty() }.getOrDefault(false)
     }
 
     /** Replaces this TV's Live TV setup with [data] from [exportForSync], keeping per-TV state. */

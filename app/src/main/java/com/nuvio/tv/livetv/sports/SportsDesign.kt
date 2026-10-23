@@ -77,9 +77,11 @@ import kotlinx.coroutines.launch
  */
 
 internal object SportsLook {
-    val Card = Color(0xFF12141B)
-    val CardRaised = Color(0xFF1A1D26)
-    val Border = Color.White.copy(alpha = 0.09f)
+    // Translucent (not flat), so cards read as glass over the hub's own background, matching
+    // the full-screen player's bar and gear panel.
+    val Card = Color(0xCC12141B)
+    val CardRaised = Color(0xD41A1D26)
+    val Border = Color.White.copy(alpha = 0.12f)
     val Divider = Color.White.copy(alpha = 0.08f)
     val Dim = Color(0xFF8B90A0)
     val Faint = Color(0xFF5D6170)
@@ -261,7 +263,9 @@ internal fun TeamBand(
     logo: Dp = 30.dp,
     name: TextUnit = 13.sp,
     score: TextUnit = 22.sp,
-    extra: String? = side.record
+    extra: String? = side.record,
+    /** Before the game: this team's place, form and chances, where the score goes later. */
+    trailing: (@Composable () -> Unit)? = null
 ) {
     val c = bandColor(teamColor(side.team))
     Row(
@@ -281,6 +285,7 @@ internal fun TeamBand(
             extra?.takeIf { it.isNotBlank() }?.let { LiveText(it, color = Color.White.copy(alpha = 0.6f), size = name * 0.68f, weight = FontWeight.SemiBold) }
         }
         if (showScore) ScoreLabel(side.score.orEmpty(), dim, score)
+        else trailing?.invoke()
     }
 }
 

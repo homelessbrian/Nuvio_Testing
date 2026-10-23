@@ -121,14 +121,15 @@ internal fun LiveText(
 @Composable
 internal fun guideSurface(): Color {
     val c = NuvioTheme.colors.BackgroundElevated
-    return if (c.luminance() < 0.003f) Color(0xFF1C1C1F) else c
+    // A touch see-through (not flat), to match the glass look of the full-screen player's bar.
+    return (if (c.luminance() < 0.003f) Color(0xFF1C1C1F) else c).copy(alpha = 0.92f)
 }
 
 /** Shows on now, and the group on screen: a step lighter than [guideSurface]. */
 @Composable
 internal fun guideSurfaceVariant(): Color {
     val c = NuvioTheme.colors.BackgroundCard
-    return if (c.luminance() < 0.003f) Color(0xFF26262B) else c
+    return (if (c.luminance() < 0.003f) Color(0xFF26262B) else c).copy(alpha = 0.92f)
 }
 
 /** Background / border / text colors for a focused or unfocused guide cell. */

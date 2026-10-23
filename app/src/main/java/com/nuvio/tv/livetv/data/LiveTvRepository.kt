@@ -1204,6 +1204,7 @@ class LiveTvRepository @Inject constructor(
     private val archiveFetched = java.util.Collections.synchronizedSet(HashSet<String>())
     private val archivePermits = kotlinx.coroutines.sync.Semaphore(3)
     @Volatile private var archivePausedUntil = 0L
+    @Volatile private var apiFillReported = false
 
     /**
      * Past listings for Xtream catch-up channels, the way TiviMate gets them: many providers'
@@ -1211,9 +1212,16 @@ class LiveTvRepository @Inject constructor(
      * archive (up to 7 days or more) per channel. Fetched for the channels you're looking at,
      * once per session, and stored with the rest of the guide.
      */
-    fun loadXtreamArchive(channels: List<LiveChannel>) {
-        val wanted = channels.filter { it.catchup != null && it.key !in archiveFetched }
+    fun loadXtreamArchive(channels: List<LiveChannel>, missingOnly: Boolean = false) {
+        // missingOnly: channels the guide file has nothing for. Most Xtream apps read each
+        // channel's listings from the provider's API by stream number, so they show a guide
+        // even when the guide file's ids don't line up with the channel list; this does the same.
+        val wanted = channels.filter { ch ->
+            ch.key !in archiveFetched &&
+                (if (missingOnly) _programs.value[ch.key].isNullOrEmpty() else ch.catchup != null)
+        }
         if (wanted.isEmpty()) return
+
         wanted.forEach { archiveFetched += it.key }
         if (System.currentTimeMillis() < archivePausedUntil) {
             wanted.forEach { archiveFetched -= it.key }
@@ -1279,6 +1287,10 @@ class LiveTvRepository @Inject constructor(
                         }
                         _programs.value = _programs.value + (ch.key to merged)
                         loadedFrom = minOf(loadedFrom, from)
+                        if (missingOnly && !apiFillReported) {
+                            apiFillReported = true
+                            LIVE_REPORT.add("Guide: listings for channels the guide file doesn't cover are coming from the Xtream API (first: ${ch.name})")
+                        }
                     }.onFailure {
                         Log.w(TAG, "Catch-up archive for ${ch.name} unavailable", it)
                         if (it.message?.contains("429") == true) {
@@ -1675,6 +1687,11 @@ class LiveTvRepository @Inject constructor(
             c.tvgId?.lowercase()?.let { byTvgId.getOrPut(it) { ArrayList() }.add(c) }
             normalize(c.tvgName ?: "").takeIf { it.isNotEmpty() }?.let { byName.getOrPut(it) { ArrayList() }.add(c) }
             normalize(c.name).takeIf { it.isNotEmpty() }?.let { byName.getOrPut(it) { ArrayList() }.add(c) }
+            // The tvg-id read as a name ("GloboSP.br" ~ a guide channel called "Globo SP").
+            c.tvgId?.let { idName(it) }?.takeIf { it.length >= 3 }?.let { k ->
+                val l = byName.getOrPut(k) { ArrayList() }
+                if (c !in l) l.add(c)
+            }
         }
 
         // Every guide is read; each channel keeps its best candidate:
@@ -1714,8 +1731,8 @@ class LiveTvRepository @Inject constructor(
                         selectChannels = { xmlChannels ->
                             xmlChannels.values.forEach { xc ->
                                 byTvgId[xc.id.lowercase()]?.let { idHits.getOrPut(xc.id) { LinkedHashSet() }.addAll(it) }
-                                (xc.displayNames + xc.id).forEach { dn ->
-                                    byName[normalize(dn)]?.let { nameHits.getOrPut(xc.id) { LinkedHashSet() }.addAll(it) }
+                                (xc.displayNames.map { normalize(it) } + normalize(xc.id) + idName(xc.id)).distinct().forEach { k ->
+                                    byName[k]?.let { nameHits.getOrPut(xc.id) { LinkedHashSet() }.addAll(it) }
                                 }
                             }
                             if (xmlChannels.isEmpty()) null
@@ -1725,7 +1742,7 @@ class LiveTvRepository @Inject constructor(
                         // below can use (the same id / name test) or picked by hand, instead of
                         // every show in the file.
                         keepUnlisted = { id ->
-                            byTvgId.containsKey(id.lowercase()) || byName.containsKey(normalize(id)) ||
+                            byTvgId.containsKey(id.lowercase()) || byName.containsKey(normalize(id)) || byName.containsKey(idName(id)) ||
                                 pinnedHere.values.any { it.xmltvId == id }
                         }
                     )
@@ -1775,7 +1792,7 @@ class LiveTvRepository @Inject constructor(
                 // Guide had no <channel> list before programs: match program channel ids directly.
                 parsed.programs.keys.forEach { id ->
                     byTvgId[id.lowercase()]?.let { idHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
-                    byName[normalize(id)]?.let { nameHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
+                    (byName[normalize(id)] ?: byName[idName(id)])?.let { nameHits.getOrPut(id) { LinkedHashSet() }.addAll(it) }
                 }
             }
             var count = 0
@@ -1802,6 +1819,13 @@ class LiveTvRepository @Inject constructor(
                 "Guide \"${target.name}\": ${entries.size} guide channels, ${parsed.programs.size} with listings kept; " +
                     "matched ${idHits.size} by id, ${nameHits.size} by name → $matchedChannels channels, $count listings"
             )
+            // Most of the guide left unmatched: a few names from each side, so it's clear why.
+            if (count > 0 && entries.size >= 20 && idHits.size + nameHits.size < entries.size / 5) {
+                val hit = idHits.keys + nameHits.keys
+                val guideSide = entries.filter { it.id !in hit }.take(4).joinToString { e -> e.id + (e.names.firstOrNull()?.let { " ($it)" } ?: "") }
+                val ourSide = channels.filter { it.tvgId?.isNotBlank() == true }.take(4).joinToString { "${it.tvgId} (${it.name})" }
+                LIVE_REPORT.add("Guide \"${target.name}\" mostly unmatched: guide has [$guideSide], playlist has [$ourSide]")
+            }
             if (count == 0) {
                 val guideIds = entries.take(3).joinToString { it.id }
                 val ourIds = channels.mapNotNull { it.tvgId?.takeIf { id -> id.isNotBlank() } }.take(3).joinToString()
@@ -2533,6 +2557,11 @@ class LiveTvRepository @Inject constructor(
         private val bracketed = Regex("""\[.*?]|\(.*?\)""")
 
         private const val SOURCE_LISTS_VERSION = 1
+
+        private val countryEnd = Regex("""(\.(com|co|net|tv))?\.[a-z]{2}$""", RegexOption.IGNORE_CASE)
+
+        /** A guide or tvg-id as a name: "GloboSP.br" -> "globosp". */
+        internal fun idName(id: String): String = normalize(id.trim().replace(countryEnd, ""))
 
         internal fun normalize(name: String): String {
             var n = name.lowercase().trim()

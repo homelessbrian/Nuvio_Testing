@@ -195,7 +195,9 @@ data class SportsSettings(
     /** "eventId|channelKey": channels you said aren't showing that game. */
     val blocked: Set<String> = emptySet(),
     /** A team ("family|team id", see [SportsCatalog.teamFamily]) -> the channel for all its games (a team's own sports network). */
-    val teamChannels: Map<String, String> = emptyMap()
+    val teamChannels: Map<String, String> = emptyMap(),
+    /** Channel groups (lowercase names) whose channels go to the top of every game's list. */
+    val preferredGroups: Set<String> = emptySet()
 ) {
     fun toJson(): String = JSONObject()
         .put("showInSidebar", showInSidebar)
@@ -214,6 +216,7 @@ data class SportsSettings(
         .put("eventChannels", JSONObject(eventChannels as Map<*, *>))
         .put("blocked", JSONArray(blocked.toList()))
         .put("teamChannels", JSONObject(teamChannels as Map<*, *>))
+        .put("preferredGroups", JSONArray(preferredGroups.toList()))
         .toString()
 
     companion object {
@@ -239,7 +242,8 @@ data class SportsSettings(
                     networkChannels = o.optJSONObject("networkChannels").stringMap(),
                     eventChannels = o.optJSONObject("eventChannels").stringMap(),
                     blocked = o.optJSONArray("blocked").strings().toSet(),
-                    teamChannels = o.optJSONObject("teamChannels").stringMap()
+                    teamChannels = o.optJSONObject("teamChannels").stringMap(),
+                    preferredGroups = o.optJSONArray("preferredGroups").strings().toSet()
                 )
             }.getOrDefault(SportsSettings())
         }

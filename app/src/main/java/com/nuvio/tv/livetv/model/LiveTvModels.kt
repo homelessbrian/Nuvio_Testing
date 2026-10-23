@@ -283,8 +283,11 @@ data class LiveTvSettings(
     val showQualityBadges: Boolean = true,
     /** The frame rate ("50 FPS") next to the picture size on the info bar. */
     val showFrameRate: Boolean = true,
-    /** Switch the TV's refresh rate to match the video (auto frame rate). */
-    val matchFrameRate: Boolean = false,
+    /**
+     * Switch the TV's refresh rate to match the video (auto frame rate), as Nuvio's own player
+     * setting: "OFF", "START" (switch when playback starts) or "START_STOP" (and put it back after).
+     */
+    val frameRateMode: String = "OFF",
     /** Show On Demand in Nuvio's side menu (when there's something to show). */
     val onDemandInSidebar: Boolean = true,
     /** Recordings in the side menu (once anything is recorded or set to record). */
@@ -380,7 +383,9 @@ data class LiveTvSettings(
     /** The row at the bottom of the full info panel: "RECENT", "FAVORITES" or "OFF". */
     val panelRow: String = "RECENT",
     /** Channel surfing: Up / Down show other channels on the info bar; OK switches. */
-    val channelSurf: Boolean = false
+    val channelSurf: Boolean = false,
+    /** Parts of the full-screen bar switched off (⚙ → Customize the bar), comma separated. */
+    val barHidden: String = ""
 )
 
 data class LiveUserState(
@@ -602,3 +607,6 @@ object LiveTvLoadReport {
 /** Guide Size, with the old "Slimmer Rows" switch standing in until a size is picked. */
 val LiveTvSettings.effectiveGuideSize: String
     get() = guideSize.ifBlank { if (compactRows) "COMPACT" else "STANDARD" }
+
+/** Match Frame Rate is on (either way). */
+val LiveTvSettings.matchFrameRate: Boolean get() = frameRateMode != "OFF"

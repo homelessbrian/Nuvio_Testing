@@ -69,8 +69,16 @@ import java.util.Locale
 data class TableRequest(val leagueId: String?, val mark: Set<String> = emptySet())
 
 private val POS_W = 34.dp
-private val CELL_W = 40.dp
 private val FORM_W = 70.dp
+
+/** A column's width: small counts narrow, so the team names have room. */
+private fun cellWidth(key: String) = when (key) {
+    "gamesPlayed", "wins", "ties", "losses", "otLosses" -> 28.dp
+    "pointDifferential", "points", "gamesBehind" -> 38.dp
+    "winPercent" -> 44.dp
+    "behind" -> 56.dp
+    else -> 40.dp
+}
 
 @Composable
 internal fun TablesPage(
@@ -335,12 +343,14 @@ private fun TableView(
         val season = listOfNotNull(table.season?.let { "Season $it" }, "from ${table.source}").joinToString(" · ")
         LiveText(season, color = SportsLook.Faint, size = 10.sp, modifier = Modifier.padding(start = 6.dp, top = 6.dp))
         // Column headings.
-        val showForm = table.kind == StandingsKind.TABLE && groups.any { g -> g.rows.any { it.form != null } }
+        // The last five as squares (every team sport); US tables' streak column gives way to them.
+        val showForm = table.kind != StandingsKind.RACING && groups.any { g -> g.rows.any { it.form != null } }
+        val columns = if (showForm) table.columns.filter { it.key != "streak" } else table.columns
         Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 8.dp, top = 4.dp, bottom = 2.dp), verticalAlignment = Alignment.CenterVertically) {
             Spacer(Modifier.width(POS_W))
             LiveText(if (table.kind == StandingsKind.RACING) "DRIVER" else "TEAM", color = SportsLook.Dim, size = 9.sp, weight = FontWeight.Black, modifier = Modifier.weight(1f).padding(start = 30.dp))
-            table.columns.forEach { c ->
-                LiveText(c.label, color = SportsLook.Dim, size = 9.sp, weight = FontWeight.Black, align = TextAlign.End, modifier = Modifier.width(if (c.key == "behind") 56.dp else CELL_W))
+            columns.forEach { c ->
+                LiveText(c.label, color = SportsLook.Dim, size = 9.sp, weight = FontWeight.Black, align = TextAlign.End, modifier = Modifier.width(cellWidth(c.key)))
             }
             if (showForm) LiveText("LAST 5", color = SportsLook.Dim, size = 9.sp, weight = FontWeight.Black, align = TextAlign.End, modifier = Modifier.width(FORM_W + 8.dp))
         }
@@ -368,6 +378,7 @@ private fun TableView(
                     item(key = key) {
                         StandingsLine(
                             table = table,
+                            columns = columns,
                             row = r,
                             mine = r.id in followedIds,
                             marked = r.id in marked,
@@ -391,6 +402,7 @@ private fun TableView(
 @Composable
 private fun StandingsLine(
     table: Standings,
+    columns: List<StandingsColumn>,
     row: StandingsRow,
     mine: Boolean,
     marked: Boolean,
@@ -404,18 +416,27 @@ private fun StandingsLine(
     val shape = RoundedCornerShape(8.dp)
     val ink = if (focused) SportsLook.Ink else Color.White
     val sub = if (focused) Color(0xFF555A66) else Color(0xFFC9CCD6)
+    val team = TeamInfo(table.leagueId, row.id, row.shortName, row.name, row.abbr, null, row.color, row.altColor, row.logo)
+    // The team's colour behind its name, fading out across the row (as on the game cards).
+    val band = if (row.color != null || row.altColor != null) bandColor(teamColor(team)) else null
     Row(
         modifier
             .fillMaxWidth()
             .height(32.dp)
             .clip(shape)
+            .background(SportsLook.Card)
             .background(
                 when {
-                    focused -> Color.White
-                    marked -> Color(0xFFFFCE54).copy(alpha = 0.13f)
-                    else -> SportsLook.Card
+                    focused -> Brush.horizontalGradient(listOf(Color.White, Color.White))
+                    band != null -> Brush.horizontalGradient(
+                        0f to band.copy(alpha = if (marked) 0.95f else 0.75f), 0.55f to band.copy(alpha = 0.18f), 1f to Color.Transparent
+                    )
+                    marked -> Brush.horizontalGradient(listOf(Color(0xFFFFCE54).copy(alpha = 0.16f), Color.Transparent))
+                    else -> Brush.horizontalGradient(listOf(Color.Transparent, Color.Transparent))
                 }
             )
+            // Your team (or the game's two, from a game page): a gold outline.
+            .border(if (marked && !focused) 1.5.dp else 0.dp, if (marked && !focused) Color(0xFFFFCE54) else Color.Transparent, shape)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
         verticalAlignment = Alignment.CenterVertically
@@ -423,12 +444,12 @@ private fun StandingsLine(
         // The zone's colour down the left edge (Champions League, relegation…), or the division leader's.
         Box(Modifier.width(3.dp).fillMaxHeight().background(row.zone?.let { Color(it.color) } ?: Color.Transparent))
         Row(Modifier.width(POS_W - 3.dp), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.Center) {
-            LiveText("${row.pos}", color = if (focused) SportsLook.Ink else SportsLook.Dim, size = 11.sp, weight = FontWeight.ExtraBold)
+            LiveText("${row.pos}", color = if (focused) SportsLook.Ink else if (band != null) Color.White.copy(alpha = 0.85f) else SportsLook.Dim, size = 11.sp, weight = FontWeight.ExtraBold)
             if (showChange) row.change?.let { c ->
                 LiveText(if (c > 0) "▲" else "▼", color = if (c > 0) Color(0xFF2E9E5B) else Color(0xFFE05A4F), size = 7.sp, modifier = Modifier.padding(start = 2.dp))
             }
         }
-        TeamLogo(TeamInfo(table.leagueId, row.id, row.shortName, row.name, row.abbr, null, null, null, row.logo), 20.dp)
+        TeamLogo(team, 20.dp)
         Spacer(Modifier.width(8.dp))
         Row(Modifier.weight(1f), verticalAlignment = Alignment.CenterVertically) {
             LiveText(row.shortName, color = ink, size = 12.sp, weight = FontWeight.ExtraBold, marquee = focused, modifier = Modifier.weight(1f, fill = false))
@@ -441,7 +462,7 @@ private fun StandingsLine(
                 )
             }
         }
-        table.columns.forEach { c ->
+        columns.forEach { c ->
             val v = row.values[c.key].orEmpty()
             val strong = c.key == "points" || (table.kind == StandingsKind.RECORD && c.key == "winPercent")
             val streakColor = if (c.key == "streak") when {
@@ -452,7 +473,7 @@ private fun StandingsLine(
             LiveText(
                 v, color = streakColor ?: if (strong) ink else sub, size = if (strong) 12.sp else 11.sp,
                 weight = if (strong || streakColor != null) FontWeight.Black else FontWeight.SemiBold,
-                align = TextAlign.End, modifier = Modifier.width(if (c.key == "behind") 56.dp else CELL_W)
+                align = TextAlign.End, modifier = Modifier.width(cellWidth(c.key))
             )
         }
         if (showForm) {

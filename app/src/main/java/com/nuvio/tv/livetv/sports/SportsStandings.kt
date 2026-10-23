@@ -42,7 +42,10 @@ data class StandingsRow(
     /** Win % (US sports) or points (tables), for sorting a merged view. */
     val sortValue: Double = 0.0,
     /** A driver, not a team. */
-    val athlete: Boolean = false
+    val athlete: Boolean = false,
+    /** The team's colours (from its league's team list), for its row. */
+    val color: Long? = null,
+    val altColor: Long? = null
 )
 
 /** A division, a conference, a group, or the whole league. [parent]: its conference, if any. */
@@ -332,7 +335,7 @@ data class Standings(
 
         /** Adds [form] to rows that don't have their own. */
         fun withForm(s: Standings, form: Map<String, String>): Standings {
-            if (form.isEmpty() || s.kind != StandingsKind.TABLE) return s
+            if (form.isEmpty() || s.kind == StandingsKind.RACING) return s
             return s.copy(groups = s.groups.map { g -> g.copy(rows = g.rows.map { r -> if (r.form != null) r else r.copy(form = form[r.id]?.takeIf { it.isNotEmpty() }) }) })
         }
 

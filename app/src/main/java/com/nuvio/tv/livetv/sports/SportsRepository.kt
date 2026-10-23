@@ -742,7 +742,7 @@ class SportsRepository @Inject constructor(
         val trigger = combine(
             events.map { list -> list.filter { it.source != EventSource.GUIDE }.map { "${it.id}@${it.startMs}:${it.broadcasts.size}" } }.distinctUntilChanged(),
             channelStore.displayChannels.map { it.size to it.firstOrNull()?.key }.distinctUntilChanged(),
-            settings.map { listOf(it.networkChannels, it.eventChannels, it.blocked, it.bestChannelFirst, it.hiddenLeagues, it.region) }.distinctUntilChanged(),
+            settings.map { listOf(it.networkChannels, it.eventChannels, it.teamChannels, it.blocked, it.bestChannelFirst, it.hiddenLeagues, it.region, it.preferredGroups) }.distinctUntilChanged(),
             follows.map { it.words to it.leagues }.distinctUntilChanged(),
             liveRepo.status.map { it.loading }.distinctUntilChanged()
         ) { a, b, c, d, e -> listOf(a, b, c, d, e) }
@@ -757,21 +757,29 @@ class SportsRepository @Inject constructor(
         combine(trigger, matchKick) { t, k -> t to k }.debounce(1_500).collect {
             if (!foreground.value && viewers.value == 0) return@collect
             if (!settings.value.showInSidebar && viewers.value == 0) return@collect
-            if (liveRepo.status.value.loading && !liveRepo.status.value.quiet && _matches.value.isNotEmpty()) return@collect
+            if (liveRepo.status.value.loading && !liveRepo.status.value.quiet && _matches.value.isNotEmpty() && !pickPending) return@collect
+            pickPending = false
             lastRun = System.currentTimeMillis()
             runCatching { runMatch() }.onFailure { Log.w(TAG, "Sports matching failed", it) }
         }
     }
 
     private val matchKick = MutableStateFlow(0)
+    @Volatile private var pickPending = false
     private var lastSummary: String? = null
 
     // Nobody on the Sports page: low priority, out of the way of the guide and the video.
     private suspend fun runMatch() = withContext(if (viewers.value > 0) Dispatchers.Default else com.nuvio.tv.livetv.data.BackgroundWork.quiet) {
         val live = prefs.settings.first()
         val user = prefs.userState.first()
+        // Channels you picked yourself (Fix Channel) count even in a hidden group.
+        val sp = settings.value
+        val picked = HashSet<String>().apply {
+            sp.eventChannels.values.forEach { add(it.substringBefore('|')) }
+            addAll(sp.networkChannels.values); addAll(sp.teamChannels.values)
+        }
         val channels: List<LiveChannel> = channelStore.displayChannels.value.filter { ch ->
-            ch.key !in user.hiddenChannels && ch.groupId !in user.hiddenGroups &&
+            (ch.key in picked || (ch.key !in user.hiddenChannels && ch.groupId !in user.hiddenGroups)) &&
                 !ParentalControls.isLocked(ch.groupId, ch.group, live, user.lockedGroups) &&
                 !(ParentalControls.enabled(live) && live.lockAdultContent && ParentalControls.isAdult(ch.name))
         }
@@ -924,14 +932,30 @@ class SportsRepository @Inject constructor(
                 return@withContext null
             }
             runCatching { file.writeText("$now\n$raw") }
-            // Form: football tables from ESPN don't have it, so it comes from the last six weeks' results.
-            if (table.kind == StandingsKind.TABLE && table.source == "ESPN") {
+            // Form (the last five as squares): ESPN's tables don't have it, so it comes from the last
+            // six weeks' results (one request).
+            if (table.kind != StandingsKind.RACING && table.source == "ESPN") {
                 val recent = known.value.filter { it.leagueId == leagueId }
                 val past = runCatching {
                     val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
                     SportsFeeds.parseScoreboard(league, feeds.scoreboardRaw(league, fmt.format(now - 42 * DAY), fmt.format(now)))
                 }.getOrDefault(emptyList())
                 table = Standings.withForm(table, Standings.formFrom((past + recent).distinctBy { it.espnId ?: it.id }, leagueId))
+            }
+            // Team colours for the rows: the league's team list (kept for a week), else games we know.
+            if (table.kind != StandingsKind.RACING) {
+                val listed = if (league.espnPath != null) runCatching { leagueTeams(league) }.getOrDefault(emptyList()).associateBy { it.id } else emptyMap()
+                val fam = SportsCatalog.teamFamily(leagueId)
+                val seen = HashMap<String, TeamInfo>()
+                if (listed.size < table.groups.sumOf { it.rows.size }) known.value.forEach { ev ->
+                    ev.sides.forEach { sd -> if (sd.team.color != null && SportsCatalog.teamFamily(sd.team.leagueId) == fam) seen.putIfAbsent(sd.team.id, sd.team) }
+                }
+                table = table.copy(groups = table.groups.map { g ->
+                    g.copy(rows = g.rows.map { r ->
+                        val t = listed[r.id]?.takeIf { it.color != null || it.altColor != null } ?: seen[r.id]
+                        if (t == null) r else r.copy(color = t.color, altColor = t.altColor, logo = r.logo ?: t.logo)
+                    })
+                })
             }
             // Places moved since the last round (remembered on this TV).
             val mem = File(dir, "table_moves_${safe(leagueId)}.json")
@@ -1149,6 +1173,15 @@ class SportsRepository @Inject constructor(
             teamChannels = if (forTeam != null) s.teamChannels + (teamChannelKey(ev.leagueId, forTeam.id) to channelKey) else s.teamChannels,
             blocked = s.blocked - "${ev.id}|$channelKey"
         )
+    }.also {
+        // Show it on the game straight away (the next channel search keeps it there), and
+        // search again now rather than waiting for the guide to finish loading.
+        channelStore.displayChannels.value.firstOrNull { it.key == channelKey }?.let { ch ->
+            val mine = ChannelMatch(ch, 200, "Your pick", null, SportsMatcher.nameQuality(ch.name), false)
+            _matches.value = _matches.value + (ev.id to (listOf(mine) + _matches.value[ev.id].orEmpty().filter { it.channel.key != channelKey }))
+        }
+        pickPending = true
+        matchKick.value++
     }
 
     /** "Not this channel" for [ev] (and it stops being used for its network). */
@@ -1159,6 +1192,10 @@ class SportsRepository @Inject constructor(
             networkChannels = s.networkChannels.filterNot { (n, key) -> key == channelKey && ev.broadcasts.any { SportsMatcher.networkKey(it) == n } },
             teamChannels = s.teamChannels.filterNot { (t, key) -> key == channelKey && ev.sides.any { teamChannelKey(ev.leagueId, it.team.id) == t } }
         )
+    }.also {
+        _matches.value[ev.id]?.let { l -> _matches.value = _matches.value + (ev.id to l.filter { it.channel.key != channelKey }) }
+        pickPending = true
+        matchKick.value++
     }
 
     fun clearFixes() = updateSettings { it.copy(networkChannels = emptyMap(), eventChannels = emptyMap(), blocked = emptySet(), teamChannels = emptyMap()) }

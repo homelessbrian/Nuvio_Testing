@@ -35,6 +35,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
 
     fun match(input: Input): Result {
         val byKey = input.channels.associateBy { it.key }
+        val rank = preferenceRank(input.settings)
         val names = input.channels.mapNotNull { ch -> if (ch.name.length < 6) null else ch to norm(ch.name.replace("+", " plus ").replace("@", " at ")) }
         val found = HashMap<String, HashMap<String, Found>>()
         fun add(eventId: String, key: String, score: Int, how: String, program: EpgProgram?) {
@@ -45,14 +46,26 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             else if (cur.program == null && program != null) cur.program = program
         }
 
-        val wanted = input.events.filter { ev ->
-            ev.state != GameState.OFF && ev.hasTime &&
+        // Events that run for days (a golf tournament, an F1 weekend from practice to the race) have
+        // no single start time: while they're on, treat them as starting now.
+        fun multiDay(ev: SportsEvent) = !ev.hasTime && ev.endMs != null
+        val events = input.events.mapNotNull { ev ->
+            when {
+                ev.hasTime -> ev
+                !multiDay(ev) -> null
+                ev.endMs!! < input.now - 8 * HOUR -> null
+                ev.startMs >= input.now -> ev
+                else -> ev.copy(startMs = input.now)
+            }
+        }
+        val wanted = events.filter { ev ->
+            ev.state != GameState.OFF &&
                 ev.startMs in (input.now - 8 * HOUR)..(input.now + AHEAD_MS)
         }
         // A channel you picked yourself shows straight away, however far off the game is (the
         // search above only looks a couple of days ahead).
-        val picked = input.events.filter { ev ->
-            ev.state != GameState.OFF && ev.hasTime && ev.startMs >= input.now - 8 * HOUR &&
+        val picked = events.filter { ev ->
+            ev.state != GameState.OFF && ev.startMs >= input.now - 8 * HOUR &&
                 (ev.id in input.settings.eventChannels ||
                     (input.settings.teamChannels.isNotEmpty() && ev.sides.any { teamChannelKey(ev.leagueId, it.team.id) in input.settings.teamChannels }))
         }
@@ -153,7 +166,10 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                             Triple(ch, score, p)
                         }
                         .filter { it.second > 0 }
-                        .sortedByDescending { qualityRank(input.quality[it.first.key] ?: nameQuality(it.first.name)) }
+                        .sortedWith(
+                            compareByDescending<Triple<LiveChannel, Int, EpgProgram?>> { rank(it.first) }
+                                .thenByDescending { qualityRank(input.quality[it.first.key] ?: nameQuality(it.first.name)) }
+                        )
                         .take(if (national) 4 else 6)
                         .forEach { (ch, score, p) -> add(ev.id, ch.key, score, "$b listed by ESPN", p); byNetwork++ }
                 }
@@ -185,7 +201,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                     )
                 }
             if (list.isEmpty()) continue
-            out[eventId] = sortMatches(list, input.settings.bestChannelFirst).take(8)
+            out[eventId] = sortMatches(list, input.settings.bestChannelFirst, rank).take(8)
         }
         val summary = "Sports: ${wanted.size} games and events in the next day or so · channels found for ${out.size} " +
             "(guide $byGuide, channel names $byName, networks $byNetwork)"
@@ -516,19 +532,57 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             "4K" -> 4; "FHD" -> 3; "HD" -> 2; "SD" -> 1; else -> 2
         }
 
-        fun sortMatches(list: List<ChannelMatch>, bestFirst: Boolean): List<ChannelMatch> {
+        /** Your own region's words, as channel names and groups use them ("UK: TNT Sports 1", group "UK | Sports"). */
+        private val REGION_WORDS = mapOf(
+            "UK" to listOf("uk", "gb", "united kingdom", "britain", "england", "scotland"),
+            "IE" to listOf("ie", "ireland", "irish", "irl", "eir"),
+            "US" to listOf("us", "usa", "united states"),
+            "CA" to listOf("ca", "canada", "can"),
+            "AU" to listOf("au", "aus", "australia", "nz", "new zealand")
+        )
+
+        /**
+         * How much a channel is preferred for any game: 2 in a group you chose (Sports settings),
+         * 1 from your own region (its group or the start of its name says so), else 0.
+         */
+        fun preferenceRank(settings: SportsSettings): (LiveChannel) -> Int {
+            val groups = settings.preferredGroups.map { it.lowercase().trim() }.toSet()
+            val words = REGION_WORDS[SportsCatalog.regionOf(settings)].orEmpty()
+            return { ch ->
+                when {
+                    groups.isNotEmpty() && ch.group.lowercase().trim() in groups -> 2
+                    words.isNotEmpty() && (
+                        norm(ch.group).let { g -> words.any { hasWord(g, it) } } ||
+                            norm(ch.name.substringBefore(':').substringBefore('|').take(16)).let { n ->
+                                (ch.name.contains(':') || ch.name.contains('|')) && words.any { hasWord(n, it) }
+                            }
+                        ) -> 1
+                    else -> 0
+                }
+            }
+        }
+
+        fun sortMatches(list: List<ChannelMatch>, bestFirst: Boolean, rank: (LiveChannel) -> Int = { 0 }): List<ChannelMatch> {
             fun band(score: Int) = when {
                 score >= 150 -> 3
                 score >= 80 -> 2
                 score >= 55 -> 1
                 else -> 0
             }
+            // Your own picks first; then your groups and region; then how sure and how good.
             return if (bestFirst) list.sortedWith(
-                compareByDescending<ChannelMatch> { band(it.score) }
+                compareByDescending<ChannelMatch> { if (band(it.score) == 3) 1 else 0 }
+                    .thenByDescending { rank(it.channel) }
+                    .thenByDescending { band(it.score) }
                     .thenByDescending { qualityRank(it.quality) }
                     .thenByDescending { it.score }
                     .thenBy { it.channel.name.length }
-            ) else list.sortedWith(compareByDescending<ChannelMatch> { it.score }.thenBy { it.channel.number })
+            ) else list.sortedWith(
+                compareByDescending<ChannelMatch> { if (band(it.score) == 3) 1 else 0 }
+                    .thenByDescending { rank(it.channel) }
+                    .thenByDescending { it.score }
+                    .thenBy { it.channel.number }
+            )
         }
     }
 }
