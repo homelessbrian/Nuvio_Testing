@@ -69,7 +69,6 @@ class LiveTvPreferences @Inject constructor(
         val showProgramTimes = booleanPreferencesKey("show_program_times")
         val showEpisodeNumbers = booleanPreferencesKey("show_episode_numbers")
         val guideSize = stringPreferencesKey("guide_size")
-        val stripeMissingGuide = booleanPreferencesKey("stripe_missing_guide")
         val epgOffset = intPreferencesKey("epg_offset_minutes")
         val reverseZap = booleanPreferencesKey("reverse_zap")
         val zapMode = stringPreferencesKey("zap_mode")
@@ -160,6 +159,7 @@ class LiveTvPreferences @Inject constructor(
         val clockOpacity = intPreferencesKey("clock_opacity")
         val clockBackground = booleanPreferencesKey("clock_background")
         val panelBackground = stringPreferencesKey("panel_background")
+        val guideBackdrop = stringPreferencesKey("guide_backdrop")
         val recentInPanel = booleanPreferencesKey("recent_in_panel")
         val panelRow = stringPreferencesKey("panel_row")
         val channelSurf = booleanPreferencesKey("channel_surf")
@@ -301,7 +301,6 @@ class LiveTvPreferences @Inject constructor(
             showProgramTimes = p[Keys.showProgramTimes] ?: d.showProgramTimes,
             showEpisodeNumbers = p[Keys.showEpisodeNumbers] ?: d.showEpisodeNumbers,
             guideSize = p[Keys.guideSize] ?: d.guideSize,
-            stripeMissingGuide = p[Keys.stripeMissingGuide] ?: d.stripeMissingGuide,
             epgOffsetMinutes = p[Keys.epgOffset] ?: d.epgOffsetMinutes,
             reverseZap = p[Keys.reverseZap] ?: d.reverseZap,
             zapMode = p[Keys.zapMode]?.let { runCatching { ZapMode.valueOf(it) }.getOrNull() } ?: d.zapMode,
@@ -391,6 +390,7 @@ class LiveTvPreferences @Inject constructor(
             clockOpacity = p[Keys.clockOpacity] ?: d.clockOpacity,
             clockBackground = p[Keys.clockBackground] ?: d.clockBackground,
             panelBackground = p[Keys.panelBackground] ?: d.panelBackground,
+            guideBackdrop = p[Keys.guideBackdrop] ?: d.guideBackdrop,
             recentInPanel = p[Keys.recentInPanel] ?: d.recentInPanel,
             // Before the choice existed it was an on / off switch for Recent.
             panelRow = p[Keys.panelRow] ?: if (p[Keys.recentInPanel] == false) "OFF" else d.panelRow,
@@ -490,7 +490,6 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.showProgramTimes] = s.showProgramTimes
         p[Keys.showEpisodeNumbers] = s.showEpisodeNumbers
         p[Keys.guideSize] = s.guideSize
-        p[Keys.stripeMissingGuide] = s.stripeMissingGuide
         p[Keys.epgOffset] = s.epgOffsetMinutes
         p[Keys.reverseZap] = s.reverseZap
         p[Keys.zapMode] = s.zapMode.name
@@ -577,6 +576,7 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.clockOpacity] = s.clockOpacity
         p[Keys.clockBackground] = s.clockBackground
         p[Keys.panelBackground] = s.panelBackground
+        p[Keys.guideBackdrop] = s.guideBackdrop
         p[Keys.recentInPanel] = s.recentInPanel
         p[Keys.panelRow] = s.panelRow
         p[Keys.channelSurf] = s.channelSurf

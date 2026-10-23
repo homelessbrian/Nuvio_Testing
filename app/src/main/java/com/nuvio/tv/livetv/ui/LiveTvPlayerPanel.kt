@@ -193,34 +193,36 @@ internal fun LiveTvPlayerPanel(
     Box(
         modifier = modifier
             .fillMaxWidth()
-            .padding(start = 36.dp, end = 36.dp, bottom = 22.dp, top = 12.dp)
+            .padding(start = 36.dp, end = 36.dp, bottom = 14.dp, top = 8.dp)
     ) {
         Column(
             Modifier
                 .fillMaxWidth()
                 .glass(glassColor(background))
-                .padding(horizontal = 18.dp, vertical = 14.dp)
+                // Equal on every side, so the poster (and everything else) sits in an evenly
+                // framed card instead of a wider gap on one axis than the other.
+                .padding(14.dp)
         ) {
             Row(verticalAlignment = Alignment.CenterVertically) {
                 // ---- left: the poster, or the channel's logo on a tile
                 if (showPoster) {
-                    val shape = RoundedCornerShape(12.dp)
+                    val shape = RoundedCornerShape(10.dp)
                     Box(
-                        Modifier.width(64.dp).height(96.dp).clip(shape)
+                        Modifier.width(52.dp).height(76.dp).clip(shape)
                             .background(colors.BackgroundCard.copy(alpha = 0.85f))
                             .border(1.dp, Color.White.copy(alpha = 0.12f), shape),
                         contentAlignment = Alignment.Center
                     ) {
                         if (!poster.isNullOrBlank()) LivePosterImage(poster, Modifier.fillMaxSize())
-                        else ChannelLogo(channel.logo, 36.dp)
+                        else ChannelLogo(channel.logo, 30.dp)
                     }
-                    Spacer(Modifier.width(16.dp))
+                    Spacer(Modifier.width(14.dp))
                 } else if (showChannel && !channel.logo.isNullOrBlank()) {
                     Box(
-                        Modifier.size(56.dp).clip(RoundedCornerShape(12.dp)).background(Color.White.copy(alpha = 0.10f)),
+                        Modifier.size(48.dp).clip(RoundedCornerShape(10.dp)).background(Color.White.copy(alpha = 0.10f)),
                         contentAlignment = Alignment.Center
-                    ) { ChannelLogo(channel.logo, 40.dp) }
-                    Spacer(Modifier.width(16.dp))
+                    ) { ChannelLogo(channel.logo, 34.dp) }
+                    Spacer(Modifier.width(14.dp))
                 }
 
                 // ---- middle: channel line, title, description, the controls and progress
@@ -261,14 +263,14 @@ internal fun LiveTvPlayerPanel(
                         }
                         Spacer(Modifier.height(4.dp))
                     }
-                    LiveText(title, size = 24.sp, weight = FontWeight.ExtraBold, maxLines = 1, marquee = true, color = colors.TextPrimary)
+                    LiveText(title, size = 20.sp, weight = FontWeight.ExtraBold, maxLines = 1, marquee = true, color = colors.TextPrimary)
                     val line = listOfNotNull(meta.takeIf { it.isNotBlank() }, desc).joinToString("  ·  ")
                     if (on(BarPart.DESCRIPTION) && (line.isNotEmpty() || browsing)) {
                         Spacer(Modifier.height(2.dp))
                         LiveText(line.ifEmpty { " " }, size = 12.sp, color = colors.TextSecondary, maxLines = if (full) 2 else 1)
                     }
                     if (full || showProgress) {
-                        Spacer(Modifier.height(8.dp))
+                        Spacer(Modifier.height(6.dp))
                         Row(verticalAlignment = Alignment.CenterVertically) {
                             if (full) {
                                 listOf(PanelControl.BACK, PanelControl.PLAY, PanelControl.FORWARD).filter { it in controls }.forEach { c ->
@@ -305,11 +307,11 @@ internal fun LiveTvPlayerPanel(
 
                 // ---- right: the clock and what's next
                 if (showClock || showNext) {
-                    Spacer(Modifier.width(16.dp))
-                    Box(Modifier.width(1.dp).height(84.dp).background(Color.White.copy(alpha = 0.10f)))
-                    Spacer(Modifier.width(16.dp))
+                    Spacer(Modifier.width(14.dp))
+                    Box(Modifier.width(1.dp).height(60.dp).background(Color.White.copy(alpha = 0.10f)))
+                    Spacer(Modifier.width(14.dp))
                     Column(Modifier.widthIn(min = 70.dp, max = if (showNext) 190.dp else 110.dp)) {
-                        if (showClock) LiveText(clock, size = 22.sp, weight = FontWeight.ExtraBold, color = colors.TextPrimary)
+                        if (showClock) LiveText(clock, size = 19.sp, weight = FontWeight.ExtraBold, color = colors.TextPrimary)
                         if (showNext) {
                             if (showClock) Spacer(Modifier.height(4.dp))
                             LiveText(
@@ -322,9 +324,9 @@ internal fun LiveTvPlayerPanel(
                 }
             }
             if (withRecent) {
-                Spacer(Modifier.height(10.dp))
+                Spacer(Modifier.height(6.dp))
                 Box(Modifier.fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.08f)))
-                Spacer(Modifier.height(8.dp))
+                Spacer(Modifier.height(6.dp))
                 RecentRow(recent.orEmpty(), recentFocus, recentTitle, recentClear)
             }
         }
@@ -345,7 +347,7 @@ private fun GlassChip(text: String) {
 @Composable
 private fun RoundButton(icon: ImageVector, focused: Boolean, big: Boolean) {
     val colors = NuvioTheme.colors
-    val size: Dp = if (big) 38.dp else 32.dp
+    val size: Dp = if (big) 32.dp else 27.dp
     Box(
         modifier = Modifier
             .graphicsLayer { val s = if (focused) 1.08f else 1f; scaleX = s; scaleY = s }
@@ -355,7 +357,7 @@ private fun RoundButton(icon: ImageVector, focused: Boolean, big: Boolean) {
             .border(if (focused) 3.dp else 0.dp, if (focused) Color.White.copy(alpha = 0.25f) else Color.Transparent, CircleShape),
         contentAlignment = Alignment.Center
     ) {
-        Icon(icon, contentDescription = null, tint = if (focused) Color(0xFF111111) else colors.TextPrimary, modifier = Modifier.size(if (big) 22.dp else 18.dp))
+        Icon(icon, contentDescription = null, tint = if (focused) Color(0xFF111111) else colors.TextPrimary, modifier = Modifier.size(if (big) 18.dp else 15.dp))
     }
 }
 
@@ -441,39 +443,46 @@ private fun RecentRow(recent: List<PanelRecent>, focus: Int?, title: String, sho
         Spacer(Modifier.width(4.dp))
         androidx.compose.foundation.lazy.LazyRow(
             state = state,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 4.dp),
+            horizontalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 4.dp, vertical = 2.dp),
             userScrollEnabled = false
         ) {
             item(key = "guide") {
-                RecentTile(focused = focus == 0, width = 64.dp) {
-                    Icon(Icons.Default.GridView, contentDescription = null, tint = colors.TextPrimary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.height(2.dp))
-                    LiveText("TV Guide", size = 10.sp, weight = FontWeight.SemiBold, color = colors.TextPrimary)
+                val f = focus == 0
+                val fg = if (f) Color(0xFF111111) else colors.TextPrimary
+                RecentTile(focused = f, width = 56.dp) {
+                    Icon(Icons.Default.GridView, contentDescription = null, tint = fg, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.height(1.dp))
+                    LiveText("TV Guide", size = 9.sp, weight = FontWeight.SemiBold, color = fg)
                 }
             }
             recent.forEachIndexed { i, r ->
                 item(key = "ch:" + r.channel.key) {
-                    RecentTile(focused = focus == i + 1, width = 96.dp, progress = r.progress) {
-                        if (!r.channel.logo.isNullOrBlank()) ChannelLogo(r.channel.logo, 17.dp)
-                        else LiveText(r.channel.name, size = 12.sp, weight = FontWeight.Bold, color = colors.TextPrimary, maxLines = 1)
-                        Spacer(Modifier.height(2.dp))
-                        LiveText(r.title ?: r.channel.name, size = 9.sp, color = colors.TextSecondary, maxLines = 1)
+                    val f = focus == i + 1
+                    val fg = if (f) Color(0xFF111111) else colors.TextPrimary
+                    val fgDim = if (f) Color(0xFF111111).copy(alpha = 0.65f) else colors.TextSecondary
+                    RecentTile(focused = f, width = 86.dp, progress = r.progress) {
+                        if (!r.channel.logo.isNullOrBlank()) ChannelLogo(r.channel.logo, 15.dp)
+                        else LiveText(r.channel.name, size = 11.sp, weight = FontWeight.Bold, color = fg, maxLines = 1)
+                        Spacer(Modifier.height(1.dp))
+                        LiveText(r.title ?: r.channel.name, size = 9.sp, color = fgDim, maxLines = 1)
                     }
                 }
             }
             if (showClear) item(key = "clear") {
-                RecentTile(focused = focus == recent.size + 1, width = 64.dp) {
-                    Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = colors.TextSecondary, modifier = Modifier.size(16.dp))
-                    Spacer(Modifier.height(2.dp))
-                    LiveText("Clear", size = 10.sp, weight = FontWeight.SemiBold, color = colors.TextSecondary)
+                val f = focus == recent.size + 1
+                val fg = if (f) Color(0xFF111111) else colors.TextSecondary
+                RecentTile(focused = f, width = 56.dp) {
+                    Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = fg, modifier = Modifier.size(14.dp))
+                    Spacer(Modifier.height(1.dp))
+                    LiveText("Clear", size = 9.sp, weight = FontWeight.SemiBold, color = fg)
                 }
             }
         }
     }
 }
 
-private val TILE_H = 44.dp
+private val TILE_H = 34.dp
 
 @Composable
 private fun RecentTile(
@@ -483,18 +492,20 @@ private fun RecentTile(
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
     val colors = NuvioTheme.colors
-    val shape = RoundedCornerShape(10.dp)
+    val shape = RoundedCornerShape(9.dp)
     Box(
         modifier = Modifier
             .graphicsLayer { val s = if (focused) 1.06f else 1f; scaleX = s; scaleY = s }
             .width(width)
             .height(TILE_H)
             .clip(shape)
-            .background(if (focused) Color.White.copy(alpha = 0.22f) else Color.White.copy(alpha = 0.07f))
-            .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = 0.08f), shape)
+            // Dark, not white-tinted: stays readable over bright video regardless of what's
+            // behind the (translucent) bar, instead of relying on contrast with the picture.
+            .background(if (focused) Color.White else Color.Black.copy(alpha = 0.45f))
+            .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = 0.12f), shape)
     ) {
         Column(
-            modifier = Modifier.fillMaxSize().padding(horizontal = 6.dp),
+            modifier = Modifier.fillMaxSize().padding(horizontal = 5.dp),
             horizontalAlignment = Alignment.CenterHorizontally,
             verticalArrangement = Arrangement.Center,
             content = content

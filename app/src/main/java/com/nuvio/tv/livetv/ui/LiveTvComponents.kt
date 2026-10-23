@@ -114,6 +114,36 @@ internal fun LiveText(
 }
 
 /**
+ * The backdrop behind the whole guide / Sports hub (Settings → "Guide & Sports Background"). A
+ * flat near-black background made the glass cards' translucency invisible — the fill and what's
+ * behind it were nearly the same tone, so alpha blending had nothing to show against. A gradient
+ * with real hue and brightness range gives the glass something to read against.
+ */
+private fun backdropStops(style: String): List<Pair<Float, Color>> = when (style) {
+    "graphite" -> listOf(0.0f to Color(0xFF3A3D46), 0.4f to Color(0xFF24262C), 0.75f to Color(0xFF17181C), 1.0f to Color(0xFF0E0F11))
+    "oled" -> listOf(0.0f to Color(0xFF15161A), 0.45f to Color(0xFF0A0A0C), 1.0f to Color(0xFF000000))
+    "red" -> listOf(0.0f to Color(0xFF5A1B24), 0.4f to Color(0xFF35101A), 0.75f to Color(0xFF220A12), 1.0f to Color(0xFF140609))
+    else -> listOf(0.0f to Color(0xFF1B3A66), 0.4f to Color(0xFF0E2340), 0.75f to Color(0xFF081528), 1.0f to Color(0xFF050D1A)) // "midnight"
+}
+
+/** Scales with the screen (a fixed-pixel gradient looked tiny on 4K, oversized at 720p). */
+internal fun guideBackdropBrush(style: String): Brush {
+    val stops = backdropStops(style)
+    return object : androidx.compose.ui.graphics.ShaderBrush() {
+        override fun createShader(size: androidx.compose.ui.geometry.Size): androidx.compose.ui.graphics.Shader {
+            val radius = (maxOf(size.width, size.height) * 0.95f).coerceAtLeast(1f)
+            return androidx.compose.ui.graphics.RadialGradientShader(
+                center = Offset(size.width * 0.18f, size.height * 0.10f),
+                radius = radius,
+                colors = stops.map { it.second },
+                colorStops = stops.map { it.first },
+                tileMode = androidx.compose.ui.graphics.TileMode.Clamp
+            )
+        }
+    }
+}
+
+/**
  * Guide tiles. The theme's raised and card surfaces, which carry its tint (warm for Amber, cool
  * for Ocean…), instead of its plain neutral greys, which looked flat. When "pure black surfaces"
  * makes them black, fixed dark greys keep the tiles visible.
@@ -121,15 +151,17 @@ internal fun LiveText(
 @Composable
 internal fun guideSurface(): Color {
     val c = NuvioTheme.colors.BackgroundElevated
-    // A touch see-through (not flat), to match the glass look of the full-screen player's bar.
-    return (if (c.luminance() < 0.003f) Color(0xFF1C1C1F) else c).copy(alpha = 0.92f)
+    // See-through (not flat), to match the glass look of the full-screen player's bar. The
+    // tiles also get a soft white edge (see ProgramBlock/channel cell) — the alpha alone barely
+    // shows against a background this close in tone, the border is what reads as "glass".
+    return (if (c.luminance() < 0.003f) Color(0xFF1C1C1F) else c).copy(alpha = 0.82f)
 }
 
 /** Shows on now, and the group on screen: a step lighter than [guideSurface]. */
 @Composable
 internal fun guideSurfaceVariant(): Color {
     val c = NuvioTheme.colors.BackgroundCard
-    return (if (c.luminance() < 0.003f) Color(0xFF26262B) else c).copy(alpha = 0.92f)
+    return (if (c.luminance() < 0.003f) Color(0xFF26262B) else c).copy(alpha = 0.85f)
 }
 
 /** Background / border / text colors for a focused or unfocused guide cell. */

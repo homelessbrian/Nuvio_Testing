@@ -597,9 +597,10 @@ fun LiveTvPlayerScreen(
         // recording), playback buttons and quick options. Stays up while paused.
         // Only when you paused it (not while changing channel, loading or reconnecting).
         val pausedNow = playback.userPaused && current != null && playback.error == null
-        // The full panel closes by itself after a while without a button press (not while paused).
-        LaunchedEffect(bannerToken, panelFull, pausedNow) {
-            if (panelFull && !pausedNow) { delay(10_000); closeFull(); bannerVisible = false }
+        // The full panel closes by itself after a while without a button press (not while paused,
+        // and not while the gear panel or another dialog is open over it).
+        LaunchedEffect(bannerToken, panelFull, pausedNow, dialog) {
+            if (panelFull && !pausedNow && dialog == PlayerDialog.NONE) { delay(10_000); closeFull(); bannerVisible = false }
         }
         // The always-on corner clock, out of the way while the panel, channel list or a menu is
         // up (the panel shows the time itself).

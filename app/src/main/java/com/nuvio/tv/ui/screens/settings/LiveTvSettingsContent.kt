@@ -668,12 +668,6 @@ fun LiveTvSettingsContent(
                         { update { it.copy(showEpisodeNumbers = !it.showEpisodeNumbers) } }
                     )
                     SettingsToggleRow(
-                        "Striped Bars When There's No Guide",
-                        "Channels with no show listings get striped bars. Turn off to show the channel name in a plain bar instead.",
-                        s.stripeMissingGuide,
-                        { update { it.copy(stripeMissingGuide = !it.stripeMissingGuide) } }
-                    )
-                    SettingsToggleRow(
                         "Show the \"Now\" Line",
                         "The line that marks the current time across the guide",
                         s.showNowLine,
@@ -789,6 +783,21 @@ fun LiveTvSettingsContent(
                         onClick = {
                             update {
                                 it.copy(panelBackground = when (it.panelBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" })
+                            }
+                        }
+                    )
+                    SettingsActionRow(
+                        title = "Guide & Sports Background",
+                        subtitle = "The backdrop behind the TV Guide and the Sports hub",
+                        value = when (s.guideBackdrop) { "graphite" -> "Graphite"; "oled" -> "OLED Black"; "red" -> "Dark Red"; else -> "Midnight Blue" },
+                        onClick = {
+                            update {
+                                it.copy(guideBackdrop = when (it.guideBackdrop) {
+                                    "midnight" -> "graphite"
+                                    "graphite" -> "oled"
+                                    "oled" -> "red"
+                                    else -> "midnight"
+                                })
                             }
                         }
                     )

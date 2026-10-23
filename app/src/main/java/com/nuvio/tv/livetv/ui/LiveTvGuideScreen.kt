@@ -846,7 +846,7 @@ fun LiveTvGuideScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(NuvioTheme.colors.Background)
+            .background(guideBackdropBrush(settings.guideBackdrop))
             .onGloballyPositioned { rootBounds = it.boundsInRoot() }
             .onFocusChanged {
                 if (it.hasFocus && !guideHasFocus) lastKeyAt = System.currentTimeMillis()
@@ -2217,7 +2217,7 @@ private fun GuideRow(
                 .padding(end = 6.dp)
                 .clip(cellShape)
                 .background(cell.background)
-                .border(2.dp, cell.border, cellShape)
+                .border(2.dp, if (cell.border == Color.Transparent) Color.White.copy(alpha = 0.09f) else cell.border, cellShape)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2322,13 +2322,10 @@ private fun GuideRow(
             // (Also while the highlight is on the channel itself: a show lights up then too, and
             // the empty row showed a half-hour "No information" block instead.)
             val emptyRowFocused = visible.isEmpty() && focusColumn != null
-            // "Mark Channels Without Guide Info" off: no stripes, and the empty row looks like an
-            // ordinary show named after the channel.
-            val striped = settings.stripeMissingGuide
             if (visible.isEmpty()) {
                 val emptyColors = liveCellColors(
                     focused = emptyRowFocused,
-                    idle = if (striped) guideSurface().copy(alpha = 0.55f) else guideSurface()
+                    idle = guideSurface().copy(alpha = 0.55f)
                 )
                 Box(
                     modifier = Modifier
@@ -2336,31 +2333,23 @@ private fun GuideRow(
                         .padding(horizontal = 3.dp)
                         .clip(cellShape)
                         .background(emptyColors.background)
-                        .then(
-                            if (!striped) Modifier
-                            else Modifier.noGuideStripes(
-                                if (emptyRowFocused) NuvioTheme.colors.Secondary.copy(alpha = 0.10f)
-                                else guideSurfaceVariant().copy(alpha = 0.45f)
-                            )
-                        )
-                        .border(2.dp, emptyColors.border, cellShape)
+                        .border(2.dp, if (emptyColors.border == Color.Transparent) Color.White.copy(alpha = 0.09f) else emptyColors.border, cellShape)
                         .padding(horizontal = 12.dp),
                     contentAlignment = Alignment.CenterStart
                 ) {
                     androidx.compose.material3.Text(
                         // The channel's name, so you can see what the row is (24/7 channels'
-                        // names also say what's on).
+                        // names also say what's on). Dim and italic: nothing's actually listed.
                         text = channel.name,
-                        color = if (emptyRowFocused || !striped) emptyColors.text else NuvioTheme.colors.TextTertiary,
+                        color = if (emptyRowFocused) emptyColors.text else NuvioTheme.colors.TextTertiary,
                         fontSize = gsp(14f),
-                        fontStyle = if (striped) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                        fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                         fontWeight = if (emptyRowFocused) FontWeight.Bold else FontWeight.Normal,
                         maxLines = 1
                     )
                 }
             }
-            // Gaps in a channel's listings (nothing listed for a while, then shows again): the
-            // same striped tile as a channel with no guide at all, instead of empty background.
+            // Gaps in a channel's listings (nothing listed for a while, then shows again).
             if (visible.isNotEmpty()) {
                 laid.gaps.forEach { (from, to) ->
                     val gx = xOf(from)
@@ -2373,18 +2362,18 @@ private fun GuideRow(
                                 .fillMaxHeight()
                                 .padding(horizontal = 3.dp)
                                 .clip(cellShape)
-                                .background(if (striped) guideSurface().copy(alpha = 0.55f) else guideSurface())
-                                .then(if (striped) Modifier.noGuideStripes(guideSurfaceVariant().copy(alpha = 0.45f)) else Modifier)
+                                .background(guideSurface().copy(alpha = 0.55f))
+                                .border(2.dp, Color.White.copy(alpha = 0.09f), cellShape)
                                 .padding(horizontal = 12.dp),
                             contentAlignment = Alignment.CenterStart
                         ) {
                             // Something is on; the guide just doesn't say what.
                             if (gw > 90.dp) {
                                 androidx.compose.material3.Text(
-                                    text = if (striped) "No information" else channel.name,
-                                    color = if (striped) NuvioTheme.colors.TextTertiary else NuvioTheme.colors.TextPrimary,
+                                    text = "No information",
+                                    color = NuvioTheme.colors.TextTertiary,
                                     fontSize = gsp(14f),
-                                    fontStyle = if (striped) androidx.compose.ui.text.font.FontStyle.Italic else androidx.compose.ui.text.font.FontStyle.Normal,
+                                    fontStyle = androidx.compose.ui.text.font.FontStyle.Italic,
                                     maxLines = 1
                                 )
                             }
@@ -2431,7 +2420,7 @@ private fun GuideRow(
                 val x = xOf(focusedBlock.startMs)
                 val w = (xOf(focusedBlock.stopMs) - x).coerceAtLeast(2.dp)
                 ProgramBlock(
-                    title = if (settings.stripeMissingGuide) "No information" else channel.name, subtitle = null, x = x, width = w,
+                    title = "No information", subtitle = null, x = x, width = w,
                     colors = liveCellColors(focused = true, idle = guideSurface()),
                     focused = true, progress = null, continuesLeft = false
                 )
@@ -2499,7 +2488,8 @@ private fun ProgramBlock(
             .padding(horizontal = 3.dp)
             .clip(shape)
             .background(colors.background)
-            .border(2.dp, colors.border, shape)
+            // A soft glass edge on every tile (not focused ones only), to match the bar and header.
+            .border(2.dp, if (colors.border == Color.Transparent) Color.White.copy(alpha = 0.09f) else colors.border, shape)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
@@ -3767,29 +3757,6 @@ private const val OK_WITH_ARROW_MS = 250L
 
 /** OK held this long counts as a long press (also without key repeats, e.g. HDMI-CEC remotes). */
 internal const val LONG_PRESS_MS = 550L
-
-/**
- * Diagonal stripes for a channel with no guide info, so an empty row reads as "nothing listed"
- * rather than a missing show. Drawn in the theme's own surface colors.
- */
-private fun Modifier.noGuideStripes(stripe: Color): Modifier = this.drawWithCache {
-    val gap = 10.dp.toPx()
-    val width = gap
-    val step = gap + width
-    onDrawBehind {
-        // Lines from bottom-left to top-right ("/"), spaced evenly across the whole tile.
-        var x = -size.height
-        while (x < size.width) {
-            drawLine(
-                color = stripe,
-                start = androidx.compose.ui.geometry.Offset(x, size.height),
-                end = androidx.compose.ui.geometry.Offset(x + size.height, 0f),
-                strokeWidth = width
-            )
-            x += step * 1.4142135f
-        }
-    }
-}
 
 /** How tall each channel row is: compact or normal, taller when show times are shown. */
 private fun guideRowHeight(s: LiveTvSettings): Dp = when (s.effectiveGuideSize) {

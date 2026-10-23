@@ -4,6 +4,7 @@ package com.nuvio.tv.livetv.sports
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
@@ -163,6 +164,7 @@ fun SportsScreen(
     val problem by viewModel.problem.collectAsStateWithLifecycle()
     val hasChannels by viewModel.hasChannels.collectAsStateWithLifecycle()
     val playingKey by viewModel.playingKey.collectAsStateWithLifecycle()
+    val backdrop by viewModel.backdrop.collectAsStateWithLifecycle()
 
     var day by rememberSaveable { mutableIntStateOf(0) }
     var chip by rememberSaveable { mutableStateOf<String?>(null) }
@@ -260,7 +262,7 @@ fun SportsScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(NuvioTheme.colors.Background)
+            .background(com.nuvio.tv.livetv.ui.guideBackdropBrush(backdrop))
             .onGloballyPositioned { root = it.boundsInRoot() }
             .onPreviewKeyEvent { e ->
                 if (e.key != Key.Back) return@onPreviewKeyEvent false
@@ -1484,7 +1486,8 @@ private fun ChannelLine(channel: LiveChannel, detail: String, modifier: Modifier
         modifier
             .fillMaxWidth()
             .clip(SportsLook.SmallShape)
-            .background(if (focused) Color.White else Color.Transparent)
+            .background(if (focused) NuvioTheme.colors.FocusBackground.copy(alpha = 0.25f) else Color.Transparent)
+            .border(if (focused) NuvioTheme.focusRing.border(2.dp) else androidx.compose.foundation.BorderStroke(0.dp, Color.Transparent), SportsLook.SmallShape)
             .onFocusChanged { focused = it.isFocused }
             .clickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -1492,8 +1495,8 @@ private fun ChannelLine(channel: LiveChannel, detail: String, modifier: Modifier
     ) {
         ChannelLogo(channel.logo, 22.dp)
         Spacer(Modifier.width(10.dp))
-        LiveText(channel.name, color = if (focused) SportsLook.Ink else Color.White, size = 14.sp, weight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
-        LiveText(detail, color = if (focused) Color(0xFF555A66) else SportsLook.Dim, size = 11.sp)
+        LiveText(channel.name, color = Color.White, size = 14.sp, weight = FontWeight.SemiBold, modifier = Modifier.weight(1f))
+        LiveText(detail, color = SportsLook.Dim, size = 11.sp)
     }
 }
 

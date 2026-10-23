@@ -216,8 +216,6 @@ data class LiveTvSettings(
     val showEpisodeNumbers: Boolean = true,
     /** Guide Size: COMPACT, STANDARD, LARGE or XLARGE (blank = from the old Slimmer Rows switch). */
     val guideSize: String = "",
-    /** Diagonal stripes on channels (and stretches of time) the guide has nothing for. Off: plain, like a show. */
-    val stripeMissingGuide: Boolean = true,
     val epgOffsetMinutes: Int = 0,
     val reverseZap: Boolean = false,
     val zapMode: ZapMode = ZapMode.GROUP,
@@ -378,6 +376,8 @@ data class LiveTvSettings(
     val clockBackground: Boolean = true,
     /** How dark the info panel's background is: "standard", "darker" or "solid". */
     val panelBackground: String = "standard",
+    /** The backdrop behind the guide and Sports hub: "midnight", "graphite", "oled" or "red". */
+    val guideBackdrop: String = "midnight",
     /** The row of recently watched channels at the bottom of the full info panel (OK). */
     val recentInPanel: Boolean = true,
     /** The row at the bottom of the full info panel: "RECENT", "FAVORITES" or "OFF". */
