@@ -68,6 +68,9 @@ internal fun GearPanel(
     /** "Watch from the beginning" (live, catch-up channel), "Back to live" (replay) or "Go live" (paused). */
     timeAction: String?,
     hidden: Set<String>,
+    /** What the row under the bar lists: "RECENT", "FAVORITES" or "OFF". */
+    channelRow: String,
+    onChannelRow: () -> Unit,
     onToggle: (String) -> Unit,
     onReset: () -> Unit,
     onRecord: (() -> Unit)?,
@@ -202,6 +205,17 @@ internal fun GearPanel(
                         }
                         if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
+                }
+                // Which channels the row under the bar lists (OK cycles it).
+                GearRow(Modifier.fillMaxWidth(), onClick = onChannelRow) { focused ->
+                    Column(Modifier.weight(1f)) {
+                        LiveText("Channel row", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                        LiveText("What the row under the bar lists", size = 10.sp, color = gearText(focused, dim = true))
+                    }
+                    LiveText(
+                        when (channelRow) { "FAVORITES" -> "Favorites"; "OFF" -> "Off"; else -> "Recently watched" },
+                        size = 13.sp, weight = FontWeight.Medium, color = gearText(focused)
+                    )
                 }
             }
         }

@@ -791,13 +791,14 @@ internal fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Watching
-            if (show(LiveTvPage.GUIDE)) item(key = "watching") {
+            if (show(LiveTvPage.PLAYBACK)) item(key = "watching") {
                 LiveSection(
                     title = "Opening & Channel Surfing",
                     summary = "Opening Live TV, changing channels, the info bar",
                     icon = Icons.Default.PlayCircleFilled,
                     open = "watching" in open,
-                    onToggle = { toggle("watching") }
+                    onToggle = { toggle("watching") },
+                    focusFirst = firstFocus(LiveTvPage.PLAYBACK),
                 ) {
                     SubHeading("Opening Live TV")
                     SettingsToggleRow(
@@ -891,8 +892,7 @@ internal fun LiveTvSettingsContent(
                     summary = "The clock, frame rate, pausing and catch-up",
                     icon = Icons.Default.PlayCircleFilled,
                     open = "picture" in open,
-                    onToggle = { toggle("picture") },
-                    focusFirst = firstFocus(LiveTvPage.PLAYBACK)
+                    onToggle = { toggle("picture") }
                 ) {
                     SubHeading("On-Screen Clock")
                     SettingsActionRow(

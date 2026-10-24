@@ -953,6 +953,12 @@ fun LiveTvPlayerScreen(
                 sleepLabel = sleepAt?.let { "${((it - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min left" } ?: "Off",
                 timeAction = timeAction,
                 hidden = BarPart.parse(settings.barHidden),
+                channelRow = settings.panelRow,
+                onChannelRow = {
+                    viewModel.updateSettings {
+                        it.copy(panelRow = when (it.panelRow) { "RECENT" -> "FAVORITES"; "FAVORITES" -> "OFF"; else -> "RECENT" })
+                    }
+                },
                 onToggle = { part ->
                     viewModel.updateSettings { s ->
                         val cur = BarPart.parse(s.barHidden)

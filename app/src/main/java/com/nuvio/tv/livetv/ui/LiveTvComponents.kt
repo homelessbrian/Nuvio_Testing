@@ -158,21 +158,29 @@ private fun backdropBlobs(style: String): List<Blob> = when (style) {
 }
 
 /** Paints the backdrop; scales with the screen (fixed-pixel sizes looked tiny on 4K, huge at 720p). */
-internal fun Modifier.guideBackdrop(style: String): Modifier = this.drawWithCache {
-    // Painted once into a half-size picture, then just copied to the screen: drawing five
-    // full-screen gradients again on every redraw (each scroll step) made the guide sluggish
-    // on slower boxes. The gradients are soft, so the half-size picture looks the same.
-    val w = size.width.toInt().coerceAtLeast(1)
-    val h = size.height.toInt().coerceAtLeast(1)
-    val bw = (w / 2).coerceAtLeast(1)
-    val bh = (h / 2).coerceAtLeast(1)
-    val bmp = androidx.compose.ui.graphics.ImageBitmap(bw, bh)
-    androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
-        this, layoutDirection, androidx.compose.ui.graphics.Canvas(bmp), androidx.compose.ui.geometry.Size(bw.toFloat(), bh.toFloat())
-    ) { drawGuideBackdrop(style, bw.toFloat(), bh.toFloat()) }
-    onDrawBehind {
-        drawImage(bmp, dstSize = androidx.compose.ui.unit.IntSize(w, h))
+@Composable
+internal fun Modifier.guideBackdrop(style: String): Modifier {
+    // One modifier per style, kept across redraws. Built fresh on every pass, its picture was
+    // painted again (by the processor, five full-screen gradients) each time anything on the
+    // screen changed: that was the guide's freezing.
+    val painter = androidx.compose.runtime.remember(style) {
+        Modifier.drawWithCache {
+            // Painted once into a half-size picture, then just copied to the screen. The
+            // gradients are soft, so the half-size picture looks the same.
+            val w = size.width.toInt().coerceAtLeast(1)
+            val h = size.height.toInt().coerceAtLeast(1)
+            val bw = (w / 2).coerceAtLeast(1)
+            val bh = (h / 2).coerceAtLeast(1)
+            val bmp = androidx.compose.ui.graphics.ImageBitmap(bw, bh)
+            androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+                this, layoutDirection, androidx.compose.ui.graphics.Canvas(bmp), androidx.compose.ui.geometry.Size(bw.toFloat(), bh.toFloat())
+            ) { drawGuideBackdrop(style, bw.toFloat(), bh.toFloat()) }
+            onDrawBehind {
+                drawImage(bmp, dstSize = androidx.compose.ui.unit.IntSize(w, h))
+            }
+        }
     }
+    return this.then(painter)
 }
 
 private fun backdropBrushes(style: String, w: Float, h: Float): List<Brush> {
@@ -743,29 +751,33 @@ internal fun PlayerStatusMessage(
  * clip + background + border, whose rounded clip made every tile cost extra on slower boxes
  * (a guide screen has well over a hundred tiles). Children are only clipped when asked to.
  */
+@Composable
 internal fun Modifier.glassTile(
     fill: Color,
     edge: Color?,
     shape: androidx.compose.ui.graphics.Shape,
     clipChildren: Boolean = false
-): Modifier = this
-    .then(if (clipChildren) Modifier.clip(shape) else Modifier)
-    .drawWithCache {
-        val stroke = 2.dp.toPx()
-        val fillOutline = shape.createOutline(size, layoutDirection, this)
-        val edgeOutline = if (edge != null) {
-            val inner = androidx.compose.ui.geometry.Size((size.width - stroke).coerceAtLeast(1f), (size.height - stroke).coerceAtLeast(1f))
-            shape.createOutline(inner, layoutDirection, this)
-        } else null
-        onDrawBehind {
-            paintOutline(fillOutline, fill, null)
-            if (edge != null && edgeOutline != null) {
-                translate(stroke / 2f, stroke / 2f) {
-                    paintOutline(edgeOutline, edge, androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+): Modifier {
+    val painter = androidx.compose.runtime.remember(fill, edge, shape) {
+        Modifier.drawWithCache {
+            val stroke = 2.dp.toPx()
+            val fillOutline = shape.createOutline(size, layoutDirection, this)
+            val edgeOutline = if (edge != null) {
+                val inner = androidx.compose.ui.geometry.Size((size.width - stroke).coerceAtLeast(1f), (size.height - stroke).coerceAtLeast(1f))
+                shape.createOutline(inner, layoutDirection, this)
+            } else null
+            onDrawBehind {
+                paintOutline(fillOutline, fill, null)
+                if (edge != null && edgeOutline != null) {
+                    translate(stroke / 2f, stroke / 2f) {
+                        paintOutline(edgeOutline, edge, androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+                    }
                 }
             }
         }
     }
+    return this.then(if (clipChildren) Modifier.clip(shape) else Modifier).then(painter)
+}
 
 /**
  * Counts slow screen frames while a screen is open and writes the tally to the Start-Up Report,
