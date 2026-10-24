@@ -154,7 +154,7 @@ class LiveTvTimeshift(private val context: Context) {
         val began = System.currentTimeMillis()
         // The player has only just let go of its connection: give the provider a moment, or
         // accounts with one connection can refuse (or later cut) this one.
-        delay(1_500)
+        delay(2_500)
         var attempt = 0
         try {
             // Keeps going until you go live or change channel: a dropped connection is opened
@@ -199,7 +199,7 @@ class LiveTvTimeshift(private val context: Context) {
                 }
                 report.add("$label: connection ended after ${(System.currentTimeMillis() - t0) / 1000}s, ${bytes / 1024} KB ($why); reconnecting")
                 // Got nothing at all several times running: give up (the provider won't serve it).
-                if (bytes == 0L && attempt >= 4) { report.add("Pause buffer: gave up (no data)"); break }
+                if (bytes == 0L && attempt >= 9) { report.add("Pause buffer: gave up (no data)"); break }
                 if (bytes > 0) attempt = 1
             }
         } finally {

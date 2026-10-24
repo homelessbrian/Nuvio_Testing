@@ -843,6 +843,7 @@ fun LiveTvGuideScreen(
     // Where the preview window is (the video view sits there when not full screen).
     var rootBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     var previewBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
+    var headerGlassBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
     // Only a Back press that *started* in the guide counts as "hold Back" here.
     var backPressStartedHere by remember { mutableStateOf(false) }
     // Guide left alone for 2 minutes while a channel plays in the preview, with the guide itself
@@ -958,6 +959,7 @@ fun LiveTvGuideScreen(
                 poster = headerPoster,
                 onSurfaceAttached = { viewModel.playback.onSurfaceAttached() },
                 onPreviewBounds = { previewBounds = it },
+                onGlassBounds = { headerGlassBounds = it },
                 playlistName = if (settings.showPlaylistInInfo) headerChannel?.sourceId?.let { playlistNames[it] } else null,
                 settings = settings,
                 now = now,
@@ -1473,6 +1475,23 @@ fun LiveTvGuideScreen(
                     translate(-left, -top) {
                         drawGuideBackdrop(settings.guideBackdrop, rootW, rb.height)
                         if (showGlow) drawThemeGlow(accent, glowTop, rootW, glowH)
+                        // The preview sits on the header's glass panel; paint that too.
+                        val gb = headerGlassBounds
+                        if (gb != null) {
+                            val gl = gb.left - rb.left
+                            val gt = gb.top - rb.top
+                            val gc = glassColor(settings.panelBackground)
+                            val gr = (if (settings.smallHeader) 16.dp else 20.dp).toPx()
+                            drawRoundRect(
+                                brush = androidx.compose.ui.graphics.Brush.verticalGradient(
+                                    listOf(gc.copy(alpha = (gc.alpha - 0.06f).coerceAtLeast(0f)), gc),
+                                    startY = gt, endY = gt + gb.height
+                                ),
+                                topLeft = androidx.compose.ui.geometry.Offset(gl, gt),
+                                size = androidx.compose.ui.geometry.Size(gb.width, gb.height),
+                                cornerRadius = androidx.compose.ui.geometry.CornerRadius(gr, gr)
+                            )
+                        }
                     }
                     // Cut the rounded window back out, leaving only the corners.
                     drawRoundRect(
@@ -1985,7 +2004,9 @@ private fun GuideHeader(
     /** The preview took over the picture (the player checks the picture actually starts). */
     onSurfaceAttached: () -> Unit = {},
     /** Where the preview window is on screen (null when it isn't shown). */
-    onPreviewBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {}
+    onPreviewBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    /** Where the header's glass panel is (the preview sits on it). */
+    onGlassBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {}
 ) {
     if (!settings.showProgramDetails && !showPreview) {
         Row(
@@ -2013,6 +2034,7 @@ private fun GuideHeader(
             .fillMaxWidth()
             .height(if (small) 110.dp else 176.dp)
             .padding(start = 64.dp, end = 32.dp, top = if (small) 12.dp else 20.dp, bottom = if (small) 4.dp else 6.dp)
+            .onGloballyPositioned { onGlassBounds(it.boundsInRoot()) }
             .glass(glassColor(settings.panelBackground), RoundedCornerShape(if (small) 16.dp else 20.dp))
             .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(if (small) 16.dp else 20.dp)

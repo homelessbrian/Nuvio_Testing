@@ -370,7 +370,9 @@ class LiveTvPlaybackController @Inject constructor(
             _state.value = _state.value.copy(isBuffering = true)
             var waited = 0
             val f = java.io.File(session.playUri.path ?: "")
-            while (waited < 12_000) {
+            // Up to 25 s: a provider that allows one connection can take a while to let go of
+            // the one the player had, and the recording keeps trying meanwhile.
+            while (waited < 25_000) {
                 if (f.exists() && f.length() > 0) break
                 if (!timeshift.isRecording && waited > 2_000) break
                 delay(250); waited += 250
