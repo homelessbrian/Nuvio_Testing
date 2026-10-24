@@ -846,7 +846,7 @@ fun LiveTvGuideScreen(
     Box(
         modifier = Modifier
             .fillMaxSize()
-            .background(guideBackdropBrush(settings.guideBackdrop))
+            .guideBackdrop(settings.guideBackdrop)
             .onGloballyPositioned { rootBounds = it.boundsInRoot() }
             .onFocusChanged {
                 if (it.hasFocus && !guideHasFocus) lastKeyAt = System.currentTimeMillis()
@@ -2844,7 +2844,7 @@ private fun GroupItem(
                 when {
                     focused -> colors.border
                     selected -> NuvioTheme.colors.Secondary.copy(alpha = 0.8f)
-                    else -> Color.Transparent
+                    else -> GuideGlassEdge
                 },
                 shape
             )

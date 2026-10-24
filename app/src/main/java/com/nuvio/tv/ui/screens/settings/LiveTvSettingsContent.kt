@@ -1,5 +1,6 @@
 package com.nuvio.tv.ui.screens.settings
 
+import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -74,6 +75,23 @@ import java.util.Date
 private const val LIVE_TV_TITLE = "Live TV"
 private const val LIVE_TV_SUBTITLE = "Playlists, TV guide and channel options"
 
+/**
+ * Which tab of Live TV settings is showing. Settings has "Live TV" and four tabs next to it
+ * (Guide, Playback, On Demand, Integration); [ALL] is the old single long list, kept for the
+ * guide's long-press menu.
+ */
+internal enum class LiveTvPage(val title: String, val subtitle: String) {
+    ALL("Live TV", "Playlists, TV guide and channel options"),
+    MAIN("Live TV", "Playlists, channels, groups and help"),
+    GUIDE("Live TV \u00B7 Guide", "How the guide looks and behaves while you're browsing"),
+    PLAYBACK("Live TV \u00B7 Playback", "Picture, sound, pausing and recording"),
+    ON_DEMAND("Live TV \u00B7 On Demand", "Movies and shows from your provider"),
+    INTEGRATION("Live TV \u00B7 Integration", "How Live TV shows up in the rest of Nuvio")
+}
+
+/** On the four sub-tabs the sections sit open (there are only a few per tab), not folded. */
+private val LocalLiveFlat = androidx.compose.runtime.compositionLocalOf { false }
+
 /** Standalone version, opened from the guide's long-press menu. */
 @Composable
 fun LiveTvSettingsScreen(
@@ -81,7 +99,7 @@ fun LiveTvSettingsScreen(
     viewModel: LiveTvSettingsViewModel = hiltViewModel()
 ) {
     SettingsStandaloneScaffold(title = LIVE_TV_TITLE, subtitle = LIVE_TV_SUBTITLE) {
-        LiveTvSettingsContent(viewModel = viewModel)
+        LiveTvSettingsContent(viewModel = viewModel, page = LiveTvPage.ALL)
     }
 }
 
@@ -197,10 +215,15 @@ private fun sourceStatus(enabled: Boolean, updated: Long, error: String?, count:
 }
 
 @Composable
-fun LiveTvSettingsContent(
+internal fun LiveTvSettingsContent(
     viewModel: LiveTvSettingsViewModel = hiltViewModel(),
-    initialFocusRequester: FocusRequester? = null
+    initialFocusRequester: FocusRequester? = null,
+    page: LiveTvPage = LiveTvPage.ALL
 ) {
+    fun show(p: LiveTvPage) = page == LiveTvPage.ALL || page == p
+    val flat = page != LiveTvPage.ALL && page != LiveTvPage.MAIN
+    /** The first section on a sub-tab takes the focus when you come down from the tab bar. */
+    fun firstFocus(p: LiveTvPage): FocusRequester? = initialFocusRequester.takeIf { page == p }
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val epgs by viewModel.epgSources.collectAsStateWithLifecycle()
     val s by viewModel.settings.collectAsStateWithLifecycle()
@@ -230,9 +253,10 @@ fun LiveTvSettingsContent(
         verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
     ) {
         SettingsDetailHeader(
-            title = LIVE_TV_TITLE,
-            subtitle = if (status.loading) (status.message ?: "Updating…") else LIVE_TV_SUBTITLE
+            title = page.title,
+            subtitle = if (status.loading && !flat) (status.message ?: "Updating…") else page.subtitle
         )
+        androidx.compose.runtime.CompositionLocalProvider(LocalLiveFlat provides flat) {
         LazyColumn(
             modifier = Modifier
                 .fillMaxWidth()
@@ -241,7 +265,7 @@ fun LiveTvSettingsContent(
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
         ) {
             // ------------------------------------------------------------ Backup & Sync
-            item(key = "drive") {
+            if (show(LiveTvPage.MAIN)) item(key = "drive") {
                 DriveSyncCard(
                     modifier = if (initialFocusRequester != null) Modifier.focusRequester(initialFocusRequester) else Modifier,
                     state = drive,
@@ -268,7 +292,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Playlists & Guides
-            item(key = "sources") {
+            if (show(LiveTvPage.MAIN)) item(key = "sources") {
                 LiveSection(
                     title = "Playlists & Guides",
                     summary = if (status.loading) (status.message ?: "Updating…")
@@ -348,7 +372,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Channels
-            item(key = "channels") {
+            if (show(LiveTvPage.MAIN)) item(key = "channels") {
                 LiveSection(
                     title = "Channels",
                     summary = "Name cleanup, hidden channels and groups, your groups, resets",
@@ -421,7 +445,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Groups
-            item(key = "groups") {
+            if (show(LiveTvPage.MAIN)) item(key = "groups") {
                 LiveSection(
                     title = "Groups",
                     summary = "The group list on the left of the guide",
@@ -490,7 +514,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ On Demand
-            item(key = "on_demand") {
+            if (show(LiveTvPage.ON_DEMAND)) item(key = "on_demand") {
                 LiveSection(
                     title = "On Demand",
                     summary = when {
@@ -500,7 +524,8 @@ fun LiveTvSettingsContent(
                     },
                     icon = Icons.Default.Movie,
                     open = "on_demand" in open,
-                    onToggle = { toggle("on_demand") }
+                    onToggle = { toggle("on_demand") },
+                    focusFirst = firstFocus(LiveTvPage.ON_DEMAND)
                 ) {
                     Text(
                         text = "Movies and series from Xtream logins with movies & series switched on below.",
@@ -573,13 +598,14 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Guide Layout
-            item(key = "layout") {
+            if (show(LiveTvPage.GUIDE)) item(key = "layout") {
                 LiveSection(
                     title = "Guide Layout",
                     summary = "What the guide shows and how much fits",
                     icon = Icons.Default.GridView,
                     open = "layout" in open,
-                    onToggle = { toggle("layout") }
+                    onToggle = { toggle("layout") },
+                    focusFirst = firstFocus(LiveTvPage.GUIDE)
                 ) {
                     SubHeading("Top of the Guide")
                     SettingsToggleRow(
@@ -687,6 +713,21 @@ fun LiveTvSettingsContent(
                     )
                     SubHeading("Look")
                     SettingsActionRow(
+                        title = "Guide & Sports Background",
+                        subtitle = "The backdrop behind the TV Guide and the Sports hub",
+                        value = when (s.guideBackdrop) { "graphite" -> "Graphite"; "oled" -> "OLED Black"; "red" -> "Dark Red"; else -> "Midnight Blue" },
+                        onClick = {
+                            update {
+                                it.copy(guideBackdrop = when (it.guideBackdrop) {
+                                    "midnight" -> "graphite"
+                                    "graphite" -> "oled"
+                                    "oled" -> "red"
+                                    else -> "midnight"
+                                })
+                            }
+                        }
+                    )
+                    SettingsActionRow(
                         title = "Highlight Style",
                         subtitle = "How the selected show is marked: an outline, or filled with your theme color",
                         value = if (s.solidHighlight) "Solid" else "Outline",
@@ -702,10 +743,10 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Watching
-            item(key = "watching") {
+            if (show(LiveTvPage.GUIDE)) item(key = "watching") {
                 LiveSection(
-                    title = "Watching",
-                    summary = "Opening Live TV, changing channels, picture & sound",
+                    title = "Opening & Channel Surfing",
+                    summary = "Opening Live TV, changing channels, the info bar",
                     icon = Icons.Default.PlayCircleFilled,
                     open = "watching" in open,
                     onToggle = { toggle("watching") }
@@ -787,26 +828,24 @@ fun LiveTvSettingsContent(
                         }
                     )
                     SettingsActionRow(
-                        title = "Guide & Sports Background",
-                        subtitle = "The backdrop behind the TV Guide and the Sports hub",
-                        value = when (s.guideBackdrop) { "graphite" -> "Graphite"; "oled" -> "OLED Black"; "red" -> "Dark Red"; else -> "Midnight Blue" },
-                        onClick = {
-                            update {
-                                it.copy(guideBackdrop = when (it.guideBackdrop) {
-                                    "midnight" -> "graphite"
-                                    "graphite" -> "oled"
-                                    "oled" -> "red"
-                                    else -> "midnight"
-                                })
-                            }
-                        }
-                    )
-                    SettingsActionRow(
                         title = "Info Bar Stays For",
                         subtitle = "How long the show info stays on screen after changing channel or pressing OK",
                         value = "${s.infoBannerSeconds} seconds",
                         onClick = { dialog = LiveDialog.BannerTime }
                     )
+                }
+            }
+
+            // ------------------------------------------------------------ Picture, Sound & Clock
+            if (show(LiveTvPage.PLAYBACK)) item(key = "picture") {
+                LiveSection(
+                    title = "Picture, Sound & Clock",
+                    summary = "The clock, frame rate, pausing and catch-up",
+                    icon = Icons.Default.PlayCircleFilled,
+                    open = "picture" in open,
+                    onToggle = { toggle("picture") },
+                    focusFirst = firstFocus(LiveTvPage.PLAYBACK)
+                ) {
                     SubHeading("On-Screen Clock")
                     SettingsActionRow(
                         title = "Show Clock",
@@ -932,7 +971,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Guide Listings
-            item(key = "listings") {
+            if (show(LiveTvPage.GUIDE)) item(key = "listings") {
                 LiveSection(
                     title = "Guide Listings",
                     summary = "How far the guide reaches, timing fixes",
@@ -973,13 +1012,14 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Home Screen & Nuvio
-            item(key = "nuvio") {
+            if (show(LiveTvPage.INTEGRATION)) item(key = "nuvio") {
                 LiveSection(
                     title = "Home Screen & Nuvio",
                     summary = "The Live TV row and the menu",
                     icon = Icons.Default.Home,
                     open = "nuvio" in open,
-                    onToggle = { toggle("nuvio") }
+                    onToggle = { toggle("nuvio") },
+                    focusFirst = firstFocus(LiveTvPage.INTEGRATION)
                 ) {
                     // ---- Live TV row on the home screen
                     // On or off for the Nuvio profile in use (each profile has its own choice).
@@ -1073,7 +1113,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Search & Streams
-            item(key = "search_streams") {
+            if (show(LiveTvPage.INTEGRATION)) item(key = "search_streams") {
                 var pickingStreamsPosition by remember { mutableStateOf(false) }
                 LiveSection(
                     title = "Search & Streams",
@@ -1163,7 +1203,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Parental Controls
-            item(key = "parental") {
+            if (show(LiveTvPage.MAIN)) item(key = "parental") {
                 LiveSection(
                     title = "Parental Controls",
                     summary = if (hasPin) "On · ${user.lockedGroups.size} locked" else "Off",
@@ -1199,7 +1239,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Reminders
-            item(key = "reminders") {
+            if (show(LiveTvPage.GUIDE)) item(key = "reminders") {
                 LiveSection(
                     title = "Reminders",
                     summary = if (user.reminders.isEmpty()) "None set" else "${user.reminders.size} upcoming",
@@ -1217,7 +1257,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Recordings
-            item(key = "recordings") {
+            if (show(LiveTvPage.PLAYBACK)) item(key = "recordings") {
                 val recContext = androidx.compose.ui.platform.LocalContext.current
                 // Drives come and go: read again whenever the section is opened.
                 val drives = remember("recordings" in open) { com.nuvio.tv.livetv.record.RecordingStorage.choices(recContext) }
@@ -1306,7 +1346,7 @@ fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Help
-            item(key = "help") {
+            if (show(LiveTvPage.MAIN)) item(key = "help") {
                 val crashContext = androidx.compose.ui.platform.LocalContext.current
                 LiveSection(
                     title = "Help",
@@ -1343,6 +1383,7 @@ fun LiveTvSettingsContent(
                 }
             }
         }
+        } // LocalLiveFlat
     }
 
     drive.signIn?.let { prompt ->
@@ -2161,8 +2202,37 @@ private fun LiveSection(
     open: Boolean,
     onToggle: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Flat tabs: the first section takes the focus coming in (its first row). */
+    focusFirst: FocusRequester? = null,
     content: @Composable androidx.compose.foundation.layout.ColumnScope.() -> Unit
 ) {
+    if (LocalLiveFlat.current) {
+        // A sub-tab: sections sit open under a plain heading (nothing to fold, only a few per tab).
+        Column(
+            if (focusFirst != null) Modifier.focusRequester(focusFirst).focusGroup() else Modifier
+        ) {
+            SettingsGroupCard {
+                androidx.compose.foundation.layout.Row(
+                    modifier = Modifier.padding(start = NuvioTheme.spacing.lg, top = NuvioTheme.spacing.sm, end = NuvioTheme.spacing.lg, bottom = NuvioTheme.spacing.xxs),
+                    verticalAlignment = androidx.compose.ui.Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(14.dp)
+                ) {
+                    androidx.tv.material3.Icon(
+                        imageVector = icon,
+                        contentDescription = null,
+                        tint = NuvioTheme.colors.TextSecondary,
+                        modifier = Modifier.size(20.dp)
+                    )
+                    Column {
+                        Text(text = title, style = MaterialTheme.typography.titleMedium, color = NuvioTheme.colors.TextPrimary)
+                        Text(text = summary, style = MaterialTheme.typography.bodySmall, color = NuvioTheme.colors.TextSecondary)
+                    }
+                }
+                content()
+            }
+        }
+        return
+    }
     SettingsGroupCard {
         SettingsActionRow(
             title = title,

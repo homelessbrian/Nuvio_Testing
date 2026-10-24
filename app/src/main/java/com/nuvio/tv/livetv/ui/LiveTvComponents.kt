@@ -56,6 +56,7 @@ import androidx.media3.ui.AspectRatioFrameLayout
 import androidx.media3.ui.PlayerView
 import coil3.compose.AsyncImage
 import androidx.compose.ui.draw.drawBehind
+import androidx.compose.ui.draw.drawWithCache
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.drawscope.scale
@@ -116,30 +117,60 @@ internal fun LiveText(
 /**
  * The backdrop behind the whole guide / Sports hub (Settings → "Guide & Sports Background"). A
  * flat near-black background made the glass cards' translucency invisible — the fill and what's
- * behind it were nearly the same tone, so alpha blending had nothing to show against. A gradient
- * with real hue and brightness range gives the glass something to read against.
+ * behind it were nearly the same tone, so alpha blending had nothing to show against. Several soft
+ * colour blobs of different hue, size and brightness, laid freely over a dark base (no single
+ * centre), give the glass a lot to read against, and no two areas of the screen look alike.
  */
-private fun backdropStops(style: String): List<Pair<Float, Color>> = when (style) {
-    "graphite" -> listOf(0.0f to Color(0xFF3A3D46), 0.4f to Color(0xFF24262C), 0.75f to Color(0xFF17181C), 1.0f to Color(0xFF0E0F11))
-    "oled" -> listOf(0.0f to Color(0xFF15161A), 0.45f to Color(0xFF0A0A0C), 1.0f to Color(0xFF000000))
-    "red" -> listOf(0.0f to Color(0xFF5A1B24), 0.4f to Color(0xFF35101A), 0.75f to Color(0xFF220A12), 1.0f to Color(0xFF140609))
-    else -> listOf(0.0f to Color(0xFF1B3A66), 0.4f to Color(0xFF0E2340), 0.75f to Color(0xFF081528), 1.0f to Color(0xFF050D1A)) // "midnight"
+private class Blob(val x: Float, val y: Float, val r: Float, val color: Color, val a: Float)
+
+private fun backdropBase(style: String): Color = when (style) {
+    "graphite" -> Color(0xFF0E0F11)
+    "oled" -> Color(0xFF000000)
+    "red" -> Color(0xFF140609)
+    else -> Color(0xFF050D1A) // "midnight"
 }
 
-/** Scales with the screen (a fixed-pixel gradient looked tiny on 4K, oversized at 720p). */
-internal fun guideBackdropBrush(style: String): Brush {
-    val stops = backdropStops(style)
-    return object : androidx.compose.ui.graphics.ShaderBrush() {
-        override fun createShader(size: androidx.compose.ui.geometry.Size): androidx.compose.ui.graphics.Shader {
-            val radius = (maxOf(size.width, size.height) * 0.95f).coerceAtLeast(1f)
-            return androidx.compose.ui.graphics.RadialGradientShader(
-                center = Offset(size.width * 0.18f, size.height * 0.10f),
-                radius = radius,
-                colors = stops.map { it.second },
-                colorStops = stops.map { it.first },
-                tileMode = androidx.compose.ui.graphics.TileMode.Clamp
-            )
-        }
+private fun backdropBlobs(style: String): List<Blob> = when (style) {
+    "graphite" -> listOf(
+        Blob(0.10f, 0.05f, 0.75f, Color(0xFF59606E), 0.55f),
+        Blob(0.96f, 0.48f, 0.55f, Color(0xFF6B5E5A), 0.30f),
+        Blob(0.58f, 1.02f, 0.65f, Color(0xFF3E5566), 0.40f),
+        Blob(0.40f, 0.42f, 0.30f, Color(0xFF4A4F5C), 0.18f)
+    )
+    "oled" -> listOf(
+        Blob(0.14f, 0.00f, 0.60f, Color(0xFF2A2F4A), 0.40f),
+        Blob(0.92f, 0.82f, 0.55f, Color(0xFF3A2440), 0.30f),
+        Blob(0.55f, 0.45f, 0.28f, Color(0xFF1E2A33), 0.20f)
+    )
+    "red" -> listOf(
+        Blob(0.08f, 0.04f, 0.75f, Color(0xFF9A2A3A), 0.55f),
+        Blob(0.96f, 0.28f, 0.58f, Color(0xFF6B1F5E), 0.40f),
+        Blob(0.60f, 1.02f, 0.62f, Color(0xFF8A3A1F), 0.30f),
+        Blob(0.42f, 0.46f, 0.28f, Color(0xFF7A2442), 0.18f)
+    )
+    else -> listOf( // "midnight"
+        Blob(0.10f, 0.04f, 0.75f, Color(0xFF2B5FB0), 0.55f),
+        Blob(0.94f, 0.34f, 0.58f, Color(0xFF3B3C9E), 0.42f),
+        Blob(0.56f, 1.02f, 0.65f, Color(0xFF1B6C8F), 0.38f),
+        Blob(0.44f, 0.44f, 0.28f, Color(0xFF2AA9C9), 0.18f)
+    )
+}
+
+/** Paints the backdrop; scales with the screen (fixed-pixel sizes looked tiny on 4K, huge at 720p). */
+internal fun Modifier.guideBackdrop(style: String): Modifier = this.drawWithCache {
+    val base = backdropBase(style)
+    val blobs = backdropBlobs(style)
+    val big = maxOf(size.width, size.height)
+    val brushes = blobs.map { b ->
+        Brush.radialGradient(
+            colors = listOf(b.color.copy(alpha = b.a), b.color.copy(alpha = b.a * 0.45f), Color.Transparent),
+            center = Offset(size.width * b.x, size.height * b.y),
+            radius = (big * b.r).coerceAtLeast(1f)
+        )
+    }
+    onDrawBehind {
+        drawRect(base)
+        brushes.forEach { drawRect(it) }
     }
 }
 
@@ -150,19 +181,24 @@ internal fun guideBackdropBrush(style: String): Brush {
  */
 @Composable
 internal fun guideSurface(): Color {
-    val c = NuvioTheme.colors.BackgroundElevated
-    // See-through (not flat), to match the glass look of the full-screen player's bar. The
-    // tiles also get a soft white edge (see ProgramBlock/channel cell) — the alpha alone barely
-    // shows against a background this close in tone, the border is what reads as "glass".
-    return (if (c.luminance() < 0.003f) Color(0xFF1C1C1F) else c).copy(alpha = 0.82f)
+    // The same dark, see-through glass as the info panel at the top (glassColor): the theme's
+    // background, not its lighter "elevated" grey, which read as a different, flatter material
+    // next to it. The tiles also get a soft white edge (see ProgramBlock/channel cell) — the
+    // alpha alone barely shows, the edge is what reads as "glass".
+    val c = NuvioTheme.colors.Background
+    return (if (c.luminance() < 0.003f) Color(0xFF0E0E12) else c).copy(alpha = 0.66f)
 }
 
-/** Shows on now, and the group on screen: a step lighter than [guideSurface]. */
+/** Shows on now, and the group on screen: a step lighter than [guideSurface] (same glass, lifted with white). */
 @Composable
 internal fun guideSurfaceVariant(): Color {
-    val c = NuvioTheme.colors.BackgroundCard
-    return (if (c.luminance() < 0.003f) Color(0xFF26262B) else c).copy(alpha = 0.85f)
+    val c = NuvioTheme.colors.Background
+    val base = if (c.luminance() < 0.003f) Color(0xFF0E0E12) else c
+    return androidx.compose.ui.graphics.lerp(base, Color.White, 0.10f).copy(alpha = 0.72f)
 }
+
+/** The faint edge every glass surface in the guide shares (tiles, groups, the info panel). */
+internal val GuideGlassEdge = Color.White.copy(alpha = 0.10f)
 
 /** Background / border / text colors for a focused or unfocused guide cell. */
 internal data class LiveCellColors(val background: Color, val border: Color, val text: Color)

@@ -69,6 +69,7 @@ import com.nuvio.tv.livetv.record.LiveTvNotice
 import com.nuvio.tv.livetv.ui.ChannelLogo
 import com.nuvio.tv.livetv.ui.LivePlayerSurface
 import com.nuvio.tv.livetv.ui.LiveText
+import com.nuvio.tv.livetv.ui.guideBackdrop
 import com.nuvio.tv.livetv.ui.LiveTextField
 import com.nuvio.tv.livetv.ui.ThemeGlow
 import com.nuvio.tv.livetv.ui.drawThemeGlow
@@ -262,7 +263,7 @@ fun SportsScreen(
     Box(
         Modifier
             .fillMaxSize()
-            .background(com.nuvio.tv.livetv.ui.guideBackdropBrush(backdrop))
+            .guideBackdrop(backdrop)
             .onGloballyPositioned { root = it.boundsInRoot() }
             .onPreviewKeyEvent { e ->
                 if (e.key != Key.Back) return@onPreviewKeyEvent false
