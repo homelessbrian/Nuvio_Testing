@@ -778,11 +778,39 @@ internal fun FrameMeter(label: String) {
         var last = 0L
         var total = 0; var slow = 0; var bad = 0; var worst = 0L
         var reportedAt = System.currentTimeMillis()
+        // Where the screen was stuck: while a frame is held up, the main thread's current
+        // position in the code is noted (a few times a second at most), and the most common
+        // places go into the report.
+        val stuckAt = java.util.concurrent.ConcurrentHashMap<String, Int>()
+        val main = android.os.Handler(android.os.Looper.getMainLooper())
+        val mainThread = android.os.Looper.getMainLooper().thread
+        val alive = java.util.concurrent.atomic.AtomicBoolean(true)
+        val watcher = Thread {
+            while (alive.get()) {
+                val answered = java.util.concurrent.atomic.AtomicBoolean(false)
+                main.post { answered.set(true) }
+                try { Thread.sleep(90) } catch (_: InterruptedException) { return@Thread }
+                if (!answered.get()) {
+                    val st = mainThread.stackTrace
+                    val spot = st.filter { it.className.startsWith("com.nuvio") || it.className.startsWith("androidx.compose") || it.className.startsWith("androidx.media3") }
+                        .take(4).joinToString(" < ") { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
+                        .ifEmpty { st.take(2).joinToString(" < ") { it.className.substringAfterLast('.') + "." + it.methodName } }
+                    stuckAt.merge(spot, 1) { a, b -> a + b }
+                }
+                try { Thread.sleep(60) } catch (_: InterruptedException) { return@Thread }
+            }
+        }.also { it.isDaemon = true; it.name = "frame-watch"; it.start() }
         lateinit var cb: android.view.Choreographer.FrameCallback
         fun flush(final: Boolean) {
-            if (total >= 30) com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
-                "$label frames: $total drawn, $slow slower than 35 ms, $bad slower than 100 ms, worst $worst ms" + if (final) " (screen closed)" else ""
-            )
+            if (total >= 30) {
+                com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
+                    "$label frames: $total drawn, $slow slower than 35 ms, $bad slower than 100 ms, worst $worst ms" + if (final) " (screen closed)" else ""
+                )
+                stuckAt.entries.sortedByDescending { it.value }.take(3).forEach {
+                    com.nuvio.tv.livetv.model.LiveTvLoadReport.add("  stuck x${it.value}: ${it.key}")
+                }
+            }
+            stuckAt.clear()
             total = 0; slow = 0; bad = 0; worst = 0
             reportedAt = System.currentTimeMillis()
         }
@@ -802,10 +830,9 @@ internal fun FrameMeter(label: String) {
             choreographer.postFrameCallback(cb)
         }
         choreographer.postFrameCallback(cb)
-        onDispose { choreographer.removeFrameCallback(cb); flush(true) }
+        onDispose { alive.set(false); watcher.interrupt(); choreographer.removeFrameCallback(cb); flush(true) }
     }
 }
-
 
 private fun androidx.compose.ui.graphics.drawscope.DrawScope.paintOutline(
     outline: androidx.compose.ui.graphics.Outline,

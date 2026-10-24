@@ -1007,7 +1007,7 @@ class LiveTvRepository @Inject constructor(
         LIVE_REPORT.add("First channels' listings ready: ${_programs.value.size} channels")
         // Everything else (short form, the usual hours), in the background, in one read.
         rangeBusy.set(true)
-        scope.launch(Dispatchers.IO) {
+        scope.launch(BackgroundWork.reads) {
           try {
             val t0 = System.currentTimeMillis()
             val (fullFrom, fullTo) = defaultWindow()
@@ -1082,7 +1082,7 @@ class LiveTvRepository @Inject constructor(
             pendingRange = if (p == null) fromMs to toMs else minOf(p.first, fromMs) to maxOf(p.second, toMs)
             return
         }
-        scope.launch(Dispatchers.IO) {
+        scope.launch(BackgroundWork.reads) {
           try {
             // Read without holding the lock (a big read used to make everything else wait for it,
             // like a group you just opened); only the merge is locked.
@@ -1192,7 +1192,7 @@ class LiveTvRepository @Inject constructor(
         val todo = channelKeys.take(MAX_FULL_RANGE_CHANNELS).filter { it !in fullRangeChannels }
         if (todo.isEmpty()) return
         fullRangeJob?.cancel()
-        fullRangeJob = scope.launch(Dispatchers.IO) {
+        fullRangeJob = scope.launch(BackgroundWork.reads) {
             val settings = prefs.currentSettings()
             val now = System.currentTimeMillis()
             val from = now - HOUR

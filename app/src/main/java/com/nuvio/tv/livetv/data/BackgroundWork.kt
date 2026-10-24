@@ -31,6 +31,22 @@ object BackgroundWork {
         }.asCoroutineDispatcher()
     }
 
+    /**
+     * Reading listings out of the guide database for the channels (all of them, once the guide
+     * opens; more as you scroll ahead). Big reads and lots of memory churn: at normal priority
+     * they competed with the screen and made the guide stutter while they ran, so they get
+     * their own low-priority threads, which the screen takes precedence over.
+     */
+    val reads: kotlinx.coroutines.CoroutineDispatcher by lazy {
+        val count = java.util.concurrent.atomic.AtomicInteger()
+        java.util.concurrent.Executors.newFixedThreadPool(2) { r ->
+            Thread({
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                r.run()
+            }, "nuvio-reads-${count.incrementAndGet()}").apply { isDaemon = true }
+        }.asCoroutineDispatcher()
+    }
+
     /** Waits while Nuvio's player is open. */
     suspend fun awaitIdle() {
         if (nuvioPlaying.value) nuvioPlaying.first { !it }
