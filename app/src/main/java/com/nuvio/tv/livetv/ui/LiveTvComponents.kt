@@ -32,6 +32,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.graphics.drawscope.translate
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.KeyEventType
@@ -757,10 +758,10 @@ internal fun Modifier.glassTile(
             shape.createOutline(inner, layoutDirection, this)
         } else null
         onDrawBehind {
-            drawOutline(fillOutline, fill)
+            paintOutline(fillOutline, fill, null)
             if (edge != null && edgeOutline != null) {
-                androidx.compose.ui.graphics.drawscope.translate(stroke / 2f, stroke / 2f) {
-                    drawOutline(edgeOutline, edge, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+                translate(stroke / 2f, stroke / 2f) {
+                    paintOutline(edgeOutline, edge, androidx.compose.ui.graphics.drawscope.Stroke(stroke))
                 }
             }
         }
@@ -802,5 +803,25 @@ internal fun FrameMeter(label: String) {
         }
         choreographer.postFrameCallback(cb)
         onDispose { choreographer.removeFrameCallback(cb); flush(true) }
+    }
+}
+
+
+private fun androidx.compose.ui.graphics.drawscope.DrawScope.paintOutline(
+    outline: androidx.compose.ui.graphics.Outline,
+    color: Color,
+    style: androidx.compose.ui.graphics.drawscope.DrawStyle?
+) {
+    val st = style ?: androidx.compose.ui.graphics.drawscope.Fill
+    when (outline) {
+        is androidx.compose.ui.graphics.Outline.Rectangle -> drawRect(color, outline.rect.topLeft, outline.rect.size, style = st)
+        is androidx.compose.ui.graphics.Outline.Rounded -> {
+            val r = outline.roundRect
+            drawRoundRect(
+                color, Offset(r.left, r.top), androidx.compose.ui.geometry.Size(r.width, r.height),
+                androidx.compose.ui.geometry.CornerRadius(r.topLeftCornerRadius.x, r.topLeftCornerRadius.y), style = st
+            )
+        }
+        is androidx.compose.ui.graphics.Outline.Generic -> drawPath(outline.path, color, style = st)
     }
 }
