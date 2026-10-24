@@ -458,7 +458,7 @@ private fun RecentRow(recent: List<PanelRecent>, focus: Int?, title: String, sho
         ) {
             item(key = "guide") {
                 val f = focus == 0
-                val fg = if (f) Color(0xFF111111) else colors.TextPrimary
+                val fg = focusedTextColor(f)
                 RecentTile(focused = f, width = 56.dp) {
                     Icon(Icons.Default.GridView, contentDescription = null, tint = fg, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.height(1.dp))
@@ -468,8 +468,8 @@ private fun RecentRow(recent: List<PanelRecent>, focus: Int?, title: String, sho
             recent.forEachIndexed { i, r ->
                 item(key = "ch:" + r.channel.key) {
                     val f = focus == i + 1
-                    val fg = if (f) Color(0xFF111111) else colors.TextPrimary
-                    val fgDim = if (f) Color(0xFF111111).copy(alpha = 0.65f) else colors.TextSecondary
+                    val fg = focusedTextColor(f)
+                    val fgDim = focusedSecondaryTextColor(f)
                     RecentTile(focused = f, width = 86.dp, progress = r.progress) {
                         if (!r.channel.logo.isNullOrBlank()) ChannelLogo(r.channel.logo, 15.dp)
                         else LiveText(r.channel.name, size = 11.sp, weight = FontWeight.Bold, color = fg, maxLines = 1)
@@ -480,7 +480,7 @@ private fun RecentRow(recent: List<PanelRecent>, focus: Int?, title: String, sho
             }
             if (showClear) item(key = "clear") {
                 val f = focus == recent.size + 1
-                val fg = if (f) Color(0xFF111111) else colors.TextSecondary
+                val fg = if (f) focusedTextColor(true) else colors.TextSecondary
                 RecentTile(focused = f, width = 56.dp) {
                     Icon(Icons.Default.DeleteSweep, contentDescription = null, tint = fg, modifier = Modifier.size(14.dp))
                     Spacer(Modifier.height(1.dp))
@@ -502,6 +502,8 @@ private fun RecentTile(
 ) {
     val colors = NuvioTheme.colors
     val shape = RoundedCornerShape(9.dp)
+    // The app's own highlight (outline or solid, per the Highlight Style setting).
+    val cell = liveCellColors(focused, Color.Black.copy(alpha = 0.45f))
     Box(
         modifier = Modifier
             .graphicsLayer { val s = if (focused) 1.06f else 1f; scaleX = s; scaleY = s }
@@ -510,8 +512,8 @@ private fun RecentTile(
             .clip(shape)
             // Dark, not white-tinted: stays readable over bright video regardless of what's
             // behind the (translucent) bar, instead of relying on contrast with the picture.
-            .background(if (focused) Color.White else Color.Black.copy(alpha = 0.45f))
-            .border(if (focused) 2.dp else 1.dp, if (focused) Color.White else Color.White.copy(alpha = 0.12f), shape)
+            .background(cell.background)
+            .border(if (focused) 2.dp else 1.dp, if (focused) cell.border else Color.White.copy(alpha = 0.12f), shape)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 5.dp),

@@ -396,8 +396,8 @@ data class LiveTvSettings(
     val panelBackground: String = "standard",
     /** How dark the info bar above the guide is (the play bar has its own, [panelBackground]). */
     val guideInfoBackground: String = "standard",
-    /** The backdrop behind the guide and Sports hub: "midnight", "graphite", "oled" or "red". */
-    val guideBackdrop: String = "midnight",
+    /** The backdrop behind the guide and Sports hub: "oled" (shown as Onyx, the default), "midnight", "graphite" or "red". */
+    val guideBackdrop: String = "oled",
     /** The row of recently watched channels at the bottom of the full info panel (OK). */
     val recentInPanel: Boolean = true,
     /** The row at the bottom of the full info panel: "RECENT", "FAVORITES" or "OFF". */

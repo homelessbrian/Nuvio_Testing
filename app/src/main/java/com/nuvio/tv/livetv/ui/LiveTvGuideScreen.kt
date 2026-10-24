@@ -2275,7 +2275,7 @@ private fun GuideRow(
                 .width(channelColWidth)
                 .fillMaxHeight()
                 .padding(end = 6.dp)
-                .glassTile(cell.background, if (cell.border == Color.Transparent) null else cell.border, cellShape)
+                .glassTile(cell.background, if (cell.border == Color.Transparent) GuideGlassEdge else cell.border, cellShape)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2542,7 +2542,7 @@ private fun ProgramBlock(
             .fillMaxHeight()
             .padding(horizontal = 3.dp)
             // A soft glass edge on every tile (not focused ones only), to match the bar and header.
-            .glassTile(colors.background, if (colors.border == Color.Transparent) null else colors.border, shape, clipChildren = progress != null)
+            .glassTile(colors.background, if (colors.border == Color.Transparent) GuideGlassEdge else colors.border, shape, clipChildren = progress != null)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),

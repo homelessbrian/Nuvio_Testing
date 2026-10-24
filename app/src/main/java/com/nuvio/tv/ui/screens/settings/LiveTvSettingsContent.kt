@@ -773,14 +773,14 @@ internal fun LiveTvSettingsContent(
                     SettingsActionRow(
                         title = "Guide & Sports Background",
                         subtitle = "The backdrop behind the TV Guide and the Sports hub",
-                        value = when (s.guideBackdrop) { "graphite" -> "Graphite"; "oled" -> "OLED Black"; "red" -> "Dark Red"; else -> "Midnight Blue" },
+                        value = when (s.guideBackdrop) { "graphite" -> "Graphite"; "midnight" -> "Midnight Blue"; "red" -> "Dark Red"; else -> "Onyx" },
                         onClick = {
                             update {
                                 it.copy(guideBackdrop = when (it.guideBackdrop) {
+                                    "oled" -> "midnight"
                                     "midnight" -> "graphite"
-                                    "graphite" -> "oled"
-                                    "oled" -> "red"
-                                    else -> "midnight"
+                                    "graphite" -> "red"
+                                    else -> "oled"
                                 })
                             }
                         }

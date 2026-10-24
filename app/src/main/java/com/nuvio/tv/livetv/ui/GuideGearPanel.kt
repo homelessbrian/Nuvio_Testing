@@ -107,6 +107,18 @@ internal fun GuideGearPanel(
                     )
                 }
             }
+            GearRow(Modifier.fillMaxWidth(), onClick = {
+                onChange { it.copy(guideBackdrop = when (it.guideBackdrop) { "oled" -> "midnight"; "midnight" -> "graphite"; "graphite" -> "red"; else -> "oled" }) }
+            }) { focused ->
+                Column(Modifier.weight(1f)) {
+                    LiveText("Background color", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                    LiveText("Behind the guide and Sports", size = 10.sp, color = gearText(focused, dim = true))
+                }
+                LiveText(
+                    when (settings.guideBackdrop) { "graphite" -> "Graphite"; "midnight" -> "Midnight Blue"; "red" -> "Dark Red"; else -> "Onyx" },
+                    size = 12.sp, color = gearText(focused, dim = true)
+                )
+            }
             Box(Modifier.padding(vertical = 6.dp, horizontal = 4.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.10f)))
             GearRow(Modifier.fillMaxWidth(), onClick = onSettings) { focused ->
                 LiveText("All Live TV settings", size = 13.sp, weight = FontWeight.Medium, color = gearText(focused), modifier = Modifier.weight(1f))
