@@ -66,7 +66,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         // search above only looks a couple of days ahead).
         val picked = events.filter { ev ->
             ev.state != GameState.OFF && ev.startMs >= input.now - 8 * HOUR &&
-                (ev.id in input.settings.eventChannels ||
+                (ev.id in input.settings.eventChannels || ev.leagueId in input.settings.leagueChannels ||
                     (input.settings.teamChannels.isNotEmpty() && ev.sides.any { teamChannelKey(ev.leagueId, it.team.id) in input.settings.teamChannels }))
         }
         val byId = (wanted + picked).associateBy { it.id }
@@ -138,6 +138,11 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         }
         networkEvents.groupBy { it.startMs / (30 * MINUTE) }.forEach { (_, slot) ->
             val at = slot.minOf { it.startMs } + 20 * MINUTE
+            // Your own channel for a network counts even when no channel is named like it (Sky
+            // Sports F1 for "Apple TV"): nothing to look through, but the pick still applies.
+            for (ev in slot) for (b in ev.broadcasts) {
+                input.settings.networkChannels[networkKey(b)]?.let { key -> add(ev.id, key, 75, "Your channel for $b", null) }
+            }
             val keys = slot.flatMap { ev -> ev.broadcasts.flatMap { candidates[networkKey(it)].orEmpty() } }.map { it.key }.distinct()
             if (keys.isEmpty()) return@forEach
             val onNow: Map<String, EpgProgram?> = runCatching {
@@ -178,7 +183,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
 
         // ---- 4. Your own fixes: this game, then every game of a team.
         for (ev in byId.values) {
-            input.settings.eventChannels[ev.id]?.substringBefore('|')?.let { add(ev.id, it, 200, "Your pick", null) }
+            input.settings.eventChannels[ev.id]?.substringBeforeLast('|')?.let { add(ev.id, it, 200, "Your pick", null) }
+            // Your channel for the whole competition (every Formula 1 round, every PGA Tour event).
+            input.settings.leagueChannels[ev.leagueId]?.let { add(ev.id, it, 140, "Your channel for ${SportsCatalog.league(ev.leagueId)?.name ?: "this competition"}", null) }
             if (input.settings.teamChannels.isNotEmpty()) for (side in ev.sides) {
                 input.settings.teamChannels[teamChannelKey(ev.leagueId, side.team.id)]?.let { add(ev.id, it, 150, "Your channel for ${side.team.name}", null) }
             }

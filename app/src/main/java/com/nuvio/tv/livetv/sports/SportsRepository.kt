@@ -742,7 +742,7 @@ class SportsRepository @Inject constructor(
         val trigger = combine(
             events.map { list -> list.filter { it.source != EventSource.GUIDE }.map { "${it.id}@${it.startMs}:${it.broadcasts.size}" } }.distinctUntilChanged(),
             channelStore.displayChannels.map { it.size to it.firstOrNull()?.key }.distinctUntilChanged(),
-            settings.map { listOf(it.networkChannels, it.eventChannels, it.teamChannels, it.blocked, it.bestChannelFirst, it.hiddenLeagues, it.region, it.preferredGroups) }.distinctUntilChanged(),
+            settings.map { listOf(it.networkChannels, it.eventChannels, it.teamChannels, it.leagueChannels, it.blocked, it.bestChannelFirst, it.hiddenLeagues, it.region, it.preferredGroups) }.distinctUntilChanged(),
             follows.map { it.words to it.leagues }.distinctUntilChanged(),
             liveRepo.status.map { it.loading }.distinctUntilChanged()
         ) { a, b, c, d, e -> listOf(a, b, c, d, e) }
@@ -780,8 +780,8 @@ class SportsRepository @Inject constructor(
         // Channels you picked yourself (Fix Channel) count even in a hidden group.
         val sp = settings.value
         val picked = HashSet<String>().apply {
-            sp.eventChannels.values.forEach { add(it.substringBefore('|')) }
-            addAll(sp.networkChannels.values); addAll(sp.teamChannels.values)
+            sp.eventChannels.values.forEach { add(it.substringBeforeLast('|')) }
+            addAll(sp.networkChannels.values); addAll(sp.teamChannels.values); addAll(sp.leagueChannels.values)
         }
         val channels: List<LiveChannel> = channelStore.displayChannels.value.filter { ch ->
             (ch.key in picked || (ch.key !in user.hiddenChannels && ch.groupId !in user.hiddenGroups)) &&
@@ -1170,12 +1170,13 @@ class SportsRepository @Inject constructor(
      * "This is the right channel" for [ev]. With [forNetworks], also for every game the same
      * network has from now on (FOX on your FOX 4K channel, say).
      */
-    fun pickChannel(ev: SportsEvent, channelKey: String, forNetworks: Boolean, forTeam: TeamInfo? = null) = updateSettings { s ->
-        val keep = s.eventChannels.filterValues { v -> (v.substringAfter('|').toLongOrNull() ?: 0L) > System.currentTimeMillis() - 3 * DAY }
+    fun pickChannel(ev: SportsEvent, channelKey: String, forNetworks: Boolean, forTeam: TeamInfo? = null, forLeague: Boolean = false) = updateSettings { s ->
+        val keep = s.eventChannels.filterValues { v -> (v.substringAfterLast('|').toLongOrNull() ?: 0L) > System.currentTimeMillis() - 3 * DAY }
         s.copy(
             eventChannels = keep + (ev.id to "$channelKey|${ev.startMs}"),
             networkChannels = if (forNetworks) s.networkChannels + ev.broadcasts.associate { SportsMatcher.networkKey(it) to channelKey } else s.networkChannels,
             teamChannels = if (forTeam != null) s.teamChannels + (teamChannelKey(ev.leagueId, forTeam.id) to channelKey) else s.teamChannels,
+            leagueChannels = if (forLeague) s.leagueChannels + (ev.leagueId to channelKey) else s.leagueChannels,
             blocked = s.blocked - "${ev.id}|$channelKey"
         )
     }.also {
@@ -1193,9 +1194,10 @@ class SportsRepository @Inject constructor(
     fun blockChannel(ev: SportsEvent, channelKey: String) = updateSettings { s ->
         s.copy(
             blocked = (s.blocked + "${ev.id}|$channelKey").toList().takeLast(400).toSet(),
-            eventChannels = s.eventChannels.filterNot { (id, v) -> id == ev.id && v.substringBefore('|') == channelKey },
+            eventChannels = s.eventChannels.filterNot { (id, v) -> id == ev.id && v.substringBeforeLast('|') == channelKey },
             networkChannels = s.networkChannels.filterNot { (n, key) -> key == channelKey && ev.broadcasts.any { SportsMatcher.networkKey(it) == n } },
-            teamChannels = s.teamChannels.filterNot { (t, key) -> key == channelKey && ev.sides.any { teamChannelKey(ev.leagueId, it.team.id) == t } }
+            teamChannels = s.teamChannels.filterNot { (t, key) -> key == channelKey && ev.sides.any { teamChannelKey(ev.leagueId, it.team.id) == t } },
+            leagueChannels = s.leagueChannels.filterNot { (l, key) -> key == channelKey && l == ev.leagueId }
         )
     }.also {
         _matches.value[ev.id]?.let { l -> _matches.value = _matches.value + (ev.id to l.filter { it.channel.key != channelKey }) }
@@ -1203,7 +1205,7 @@ class SportsRepository @Inject constructor(
         matchKick.value++
     }
 
-    fun clearFixes() = updateSettings { it.copy(networkChannels = emptyMap(), eventChannels = emptyMap(), blocked = emptySet(), teamChannels = emptyMap()) }
+    fun clearFixes() = updateSettings { it.copy(networkChannels = emptyMap(), eventChannels = emptyMap(), blocked = emptySet(), teamChannels = emptyMap(), leagueChannels = emptyMap()) }
 
     /** The channel to tune for a reminder or "watch now": the best match, if any. */
     fun bestChannel(eventId: String): ChannelMatch? = _matches.value[eventId]?.firstOrNull()

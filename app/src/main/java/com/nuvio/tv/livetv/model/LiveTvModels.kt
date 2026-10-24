@@ -44,7 +44,7 @@ data class PlaylistSource(
     val liveEnabled: Boolean get() = enabled && (!isXtream || importLive)
 
     fun resolvedUrl(): String {
-        if (!isXtream) return url.trim()
+        if (!isXtream) return tidyLink(url)
         return "${xtreamBase()}/get.php?username=${enc(xtreamUsername)}&password=${enc(xtreamPassword)}&type=m3u_plus&output=ts"
     }
 
@@ -62,8 +62,26 @@ data class PlaylistSource(
     private fun enc(s: String) = java.net.URLEncoder.encode(s.trim(), "UTF-8")
 
     companion object {
+        /**
+         * A typed or pasted link made safe: dashes that only look like "-" (the longer dashes a
+         * phone keyboard or a chat app swaps in, the non-breaking hyphen) become a real hyphen,
+         * and invisible characters and spaces that came along with a paste are dropped.
+         */
+        fun tidyLink(raw: String): String = raw
+            .replace(Regex("[\\u2010-\\u2015\\u2212\\uFE58\\uFE63\\uFF0D]"), "-")
+            .replace(Regex("[\\u200B-\\u200D\\u2060\\uFEFF\\u00A0\\s]"), "")
+
         fun cleanXtreamServer(raw: String): String {
-            var s = raw.trim()
+            // Whatever dash-like character the keyboard typed (some show as blank on screen)
+            // becomes a plain hyphen. Any other odd non-ASCII character in the server name too.
+            val t = raw.trim()
+            val schemeLen = Regex("^[a-zA-Z]+://").find(t)?.value?.length ?: 0
+            val hostEnd = t.indexOf('/', schemeLen).let { if (it < 0) t.length else it }
+            val hostPart = t.substring(schemeLen, hostEnd)
+                .replace(Regex("[\\u200B-\\u200D\\u2060\\uFEFF\\u00A0\\s]"), "")
+                .replace(Regex("[^\\x00-\\x7F]"), "-")
+            val fixed = t.substring(0, schemeLen) + hostPart + t.substring(hostEnd)
+            var s = tidyLink(fixed)
             if (s.isEmpty()) return s
             if (!s.startsWith("http://", true) && !s.startsWith("https://", true)) s = "http://$s"
             return runCatching {

@@ -920,6 +920,7 @@ class LiveTvRepository @Inject constructor(
 
     /** The stored guide is missing listings for many channels that were matched (it ran out for them). */
     @Volatile private var guideHoles = false
+    @Volatile private var holeRefreshTried = false
     private val rangeMutex = Mutex()
 
     private fun defaultWindow(now: Long = System.currentTimeMillis()) = (now - 3 * HOUR) to (now + 12 * HOUR + RANGE_SLACK_MS)
@@ -1030,13 +1031,20 @@ class LiveTvRepository @Inject constructor(
             // At most once every 3 hours (a download, even an unchanged one, resets the file's
             // date), so a guide that simply has no listings for many channels isn't fetched at every start.
             val checkedRecently = targets.none { System.currentTimeMillis() - epgFile(it.fileId).lastModified() > 3 * HOUR }
-            if (!checkedRecently && _programs.value.isNotEmpty() && matched.size >= 20 && missing * 100 > matched.size * 15 && targets.isNotEmpty()) {
+            // And once per run of the app: a provider whose guide simply lacks many channels would
+            // otherwise have the whole guide downloaded and read again every few hours, which
+            // makes the app crawl while it works.
+            if (!holeRefreshTried && !checkedRecently && _programs.value.isNotEmpty() && matched.size >= 20 && missing * 100 > matched.size * 15 && targets.isNotEmpty()) {
+                holeRefreshTried = true
                 guideHoles = true
                 LIVE_REPORT.add("Stored guide has no listings now for $missing of ${matched.size} matched channels: updating the guides")
                 scope.launch { runCatching { refreshStale() } }
             }
             if (_programs.value.isEmpty() && _channels.value.isNotEmpty() && targets.isNotEmpty()) {
                 storedGuideEmpty = true
+                // Also download the guides whole (not "only if changed"): a guide file that stopped
+                // refreshing kept being matched again and again, still empty. At most every 3 hours.
+                guideHoles = !checkedRecently
                 LIVE_REPORT.add("Stored guide has no listings for now: reading the guides again")
                 scope.launch { runCatching { refreshStale() } }
             }
@@ -2557,7 +2565,7 @@ class LiveTvRepository @Inject constructor(
         private val PLACEHOLDER_TITLES = Regex(
             """(programming|program|programme|no information|no info|no program information|no programme information|""" +
                 """to be announced|tba|tbd|n/?a|off air|no data|no epg|not available|information not available|""" +
-                """regular programming|scheduled programming|paid programming|coming soon)\.?"""
+                """regular programming|scheduled programming|paid programming|coming soon|no program guide available)\.?"""
         )
         private val VOD_PATH = Regex("""/(movie|movies|series|vod)/""", RegexOption.IGNORE_CASE)
         private val VOD_EXT = Regex("""\.(mp4|mkv|avi|mov|wmv|m4v|webm|flv)(\?|$)""", RegexOption.IGNORE_CASE)

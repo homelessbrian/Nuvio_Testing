@@ -261,6 +261,7 @@ fun SportsScreen(
         events.firstOrNull { ev -> matches[ev.id]?.any { it.channel.key == key } == true }?.let { SportsLaunch.openedFromSports(it.id) }
         onOpenLive()
     }
+    com.nuvio.tv.livetv.ui.FrameMeter("Sports")
     Box(
         Modifier
             .fillMaxSize()
@@ -420,7 +421,10 @@ private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.
                 // the picture's square corners, then the rounded window cut back out.
                 val dx = slot!!.left - root!!.left
                 val dy = slot.top - root.top
-                translate(-dx, -dy) { drawGuideBackdrop(backdrop, root.width, root.height) }
+                translate(-dx, -dy) {
+                    drawGuideBackdrop(backdrop, root.width, root.height)
+                    drawThemeGlow(accent, glowTop, root.width, SPORTS_GLOW_HEIGHT.toPx())
+                }
                 drawRoundRect(
                     color = Color.Black,
                     cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx()),
@@ -1402,7 +1406,7 @@ private fun FixChannelDialog(ev: SportsEvent, matches: List<ChannelMatch>, hideS
         val networks = ev.broadcasts
         val league = SportsCatalog.league(ev.leagueId)
         val teams = ev.ordered(league?.sport ?: Sport.OTHER).map { it.team }
-        if (networks.isEmpty() && teams.isEmpty()) {
+        if (networks.isEmpty() && teams.isEmpty() && league?.kind != LeagueKind.EVENT) {
             LaunchedEffect(pick.key) {
                 viewModel.repo.pickChannel(ev, pick.key, forNetworks = false)
                 LiveTvNotice.show("Saved: ${ev.title} on ${pick.name}")
@@ -1425,6 +1429,14 @@ private fun FixChannelDialog(ev: SportsEvent, matches: List<ChannelMatch>, hideS
                 SportsMenuRow("Yes, every $n game", firstMod()) {
                     viewModel.repo.pickChannel(ev, pick.key, forNetworks = true)
                     LiveTvNotice.show("Saved: $n games use ${pick.name}")
+                    onDismiss()
+                }
+            }
+            // A race series, a golf tour, a fight promotion: every event of it on this channel.
+            if (league?.kind == LeagueKind.EVENT) {
+                SportsMenuRow("Yes, every ${league.name} event", firstMod()) {
+                    viewModel.repo.pickChannel(ev, pick.key, forNetworks = false, forLeague = true)
+                    LiveTvNotice.show("Saved: ${league.name} events use ${pick.name}")
                     onDismiss()
                 }
             }

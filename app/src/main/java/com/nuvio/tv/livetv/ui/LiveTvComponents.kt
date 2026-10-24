@@ -735,3 +735,72 @@ internal fun PlayerStatusMessage(
     }
 }
 
+
+
+/**
+ * A guide tile: fill and soft edge painted in one go from a shape worked out once. Replaces
+ * clip + background + border, whose rounded clip made every tile cost extra on slower boxes
+ * (a guide screen has well over a hundred tiles). Children are only clipped when asked to.
+ */
+internal fun Modifier.glassTile(
+    fill: Color,
+    edge: Color?,
+    shape: androidx.compose.ui.graphics.Shape,
+    clipChildren: Boolean = false
+): Modifier = this
+    .then(if (clipChildren) Modifier.clip(shape) else Modifier)
+    .drawWithCache {
+        val stroke = 2.dp.toPx()
+        val fillOutline = shape.createOutline(size, layoutDirection, this)
+        val edgeOutline = if (edge != null) {
+            val inner = androidx.compose.ui.geometry.Size((size.width - stroke).coerceAtLeast(1f), (size.height - stroke).coerceAtLeast(1f))
+            shape.createOutline(inner, layoutDirection, this)
+        } else null
+        onDrawBehind {
+            drawOutline(fillOutline, fill)
+            if (edge != null && edgeOutline != null) {
+                androidx.compose.ui.graphics.drawscope.translate(stroke / 2f, stroke / 2f) {
+                    drawOutline(edgeOutline, edge, style = androidx.compose.ui.graphics.drawscope.Stroke(stroke))
+                }
+            }
+        }
+    }
+
+/**
+ * Counts slow screen frames while a screen is open and writes the tally to the Start-Up Report,
+ * so "it feels laggy" can be told apart by what the screen was doing (and compared between versions).
+ */
+@Composable
+internal fun FrameMeter(label: String) {
+    androidx.compose.runtime.DisposableEffect(label) {
+        val choreographer = android.view.Choreographer.getInstance()
+        var last = 0L
+        var total = 0; var slow = 0; var bad = 0; var worst = 0L
+        var reportedAt = System.currentTimeMillis()
+        lateinit var cb: android.view.Choreographer.FrameCallback
+        fun flush(final: Boolean) {
+            if (total >= 30) com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
+                "$label frames: $total drawn, $slow slower than 35 ms, $bad slower than 100 ms, worst $worst ms" + if (final) " (screen closed)" else ""
+            )
+            total = 0; slow = 0; bad = 0; worst = 0
+            reportedAt = System.currentTimeMillis()
+        }
+        cb = android.view.Choreographer.FrameCallback { nanos ->
+            if (last != 0L) {
+                val ms = (nanos - last) / 1_000_000L
+                // Long gaps are the screen sitting still, not slow drawing.
+                if (ms in 1..700) {
+                    total++
+                    if (ms > 35) slow++
+                    if (ms > 100) bad++
+                    if (ms > worst) worst = ms
+                }
+            }
+            last = nanos
+            if (System.currentTimeMillis() - reportedAt > 20_000) flush(false)
+            choreographer.postFrameCallback(cb)
+        }
+        choreographer.postFrameCallback(cb)
+        onDispose { choreographer.removeFrameCallback(cb); flush(true) }
+    }
+}

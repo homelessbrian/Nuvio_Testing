@@ -117,6 +117,34 @@ private data class MenuTarget(val channel: LiveChannel, val block: GuideBlock?)
 
 private fun floorSlot(ms: Long) = ms - Math.floorMod(ms, SLOT_MS)
 
+private const val HOUR_BLOCK_MS = 60L * 60L * 1000L
+const val NO_GUIDE_TITLE = "No Program Guide Available"
+
+/**
+ * TiviMate style: a channel that offers catch-up but has no (or patchy) guide gets hourly
+ * "No Program Guide Available" entries, so you can still step back in time and watch from an hour.
+ */
+private fun withHourlyPlaceholders(ch: LiveChannel, list: List<EpgProgram>, nowMs: Long, pastHours: Int): List<EpgProgram> {
+    val cu = ch.catchup ?: return list
+    val from = maxOf(nowMs - cu.days.coerceAtMost(7) * 24L * HOUR_BLOCK_MS, nowMs - pastHours * HOUR_BLOCK_MS)
+    val to = nowMs - Math.floorMod(nowMs, HOUR_BLOCK_MS) + HOUR_BLOCK_MS
+    var t = from - Math.floorMod(from, HOUR_BLOCK_MS)
+    if (list.isEmpty()) {
+        val out = ArrayList<EpgProgram>()
+        while (t < to) { out += EpgProgram(t, t + HOUR_BLOCK_MS, NO_GUIDE_TITLE); t += HOUR_BLOCK_MS }
+        return out
+    }
+    val sorted = list.sortedBy { it.startMs }
+    val extra = ArrayList<EpgProgram>()
+    var cursor = t
+    for (p in sorted) {
+        while (cursor + HOUR_BLOCK_MS <= p.startMs && cursor < to) { extra += EpgProgram(cursor, cursor + HOUR_BLOCK_MS, NO_GUIDE_TITLE); cursor += HOUR_BLOCK_MS }
+        if (p.stopMs > cursor) cursor = p.stopMs
+    }
+    while (cursor + HOUR_BLOCK_MS <= to) { extra += EpgProgram(cursor, cursor + HOUR_BLOCK_MS, NO_GUIDE_TITLE); cursor += HOUR_BLOCK_MS }
+    return if (extra.isEmpty()) list else (list + extra).sortedBy { it.startMs }
+}
+
 /** "Today", "Tomorrow", "Yesterday", or the day ("Sat, Oct 10") for the guide's time ruler. */
 private fun guideDayLabel(windowStart: Long, now: Long): String {
     val dayOf = { ms: Long -> java.util.Calendar.getInstance().apply { timeInMillis = ms }.let { it.get(java.util.Calendar.YEAR) * 1000 + it.get(java.util.Calendar.DAY_OF_YEAR) } }
@@ -635,7 +663,7 @@ fun LiveTvGuideScreen(
 
 
     fun blockAt(channel: LiveChannel, at: Long): GuideBlock {
-        val list = programs[channel.key].orEmpty()
+        val list = withHourlyPlaceholders(channel, programs[channel.key].orEmpty(), now, settings.epgPastHours)
         list.firstOrNull { at >= it.startMs && at < it.stopMs }?.let { return GuideBlock(it.startMs, it.stopMs, it) }
         // A gap between two listed shows: the whole gap is one block (one highlight, one press
         // of Right to get past it), like a show with no information.
@@ -839,6 +867,7 @@ fun LiveTvGuideScreen(
         }
         goFullscreen()
     }
+    FrameMeter("Guide")
     androidx.compose.runtime.CompositionLocalProvider(
         LocalShowDetails provides { key, p -> viewModel.details(key, p) },
         LocalChannelAbout provides { ch, title -> viewModel.channelAbout(ch, title) }
@@ -1334,7 +1363,7 @@ fun LiveTvGuideScreen(
                                     itemsIndexed(channels, key = { _, c -> c.key }) { index, ch ->
                                         androidx.compose.runtime.CompositionLocalProvider(LocalGuideScale provides guideScale(settings)) { GuideRow(
                                             channel = ch,
-                                            programs = programs[ch.key].orEmpty(),
+                                            programs = remember(ch.key, programs[ch.key], now / HOUR_BLOCK_MS) { withHourlyPlaceholders(ch, programs[ch.key].orEmpty(), now, settings.epgPastHours) },
                                             settings = settings,
                                             rowHeight = rowHeight,
                                             channelColWidth = channelColWidth,
@@ -1441,7 +1470,10 @@ fun LiveTvGuideScreen(
                         .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
                 ) {
                     // Exactly what's behind the window: the guide's freeform backdrop.
-                    translate(-left, -top) { drawGuideBackdrop(settings.guideBackdrop, rootW, rb.height) }
+                    translate(-left, -top) {
+                        drawGuideBackdrop(settings.guideBackdrop, rootW, rb.height)
+                        if (showGlow) drawThemeGlow(accent, glowTop, rootW, glowH)
+                    }
                     // Cut the rounded window back out, leaving only the corners.
                     drawRoundRect(
                         color = Color.Black,
@@ -2211,9 +2243,7 @@ private fun GuideRow(
                 .width(channelColWidth)
                 .fillMaxHeight()
                 .padding(end = 6.dp)
-                .clip(cellShape)
-                .background(cell.background)
-                .border(2.dp, if (cell.border == Color.Transparent) Color.White.copy(alpha = 0.09f) else cell.border, cellShape)
+                .glassTile(cell.background, if (cell.border == Color.Transparent) null else cell.border, cellShape)
                 .padding(horizontal = 8.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
@@ -2479,10 +2509,8 @@ private fun ProgramBlock(
             .width(width)
             .fillMaxHeight()
             .padding(horizontal = 3.dp)
-            .clip(shape)
-            .background(colors.background)
             // A soft glass edge on every tile (not focused ones only), to match the bar and header.
-            .border(2.dp, if (colors.border == Color.Transparent) Color.White.copy(alpha = 0.09f) else colors.border, shape)
+            .glassTile(colors.background, if (colors.border == Color.Transparent) null else colors.border, shape, clipChildren = progress != null)
     ) {
         Column(
             modifier = Modifier.fillMaxSize().padding(horizontal = 10.dp),
