@@ -14,6 +14,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
@@ -54,6 +57,18 @@ import kotlinx.coroutines.delay
  */
 @Composable
 internal fun GearPanel(
+    /** Page to open on: "" (main), "audio", "subs", "sleep", "size" or "info". */
+    startPage: String = "",
+    audioOptions: List<com.nuvio.tv.livetv.player.LiveTrackOption>,
+    subtitleOptions: List<com.nuvio.tv.livetv.player.LiveTrackOption>,
+    moreSubtitleOptions: List<com.nuvio.tv.livetv.player.LiveTrackOption>,
+    subtitleNote: String?,
+    onPickAudio: (com.nuvio.tv.livetv.player.LiveTrackOption) -> Unit,
+    /** null = captions off. */
+    onPickSubtitle: (com.nuvio.tv.livetv.player.LiveTrackOption?) -> Unit,
+    /** null = off. */
+    onPickSleep: (Int?) -> Unit,
+    streamInfo: () -> List<Pair<String, String>>,
     bottom: Dp,
     background: String,
     isFavorite: Boolean,
@@ -74,13 +89,9 @@ internal fun GearPanel(
     onToggle: (String) -> Unit,
     onReset: () -> Unit,
     onRecord: (() -> Unit)?,
-    onAudio: () -> Unit,
-    onSubtitles: () -> Unit,
     onFavorite: () -> Unit,
-    onSleep: () -> Unit,
     onTimeAction: () -> Unit,
     onPrevious: () -> Unit,
-    onStreamInfo: () -> Unit,
     onSearch: (() -> Unit)?,
     onReload: () -> Unit,
     onHide: () -> Unit,
@@ -88,10 +99,12 @@ internal fun GearPanel(
     onDismiss: () -> Unit
 ) {
     var customizing by remember { mutableStateOf(false) }
-    var sizing by remember { mutableStateOf(false) }
+    var sizing by remember { mutableStateOf(startPage == "size") }
+    // "audio", "subs", "sleep" or "info" while one of those pages is open.
+    var page by remember { mutableStateOf(startPage.takeIf { it in setOf("audio", "subs", "sleep", "info") } ?: "") }
     val first = remember { FocusRequester() }
-    BackHandler { if (customizing || sizing) { customizing = false; sizing = false } else onDismiss() }
-    LaunchedEffect(customizing, sizing) { delay(60); runCatching { first.requestFocus() } }
+    BackHandler { if (customizing || sizing || page != "") { customizing = false; sizing = false; page = "" } else onDismiss() }
+    LaunchedEffect(customizing, sizing, page) { delay(60); runCatching { first.requestFocus() } }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -102,7 +115,68 @@ internal fun GearPanel(
                 .glass(glassColor(if (background == "standard") "darker" else background), RoundedCornerShape(20.dp))
                 .padding(12.dp)
         ) {
-            if (sizing) {
+            if (page != "") {
+                // ---- Audio, Subtitles, Sleep timer, Stream info: one page each, like the others
+                val title = when (page) { "audio" -> "Audio"; "subs" -> "Subtitles"; "sleep" -> "Sleep timer"; else -> "Stream info" }
+                val hint = when (page) { "sleep" -> "Stops playback after"; "audio" -> "Applies to this channel"; else -> null }
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    LiveText("‹  $title", size = 14.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    hint?.let { LiveText(it, size = 11.sp, color = Color.White.copy(alpha = 0.55f)) }
+                }
+                Spacer(Modifier.height(6.dp))
+                Column(
+                    Modifier.heightIn(max = 300.dp).verticalScroll(rememberScrollState()),
+                    verticalArrangement = Arrangement.spacedBy(2.dp)
+                ) {
+                    var firstSet = false
+                    fun f(on: Boolean): Modifier = if (on && !firstSet) { firstSet = true; Modifier.focusRequester(first) } else Modifier
+                    @Composable
+                    fun choice(label: String, on: Boolean, focusHere: Boolean, indent: Boolean = false, onClick: () -> Unit) {
+                        GearRow(Modifier.fillMaxWidth().padding(start = if (indent) 14.dp else 0.dp).then(f(focusHere)), onClick = onClick) { focused ->
+                            LiveText(label, size = 13.sp, weight = if (focused || on) FontWeight.Bold else FontWeight.Medium, color = gearText(focused), modifier = Modifier.weight(1f))
+                            if (on) LiveText("✓", size = 13.sp, color = gearText(focused, dim = true))
+                        }
+                    }
+                    when (page) {
+                        "audio" -> {
+                            if (audioOptions.isEmpty()) LiveText("No tracks available", size = 13.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.padding(10.dp))
+                            val at = audioOptions.indexOfFirst { it.selected }.coerceAtLeast(0)
+                            audioOptions.forEachIndexed { i, o -> choice(o.label, o.selected, i == at) { onPickAudio(o) } }
+                        }
+                        "subs" -> {
+                            subtitleNote?.let { LiveText(it, size = 12.sp, color = Color.White.copy(alpha = 0.7f), modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)) }
+                            val anyOn = subtitleOptions.any { it.selected } || moreSubtitleOptions.any { it.selected }
+                            var showMore by remember { mutableStateOf(moreSubtitleOptions.any { it.selected }) }
+                            choice("Off", !anyOn, !anyOn || subtitleOptions.none { it.selected }) { onPickSubtitle(null) }
+                            subtitleOptions.forEach { o -> choice(o.label, o.selected, o.selected) { onPickSubtitle(o) } }
+                            if (moreSubtitleOptions.isNotEmpty()) {
+                                GearRow(Modifier.fillMaxWidth(), onClick = { showMore = !showMore }) { focused ->
+                                    LiveText((if (showMore) "▾  " else "▸  ") + "More caption tracks", size = 13.sp, weight = FontWeight.Medium, color = gearText(focused), modifier = Modifier.weight(1f))
+                                }
+                                if (showMore) moreSubtitleOptions.forEach { o -> choice(o.label, o.selected, false, indent = true) { onPickSubtitle(o) } }
+                            }
+                        }
+                        "sleep" -> {
+                            choice("Off", false, true) { onPickSleep(null) }
+                            listOf(15, 30, 45, 60, 90, 120).forEach { m ->
+                                choice(if (m < 60) "$m minutes" else if (m == 60) "1 hour" else "${m / 60.0} hours".replace(".0 ", " "), false, false) { onPickSleep(m) }
+                            }
+                        }
+                        else -> {
+                            val rows = remember { streamInfo() }
+                            GearRow(Modifier.fillMaxWidth().focusRequester(first), onClick = { page = "" }) { focused ->
+                                LiveText("Close", size = 13.sp, weight = FontWeight.Bold, color = gearText(focused), modifier = Modifier.weight(1f))
+                            }
+                            rows.forEach { (k, v) ->
+                                Row(Modifier.padding(horizontal = 10.dp, vertical = 3.dp)) {
+                                    LiveText(k, size = 12.sp, color = Color.White.copy(alpha = 0.6f), modifier = Modifier.width(100.dp))
+                                    LiveText(v, size = 12.sp, maxLines = 2, modifier = Modifier.weight(1f))
+                                }
+                            }
+                        }
+                    }
+                }
+            } else if (sizing) {
                 // ---- Screen size: the same choices as the movie player; the picture changes as you pick
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) {
                     LiveText("‹  Screen size", size = 14.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
@@ -133,8 +207,8 @@ internal fun GearPanel(
                         Icons.Default.FiberManualRecord, if (recording) "Stop" else "Record", if (recording) "Recording" else null,
                         Modifier.weight(1f).then(f()), iconTint = LIVE_RED, onClick = onRecord
                     )
-                    GearTile(Icons.Default.VolumeUp, "Audio", audioLabel.ifBlank { null }, Modifier.weight(1f).then(f()), onClick = onAudio)
-                    GearTile(Icons.Default.ClosedCaption, "Subtitles", if (captionsOn) "On" else "Off", Modifier.weight(1f).then(f()), onClick = onSubtitles)
+                    GearTile(Icons.Default.VolumeUp, "Audio", audioLabel.ifBlank { null }, Modifier.weight(1f).then(f()), onClick = { page = "audio" })
+                    GearTile(Icons.Default.ClosedCaption, "Subtitles", if (captionsOn) "On" else "Off", Modifier.weight(1f).then(f()), onClick = { page = "subs" })
                     GearTile(
                         if (isFavorite) Icons.Default.Star else Icons.Default.StarBorder, "Favorite", if (isFavorite) "Saved" else null,
                         Modifier.weight(1f).then(f()), iconTint = if (isFavorite) Color(0xFFF5C400) else null, onClick = onFavorite
@@ -144,10 +218,10 @@ internal fun GearPanel(
                 // ---- the rest, two to a line
                 val items = buildList<Triple<String, String?, () -> Unit>> {
                     add(Triple("Screen size", sizeLabel, { sizing = true }))
-                    add(Triple("Sleep timer", sleepLabel, onSleep))
+                    add(Triple("Sleep timer", sleepLabel, { page = "sleep" }))
                     timeAction?.let { add(Triple(it, null, onTimeAction)) }
                     add(Triple("Previous channel", null, onPrevious))
-                    add(Triple("Stream info", null, onStreamInfo))
+                    add(Triple("Stream info", null, { page = "info" }))
                     onSearch?.let { add(Triple("Search", null, it)) }
                     add(Triple("Reload stream", null, onReload))
                     add(Triple("Hide channel", null, onHide))
@@ -223,13 +297,13 @@ internal fun GearPanel(
 }
 
 @Composable
-private fun gearText(focused: Boolean, dim: Boolean = false): Color =
+internal fun gearText(focused: Boolean, dim: Boolean = false): Color =
     if (focused) Color(0xFF111111).copy(alpha = if (dim) 0.65f else 1f) else Color.White.copy(alpha = if (dim) 0.6f else 0.95f)
 
 /** One line in the gear panel: white when highlighted. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GearRow(modifier: Modifier, onClick: () -> Unit, content: @Composable RowScope.(Boolean) -> Unit) {
+internal fun GearRow(modifier: Modifier, onClick: () -> Unit, content: @Composable RowScope.(Boolean) -> Unit) {
     var focused by remember { mutableStateOf(false) }
     Row(
         modifier
@@ -273,7 +347,7 @@ private fun GearTile(
 
 /** An on / off switch: green when on. */
 @Composable
-private fun Switch(on: Boolean, focused: Boolean) {
+internal fun Switch(on: Boolean, focused: Boolean) {
     val track = when {
         on -> Color(0xFF22C55E)
         focused -> Color(0xFF9CA3AF)

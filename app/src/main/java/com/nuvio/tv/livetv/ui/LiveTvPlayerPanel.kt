@@ -30,6 +30,7 @@ import androidx.compose.material.icons.filled.PlayArrow
 import androidx.compose.material.icons.filled.Replay30
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.Composable
+import androidx.compose.ui.graphics.luminance
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -115,6 +116,14 @@ internal fun panelControls(mode: PanelMode, paused: Boolean, canSkip: Boolean): 
 internal fun glassColor(level: String): Color {
     val base = NuvioTheme.colors.Background
     return base.copy(alpha = when (level) { "solid" -> 0.97f; "darker" -> 0.86f; else -> 0.74f })
+}
+
+/** The info bar above the guide: "Standard" is exactly as dark as the guide's own tiles. */
+@Composable
+internal fun guideInfoGlass(level: String): Color {
+    val c = NuvioTheme.colors.Background
+    val base = if (c.luminance() < 0.003f) Color(0xFF0E0E12) else c
+    return base.copy(alpha = when (level) { "solid" -> 0.97f; "darker" -> 0.86f; else -> 0.66f })
 }
 
 internal val GLASS_SHAPE = RoundedCornerShape(22.dp)

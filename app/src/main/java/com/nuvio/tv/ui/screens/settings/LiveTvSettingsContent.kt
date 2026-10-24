@@ -674,6 +674,16 @@ internal fun LiveTvSettingsContent(
                         s.smallHeader,
                         { update { it.copy(smallHeader = !it.smallHeader) } }
                     )
+                    SettingsActionRow(
+                        title = "Info Panel Darkness",
+                        subtitle = "How dark the box behind the show info is. Standard matches the guide rows. Darker or Solid makes the text easier to read.",
+                        value = when (s.guideInfoBackground) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
+                        onClick = {
+                            update {
+                                it.copy(guideInfoBackground = when (it.guideInfoBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" })
+                            }
+                        }
+                    )
                     SettingsToggleRow(
                         "Show Posters",
                         "Posters for what's on, from your addons. Off: just the channel logo.",
@@ -867,8 +877,8 @@ internal fun LiveTvSettingsContent(
                         }
                     )
                     SettingsActionRow(
-                        title = "Info Panel Background",
-                        subtitle = "How dark the box behind the show info is. Darker or Solid makes the text easier to read over bright, busy pictures.",
+                        title = "Play Bar Background",
+                        subtitle = "How dark the play bar is. Darker or Solid makes the text easier to read over bright, busy pictures.",
                         value = when (s.panelBackground) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
                         onClick = {
                             update {

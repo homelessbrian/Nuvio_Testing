@@ -332,6 +332,7 @@ fun LiveTvGuideScreen(
     var highlightKey by remember { mutableStateOf<String?>(null) }
     val groupsListState = rememberLazyListState()
     var menuTarget by remember { mutableStateOf<MenuTarget?>(null) }
+    var guideGearOpen by remember { mutableStateOf(false) }
     /** Schedule a Recording (long-press menu): the channel it's for. */
     var manualRecordingFor by remember { mutableStateOf<LiveChannel?>(null) }
     var infoTarget by remember { mutableStateOf<MenuTarget?>(null) }
@@ -1460,6 +1461,7 @@ fun LiveTvGuideScreen(
             val glowTop = NuvioTheme.colors.BackgroundElevated
             val showGlow = settings.showProgramDetails || settings.showPreview
             val glowH = with(density) { (if (settings.smallHeader) 150.dp else 220.dp).toPx() }
+            val gc = guideInfoGlass(settings.guideInfoBackground)
             val corner = with(density) { liveCorner().toPx() }
             val left = pb.left - rb.left
             val top = pb.top - rb.top
@@ -1480,7 +1482,6 @@ fun LiveTvGuideScreen(
                         if (gb != null) {
                             val gl = gb.left - rb.left
                             val gt = gb.top - rb.top
-                            val gc = glassColor(settings.panelBackground)
                             val gr = (if (settings.smallHeader) 16.dp else 20.dp).toPx()
                             drawRoundRect(
                                 brush = androidx.compose.ui.graphics.Brush.verticalGradient(
@@ -1548,7 +1549,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
+                    .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Manage group visibility", size = 15.sp, weight = FontWeight.Bold)
@@ -1564,7 +1565,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
+                    .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Reorder groups", size = 15.sp, weight = FontWeight.Bold)
@@ -1578,7 +1579,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
+                    .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Reorder channels", size = 15.sp, weight = FontWeight.Bold)
@@ -1599,7 +1600,7 @@ fun LiveTvGuideScreen(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
                     .padding(end = 36.dp, bottom = 24.dp)
-                    .glass(glassColor(settings.panelBackground), RoundedCornerShape(10.dp))
+                    .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(10.dp))
                     .padding(horizontal = 16.dp, vertical = 12.dp)
             ) {
                 LiveText("Manage visibility", size = 15.sp, weight = FontWeight.Bold)
@@ -1774,7 +1775,16 @@ fun LiveTvGuideScreen(
                 onFindInNuvio = { p -> menuTarget = null; findInNuvio(p) },
                 onSearch = { menuTarget = null; LiveTvSearchBridge.origin.value = LiveTvSearchBridge.GUIDE; onOpenNuvioSearch() },
                 onRefresh = { menuTarget = null; viewModel.refresh() },
+                onGuideDisplay = { menuTarget = null; guideGearOpen = true },
                 onSettings = { menuTarget = null; onOpenSettings() }
+            )
+        }
+        if (guideGearOpen) {
+            GuideGearPanel(
+                settings = settings,
+                onChange = { f -> viewModel.updateSettings(f) },
+                onSettings = { guideGearOpen = false; onOpenSettings() },
+                onDismiss = { guideGearOpen = false; scope.launch { delay(60); runCatching { gridFocus.requestFocus() } } }
             )
         }
         infoTarget?.let { target ->
@@ -2011,14 +2021,14 @@ private fun GuideHeader(
     if (!settings.showProgramDetails && !showPreview) {
         Row(
             // Info panel and preview both off: just a slim bar with the clock.
-            modifier = Modifier.fillMaxWidth().padding(start = 64.dp, end = 32.dp, top = 8.dp, bottom = 2.dp),
+            modifier = Modifier.fillMaxWidth().padding(start = 56.dp, end = 24.dp, top = 8.dp, bottom = 2.dp),
             verticalAlignment = Alignment.CenterVertically
         ) {
             LiveText("Live TV", size = 16.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
             status?.let { LiveText(it, color = NuvioTheme.colors.TextSecondary, size = 13.sp) }
             Spacer(Modifier.width(16.dp))
             Row(
-                modifier = Modifier.glass(glassColor(settings.panelBackground), RoundedCornerShape(12.dp))
+                modifier = Modifier.glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 6.dp),
                 verticalAlignment = Alignment.CenterVertically
             ) {
@@ -2033,9 +2043,9 @@ private fun GuideHeader(
         modifier = Modifier
             .fillMaxWidth()
             .height(if (small) 110.dp else 176.dp)
-            .padding(start = 64.dp, end = 32.dp, top = if (small) 12.dp else 20.dp, bottom = if (small) 4.dp else 6.dp)
+            .padding(start = 56.dp, end = 24.dp, top = if (small) 12.dp else 20.dp, bottom = if (small) 4.dp else 6.dp)
             .onGloballyPositioned { onGlassBounds(it.boundsInRoot()) }
-            .glass(glassColor(settings.panelBackground), RoundedCornerShape(if (small) 16.dp else 20.dp))
+            .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(if (small) 16.dp else 20.dp))
             .padding(horizontal = 18.dp, vertical = 14.dp),
         horizontalArrangement = Arrangement.spacedBy(if (small) 16.dp else 20.dp)
     ) {
@@ -2980,6 +2990,7 @@ private fun ChannelContextMenu(
     onScheduleRecording: () -> Unit = {},
     onSearch: () -> Unit,
     onRefresh: () -> Unit,
+    onGuideDisplay: () -> Unit,
     onSettings: () -> Unit
 ) {
     val first = remember { FocusRequester() }
@@ -3029,6 +3040,7 @@ private fun ChannelContextMenu(
             if (isCopyHere) item { MenuItem("Remove copy from this group", onClick = onRemoveCopy) }
             item { MenuItem("Hide group \"${ch.group}\"", onClick = onHideGroup) }
             item { MenuItem("Update playlists & EPG", onClick = onRefresh) }
+            item { MenuItem("Guide display (info panel, preview…)", onClick = onGuideDisplay) }
             item { MenuItem("Live TV settings", onClick = onSettings) }
         }
     }

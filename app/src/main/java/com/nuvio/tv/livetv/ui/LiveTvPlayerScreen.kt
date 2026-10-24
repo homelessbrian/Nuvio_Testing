@@ -115,6 +115,9 @@ fun LiveTvPlayerScreen(
     var bannerToken by remember { mutableIntStateOf(0) }
     var listVisible by remember { mutableStateOf(false) }
     var dialog by remember { mutableStateOf(PlayerDialog.NONE) }
+    // Which page the ⚙ panel opens on ("" = the main one; "audio", "subs", "sleep", "size", "info").
+    var gearStart by remember { mutableStateOf("") }
+    fun openGear(start: String = "") { gearStart = start; dialog = PlayerDialog.OPTIONS }
     val context = androidx.compose.ui.platform.LocalContext.current
     var numberBuffer by remember { mutableStateOf("") }
     var longPressFired by remember { mutableStateOf(false) }
@@ -434,10 +437,10 @@ fun LiveTvPlayerScreen(
                                     captionsOn = viewModel.playback.toggleCaptions()
                                     toast = if (captionsOn) "Captions on" else if (viewModel.playback.subtitleTracks().isEmpty()) "No captions on this channel" else "Captions off"
                                 }
-                                PanelControl.AUDIO -> dialog = PlayerDialog.AUDIO
-                                PanelControl.SIZE -> dialog = PlayerDialog.SCREEN_SIZE
-                                PanelControl.SLEEP -> dialog = PlayerDialog.SLEEP
-                                PanelControl.MORE -> dialog = PlayerDialog.OPTIONS
+                                PanelControl.AUDIO -> openGear("audio")
+                                PanelControl.SIZE -> openGear("size")
+                                PanelControl.SLEEP -> openGear("sleep")
+                                PanelControl.MORE -> openGear()
                                 PanelControl.TIMELINE, null -> Unit
                             }
                             return@onPreviewKeyEvent true
@@ -454,12 +457,12 @@ fun LiveTvPlayerScreen(
                             okHoldJob?.cancel()
                             okHoldJob = scope.launch {
                                 delay(LONG_PRESS_MS)
-                                if (!longPressFired) { longPressFired = true; dialog = PlayerDialog.OPTIONS }
+                                if (!longPressFired) { longPressFired = true; openGear() }
                             }
                         } else if (!longPressFired) {
                             okHoldJob?.cancel()
                             longPressFired = true
-                            dialog = PlayerDialog.OPTIONS
+                            openGear()
                         }
                         return@onPreviewKeyEvent true
                     }
@@ -469,7 +472,7 @@ fun LiveTvPlayerScreen(
                         if (longPressFired) {
                             longPressFired = false
                         } else if (heldMs >= LONG_PRESS_MS) {
-                            dialog = PlayerDialog.OPTIONS
+                            openGear()
                         } else when {
                             playback.error != null && playback.reconnectAttempt > 8 -> viewModel.playback.retry()
                             // OK: the full panel (timeline, buttons, options), on Play/Pause.
@@ -527,7 +530,7 @@ fun LiveTvPlayerScreen(
                         true
                     }
                     e.key == Key.Info -> { showBanner(); true }
-                    e.key == Key.Menu -> { dialog = PlayerDialog.OPTIONS; true }
+                    e.key == Key.Menu -> { openGear(); true }
                     e.key == Key.MediaPlayPause || e.key == Key.MediaPlay || e.key == Key.MediaPause -> {
                         viewModel.playback.togglePause(); true
                     }
@@ -935,6 +938,26 @@ fun LiveTvPlayerScreen(
                 else -> null
             }
             GearPanel(
+                startPage = gearStart,
+                audioOptions = viewModel.playback.audioTracks(),
+                subtitleOptions = viewModel.playback.subtitleTracks(),
+                moreSubtitleOptions = viewModel.playback.moreCaptionTracks(),
+                subtitleNote = viewModel.playback.captionsNote(),
+                onPickAudio = { o -> viewModel.playback.pickAudio(o); dialog = PlayerDialog.NONE },
+                onPickSubtitle = { o ->
+                    viewModel.playback.pickSubtitle(o)
+                    captionsOn = viewModel.playback.captionsOn()
+                    dialog = PlayerDialog.NONE
+                },
+                onPickSleep = { minutes ->
+                    viewModel.setSleepTimer(minutes)
+                    toast = if (minutes == null) "Sleep timer off" else "Sleep timer: $minutes min"
+                    dialog = PlayerDialog.NONE
+                    scope.launch { delay(60); runCatching { rootFocus.requestFocus() } }
+                },
+                streamInfo = {
+                    streamInfoRows(viewModel.playback.player, ch, viewModel.pictureShapeOf(ch.key), viewModel.playback.captionsInfo())
+                },
                 bottom = 168.dp,
                 background = settings.panelBackground,
                 isFavorite = ch.key in user.favorites,
@@ -971,10 +994,7 @@ fun LiveTvPlayerScreen(
                         toast = viewModel.toggleRecording(ch)
                     }
                 },
-                onAudio = { dialog = PlayerDialog.AUDIO },
-                onSubtitles = { dialog = PlayerDialog.SUBTITLES },
                 onFavorite = { viewModel.toggleFavorite(ch) },
-                onSleep = { dialog = PlayerDialog.SLEEP },
                 onTimeAction = {
                     dialog = PlayerDialog.NONE
                     when {
@@ -987,7 +1007,6 @@ fun LiveTvPlayerScreen(
                     dialog = PlayerDialog.NONE
                     viewModel.previousChannel()?.let { viewModel.preview(it) }
                 },
-                onStreamInfo = { dialog = PlayerDialog.STREAM_INFO },
                 onSearch = viewModel.currentProgram(ch.key)
                     ?.let { com.nuvio.tv.livetv.data.LiveTvPosterResolver.searchTitleFor(it, ch) }
                     ?.let { title ->
@@ -1176,10 +1195,33 @@ private fun StreamInfoDialog(
     captions: String? = null,
     onDismiss: () -> Unit
 ) {
+    val rows = streamInfoRows(player, channel, shape, captions)
+    val first = remember { FocusRequester() }
+    LiveDialog(onDismiss = onDismiss, width = 520.dp) {
+        LiveText("Stream info", size = 20.sp, weight = FontWeight.Bold)
+        Spacer(Modifier.height(12.dp))
+        rows.forEach { (k, value) ->
+            Row(modifier = Modifier.padding(vertical = 3.dp)) {
+                LiveText(k, color = NuvioTheme.colors.TextSecondary, size = 14.sp, modifier = Modifier.width(130.dp))
+                LiveText(value, size = 14.sp, maxLines = 2, modifier = Modifier.weight(1f))
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        MenuItem("Close", Modifier.focusRequester(first), onDismiss)
+    }
+    LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+}
+
+private fun streamInfoRows(
+    player: androidx.media3.common.Player?,
+    channel: LiveChannel,
+    shape: com.nuvio.tv.livetv.player.PictureShape,
+    captions: String?
+): List<Pair<String, String>> {
     val exo = player as? androidx.media3.exoplayer.ExoPlayer
     val v = exo?.videoFormat
     val a = exo?.audioFormat
-    val rows = buildList {
+    return buildList {
         add("Channel" to "${channel.number}  ${channel.name}")
         v?.let { f ->
             if (f.width > 0) add("Resolution" to "${f.width} × ${f.height}" + qualityName(f.height)?.let { "  ($it)" }.orEmpty())
@@ -1215,20 +1257,6 @@ private fun StreamInfoDialog(
         exo?.let { p -> add("Buffered" to "${p.totalBufferedDuration / 1000} s") }
         add("Source" to (runCatching { android.net.Uri.parse(channel.url).host }.getOrNull() ?: "—"))
     }
-    val first = remember { FocusRequester() }
-    LiveDialog(onDismiss = onDismiss, width = 520.dp) {
-        LiveText("Stream info", size = 20.sp, weight = FontWeight.Bold)
-        Spacer(Modifier.height(12.dp))
-        rows.forEach { (k, value) ->
-            Row(modifier = Modifier.padding(vertical = 3.dp)) {
-                LiveText(k, color = NuvioTheme.colors.TextSecondary, size = 14.sp, modifier = Modifier.width(130.dp))
-                LiveText(value, size = 14.sp, maxLines = 2, modifier = Modifier.weight(1f))
-            }
-        }
-        Spacer(Modifier.height(12.dp))
-        MenuItem("Close", Modifier.focusRequester(first), onDismiss)
-    }
-    LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
 }
 
 private fun qualityName(height: Int): String? = when {
