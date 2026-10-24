@@ -2,6 +2,17 @@ package com.nuvio.tv.livetv.ui
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.combinedClickable
+import androidx.compose.foundation.layout.size
+import androidx.compose.material.icons.filled.Settings
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -125,5 +136,41 @@ internal fun GuideGearPanel(
                 LiveText("›", size = 15.sp, color = gearText(focused, dim = true))
             }
         }
+    }
+}
+
+/** The ⚙ in the guide's top bar: OK opens the Guide display panel, Down goes back to the channels. */
+@Composable
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+internal fun GuideGearButton(modifier: Modifier = Modifier, onOpen: () -> Unit, onDown: () -> Unit) {
+    var focused by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+    val cell = liveCellColors(focused, Color.White.copy(alpha = 0.10f))
+    val shape = RoundedCornerShape(10.dp)
+    Box(
+        modifier = modifier
+            .size(34.dp)
+            .clip(shape)
+            .background(cell.background)
+            .border(if (focused) 2.dp else 1.dp, if (focused) cell.border else GuideGlassEdge, shape)
+            .onFocusChanged { focused = it.isFocused }
+            .onPreviewKeyEvent { e ->
+                if (e.key == Key.DirectionDown) {
+                    if (e.type == KeyEventType.KeyDown) onDown()
+                    true
+                } else false
+            }
+            .combinedClickable(
+                interactionSource = androidx.compose.runtime.remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onOpen
+            ),
+        contentAlignment = Alignment.Center
+    ) {
+        androidx.tv.material3.Icon(
+            androidx.compose.material.icons.Icons.Default.Settings,
+            contentDescription = "Guide display",
+            tint = focusedTextColor(focused),
+            modifier = Modifier.size(18.dp)
+        )
     }
 }

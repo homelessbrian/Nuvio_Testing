@@ -349,6 +349,7 @@ class LiveTvPlaybackController @Inject constructor(
         val session = timeshift.start(url, ch.headers, timeshiftMinutes)
         if (session == null) {
             // Couldn't record: back to the live stream, paused.
+            com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: couldn't start recording (no room, or provider refused); paused live instead")
             p.setMediaSource(buildMediaSource(url, ch.headers, isLive = true)); p.prepare(); p.playWhenReady = false
             return
         }
@@ -1460,7 +1461,11 @@ class LiveTvPlaybackController @Inject constructor(
                 if (System.currentTimeMillis() - bufferStartedAt < 20_000) bufferFailed() else goLiveFresh()
                 return
             }
-            if (_shiftStartedAt.value != null) { Log.w(TAG, "Recording playback failed", error); goLive(); return }
+            if (_shiftStartedAt.value != null) {
+                Log.w(TAG, "Recording playback failed", error)
+                com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: playback error ${error.errorCodeName} (recording=${timeshift.isRecording}, reloads=$shiftReloads); back to live")
+                goLive(); return
+            }
             if (_recordingPlayback.value != null) { Log.w(TAG, "Playing from the recording failed", error); recordingPlaybackEnded(); return }
             // The saved catch-up couldn't be played: play the replay straight from the provider.
             if (replayLocal) {

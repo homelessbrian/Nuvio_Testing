@@ -454,9 +454,8 @@ internal fun LiveDialog(
                 }
                 .widthIn(min = 320.dp, max = width)
                 .heightIn(max = 620.dp)
-                .clip(RoundedCornerShape(16.dp))
-                .background(NuvioTheme.colors.BackgroundElevated)
-                .border(1.dp, NuvioTheme.colors.Border, RoundedCornerShape(16.dp))
+                // The same dark glass as the play bar and the ⚙ panels.
+                .glass(glassColor("darker"), RoundedCornerShape(20.dp))
                 .padding(20.dp)
         ) {
             content()

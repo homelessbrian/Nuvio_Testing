@@ -982,6 +982,11 @@ fun LiveTvPlayerScreen(
                         it.copy(panelRow = when (it.panelRow) { "RECENT" -> "FAVORITES"; "FAVORITES" -> "OFF"; else -> "RECENT" })
                     }
                 },
+                onBackground = {
+                    viewModel.updateSettings {
+                        it.copy(panelBackground = when (it.panelBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" })
+                    }
+                },
                 onToggle = { part ->
                     viewModel.updateSettings { s ->
                         val cur = BarPart.parse(s.barHidden)

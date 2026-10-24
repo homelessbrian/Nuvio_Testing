@@ -293,6 +293,10 @@ fun LiveTvGuideScreen(
     // you pick a group or go back to the channels, giving the guide the full width.
     var groupsOpen by remember { mutableStateOf(false) }
     var leftTapPending by remember { mutableStateOf(false) }
+    // Up on the first channel: a tap wraps to the last, holding it goes to the ⚙ in the top bar.
+    var upTopPending by remember { mutableStateOf(false) }
+    var upTopFired by remember { mutableStateOf(false) }
+    var upTopJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var lastVerticalAt by remember { mutableStateOf(0L) }
     var okHoldJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var okDuringScroll by remember { mutableStateOf(false) }
@@ -333,6 +337,7 @@ fun LiveTvGuideScreen(
     val groupsListState = rememberLazyListState()
     var menuTarget by remember { mutableStateOf<MenuTarget?>(null) }
     var guideGearOpen by remember { mutableStateOf(false) }
+    val guideGearFocus = remember { FocusRequester() }
     /** Schedule a Recording (long-press menu): the channel it's for. */
     var manualRecordingFor by remember { mutableStateOf<LiveChannel?>(null) }
     var infoTarget by remember { mutableStateOf<MenuTarget?>(null) }
@@ -961,6 +966,9 @@ fun LiveTvGuideScreen(
                 onSurfaceAttached = { viewModel.playback.onSurfaceAttached() },
                 onPreviewBounds = { previewBounds = it },
                 onGlassBounds = { headerGlassBounds = it },
+                gearFocus = guideGearFocus,
+                onGear = { guideGearOpen = true },
+                onGearDown = { runCatching { gridFocus.requestFocus() } },
                 playlistName = if (settings.showPlaylistInInfo) headerChannel?.sourceId?.let { playlistNames[it] } else null,
                 settings = settings,
                 now = now,
@@ -1052,6 +1060,7 @@ fun LiveTvGuideScreen(
                         }
                     },
                     onGroupMenu = { g -> if (!g.special) groupMenu = g },
+                    onLongUpAtTop = { runCatching { guideGearFocus.requestFocus() } },
                     onRight = {
                         column = GuideColumn.CHANNEL
                         groupsOpen = false
@@ -1308,10 +1317,31 @@ fun LiveTvGuideScreen(
                                     }
                                     return@onPreviewKeyEvent true
                                 }
+                                if (event.key == Key.DirectionUp && event.type == KeyEventType.KeyUp && upTopPending) {
+                                    upTopPending = false
+                                    upTopJob?.cancel()
+                                    if (!upTopFired) moveRow(-1)
+                                    return@onPreviewKeyEvent true
+                                }
                                 if (event.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                                 val code = event.nativeKeyEvent.keyCode
                                 when {
-                                    event.key == Key.DirectionUp -> { moveRow(-1); true }
+                                    event.key == Key.DirectionUp -> {
+                                        // Up from the first channel reaches the ⚙ in the top bar.
+                                        if (upTopPending) {
+                                            // Held at the top: wait for the long press (or the release).
+                                        } else if (row == 0 && event.nativeKeyEvent.repeatCount == 0 && !visibilityMode && channels.size > 1) {
+                                            upTopPending = true
+                                            upTopFired = false
+                                            upTopJob?.cancel()
+                                            upTopJob = scope.launch {
+                                                delay(LONG_PRESS_MS)
+                                                upTopFired = true
+                                                runCatching { guideGearFocus.requestFocus() }
+                                            }
+                                        } else moveRow(-1)
+                                        true
+                                    }
                                     event.key == Key.DirectionDown -> { moveRow(1); true }
                                     event.key == Key.PageUp || event.key == Key.ChannelUp -> { moveRow(-8); true }
                                     event.key == Key.PageDown || event.key == Key.ChannelDown -> { moveRow(8); true }
@@ -2016,7 +2046,11 @@ private fun GuideHeader(
     /** Where the preview window is on screen (null when it isn't shown). */
     onPreviewBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
     /** Where the header's glass panel is (the preview sits on it). */
-    onGlassBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {}
+    onGlassBounds: (androidx.compose.ui.geometry.Rect?) -> Unit = {},
+    /** The ⚙ that opens the Guide display panel (Up from the first channel reaches it). */
+    gearFocus: FocusRequester = FocusRequester(),
+    onGear: () -> Unit = {},
+    onGearDown: () -> Unit = {}
 ) {
     if (!settings.showProgramDetails && !showPreview) {
         Row(
@@ -2027,6 +2061,8 @@ private fun GuideHeader(
             LiveText("Live TV", size = 16.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
             status?.let { LiveText(it, color = NuvioTheme.colors.TextSecondary, size = 13.sp) }
             Spacer(Modifier.width(16.dp))
+            GuideGearButton(Modifier.focusRequester(gearFocus), onOpen = onGear, onDown = onGearDown)
+            Spacer(Modifier.width(10.dp))
             Row(
                 modifier = Modifier.glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(12.dp))
                     .padding(horizontal = 14.dp, vertical = 6.dp),
@@ -2158,6 +2194,8 @@ private fun GuideHeader(
                 LiveText(status, color = NuvioTheme.colors.TextSecondary)
             }
         }
+        // The ⚙ for the guide's display settings, in the corner of the panel.
+        GuideGearButton(Modifier.focusRequester(gearFocus), onOpen = onGear, onDown = onGearDown)
         // Preview only (info panel off): keep it at the right, as usual.
         if (showPreview) {
             Box(
@@ -2598,18 +2636,28 @@ private fun ProgramBlock(
             }
         }
         progress?.let {
+            // Inside the outline (which is 2 dp wide), not over it; the bottom corners follow the tile's.
+            val inner = (liveCorner() - 2.dp).coerceAtLeast(0.dp)
             Box(
                 modifier = Modifier
                     .align(Alignment.BottomStart)
-                    .fillMaxWidth(it)
+                    .padding(start = 2.dp, end = 2.dp, bottom = 2.dp)
+                    .fillMaxWidth()
                     .height(3.dp)
-                    // Solid highlight fills the block with the accent color, so the bar would
-                    // vanish into it: there it takes the highlighted text's color instead.
-                    .background(
-                        if (focused && LocalLiveSolidHighlight.current) colors.text.copy(alpha = 0.9f)
-                        else NuvioTheme.colors.Secondary.copy(alpha = 0.9f)
-                    )
-            )
+                    .clip(RoundedCornerShape(bottomStart = inner, bottomEnd = inner))
+            ) {
+                Box(
+                    modifier = Modifier
+                        .fillMaxWidth(it)
+                        .fillMaxHeight()
+                        // Solid highlight fills the block with the accent color, so the bar would
+                        // vanish into it: there it takes the highlighted text's color instead.
+                        .background(
+                            if (focused && LocalLiveSolidHighlight.current) colors.text.copy(alpha = 0.9f)
+                            else NuvioTheme.colors.Secondary.copy(alpha = 0.9f)
+                        )
+                )
+            }
         }
     }
 }
@@ -2647,6 +2695,8 @@ private fun GroupColumn(
     onSelect: (ChannelGroup) -> Unit,
     onGroupMenu: (ChannelGroup) -> Unit,
     onRight: () -> Unit,
+    /** Holding Up while on the first group: on to the ⚙ in the top bar. */
+    onLongUpAtTop: () -> Unit = {},
     playlistNames: Map<String, String> = emptyMap(),
     collapsed: Set<String> = emptySet(),
     onToggleCollapse: (String) -> Unit = {},
@@ -2665,6 +2715,7 @@ private fun GroupColumn(
     tileHeight: Dp = 32.dp
 ) {
     var focusedGroupId by remember { mutableStateOf<String?>(null) }
+    var focusedSince by remember { mutableStateOf(0L) }
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -2697,6 +2748,12 @@ private fun GroupColumn(
                 }
                 if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionRight) {
                     onRight(); true
+                } else if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp && e.nativeKeyEvent.repeatCount >= 2 &&
+                    reorderingId == null && hiddenPending == null &&
+                    focusedGroupId == groups.firstOrNull { it.id != ChannelGroup.SEARCH }?.id &&
+                    e.nativeKeyEvent.eventTime - focusedSince > 500
+                ) {
+                    onLongUpAtTop(); true
                 } else false
             }
     ) {
@@ -2739,6 +2796,7 @@ private fun GroupColumn(
                         visible = hiddenPending?.let { g.id !in it },
                         modifier = if (requester) Modifier.focusRequester(focusRequester) else Modifier,
                         onFocused = {
+                            if (focusedGroupId != g.id) focusedSince = android.os.SystemClock.uptimeMillis()
                             focusedGroupId = g.id
                             if (reorderingId == null && hiddenPending == null) onFocusGroup(g)
                         },
@@ -3002,23 +3060,29 @@ private fun ChannelContextMenu(
         LiveText(ch.group, color = NuvioTheme.colors.TextSecondary, size = 13.sp)
         Spacer(Modifier.height(14.dp))
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+            item { MenuHeader("Watch", first = true) }
             item { MenuItem("Watch full screen", Modifier.focusRequester(first), onWatch) }
             if (canCatchup) item { MenuItem("Play from archive: ${program!!.title}", onClick = { onCatchup(program!!) }) }
-            if (streamProgram != null) {
-                item { MenuItem("Find & stream \"${streamProgram.title}\" in Nuvio", onClick = { onFindInNuvio(streamProgram) }) }
-            }
             // On now, on a catch-up channel: start it over.
             if (program != null && now >= program.startMs && now < program.stopMs && canRestart) item {
                 MenuItem("Watch from the beginning", onClick = onRestart)
             }
-            // Upcoming show: Remind me (or Cancel reminder), right in the long-press menu.
-            if (program != null && program.startMs > now) item {
-                MenuItem(if (reminderSet) "Cancel reminder" else "Remind me", onClick = { onRemind(program) })
+            if (program != null || streamProgram != null) {
+                item { MenuHeader("This show") }
+                if (program != null) item { MenuItem("Program info", onClick = onProgramInfo) }
+                if (streamProgram != null) {
+                    item { MenuItem("Find & stream \"${streamProgram.title}\" in Nuvio", onClick = { onFindInNuvio(streamProgram) }) }
+                }
+                // Upcoming show: Remind me (or Cancel reminder), right in the long-press menu.
+                if (program != null && program.startMs > now) item {
+                    MenuItem(if (reminderSet) "Cancel reminder" else "Remind me", onClick = { onRemind(program) })
+                }
             }
+            item { MenuHeader("Record") }
             if (program != null && recordLabel != null) item { MenuItem(recordLabel, onClick = { onRecord(program) }) }
             if (program != null && seriesLabel != null) item { MenuItem(seriesLabel, onClick = { onSeries(program) }) }
             item { MenuItem("Schedule a recording…", onClick = onScheduleRecording) }
-            if (program != null) item { MenuItem("Program info", onClick = onProgramInfo) }
+            item { MenuHeader("Favorites & groups") }
             item { MenuItem(if (isFavorite) "Remove from favorites" else "Add to favorites", onClick = onToggleFavorite) }
             if (isFavorite && inFavoritesGroup) {
                 item { MenuItem("Move up in favorites", onClick = { onMoveFavorite(-1) }) }
@@ -3030,15 +3094,18 @@ private fun ChannelContextMenu(
                 item { MenuItem("Move down in this group", onClick = { onMoveInGroup(customGroupId, 1) }) }
                 item { MenuItem("Remove from this group", onClick = { onRemoveFromGroup(customGroupId) }) }
             }
+            item { MenuItem("Copy channel…", onClick = onCopy) }
+            if (isCopyHere) item { MenuItem("Remove copy from this group", onClick = onRemoveCopy) }
+            item { MenuHeader("Edit channel") }
             item { MenuItem("Rename channel", onClick = onRename) }
             item { MenuItem("Change channel number", onClick = onRenumber) }
             item { MenuItem("Assign EPG", onClick = onChangeEpg) }
+            item { MenuHeader("Hide & arrange") }
             item { MenuItem("Hide channel", onClick = onHide) }
+            item { MenuItem("Hide group \"${ch.group}\"", onClick = onHideGroup) }
             item { MenuItem("Manage visibility", onClick = onManageVisibility) }
             if (canReorder) item { MenuItem("Reorder channels", onClick = onReorder) }
-            item { MenuItem("Copy channel…", onClick = onCopy) }
-            if (isCopyHere) item { MenuItem("Remove copy from this group", onClick = onRemoveCopy) }
-            item { MenuItem("Hide group \"${ch.group}\"", onClick = onHideGroup) }
+            item { MenuHeader("Guide") }
             item { MenuItem("Update playlists & EPG", onClick = onRefresh) }
             item { MenuItem("Guide display (info panel, preview…)", onClick = onGuideDisplay) }
             item { MenuItem("Live TV settings", onClick = onSettings) }
@@ -3632,6 +3699,18 @@ private fun ActionMenuDialog(title: String, actions: List<Pair<String, () -> Uni
         }
     }
     LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+}
+
+/** A small heading that groups the items under it in a menu. */
+@Composable
+internal fun MenuHeader(title: String, first: Boolean = false) {
+    LiveText(
+        title.uppercase(),
+        size = 11.sp,
+        weight = FontWeight.Bold,
+        color = NuvioTheme.colors.TextTertiary,
+        modifier = Modifier.padding(start = 14.dp, top = if (first) 0.dp else 12.dp, bottom = 2.dp)
+    )
 }
 
 @Composable

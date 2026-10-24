@@ -86,6 +86,8 @@ internal fun GearPanel(
     /** What the row under the bar lists: "RECENT", "FAVORITES" or "OFF". */
     channelRow: String,
     onChannelRow: () -> Unit,
+    /** Cycles how dark the play bar is (Standard, Darker, Solid). */
+    onBackground: () -> Unit,
     onToggle: (String) -> Unit,
     onReset: () -> Unit,
     onRecord: (() -> Unit)?,
@@ -279,6 +281,17 @@ internal fun GearPanel(
                         }
                         if (pair.size == 1) Spacer(Modifier.weight(1f))
                     }
+                }
+                // How dark the bar is (OK cycles it).
+                GearRow(Modifier.fillMaxWidth(), onClick = onBackground) { focused ->
+                    Column(Modifier.weight(1f)) {
+                        LiveText("Bar darkness", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                        LiveText("How dark the play bar is", size = 10.sp, color = gearText(focused, dim = true))
+                    }
+                    LiveText(
+                        when (background) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
+                        size = 13.sp, weight = FontWeight.Medium, color = gearText(focused)
+                    )
                 }
                 // Which channels the row under the bar lists (OK cycles it).
                 GearRow(Modifier.fillMaxWidth(), onClick = onChannelRow) { focused ->
