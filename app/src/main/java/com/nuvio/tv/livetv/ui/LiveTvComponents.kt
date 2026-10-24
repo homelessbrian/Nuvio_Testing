@@ -792,9 +792,10 @@ internal fun FrameMeter(label: String) {
                 try { Thread.sleep(90) } catch (_: InterruptedException) { return@Thread }
                 if (!answered.get()) {
                     val st = mainThread.stackTrace
-                    val spot = st.filter { it.className.startsWith("com.nuvio") || it.className.startsWith("androidx.compose") || it.className.startsWith("androidx.media3") }
-                        .take(4).joinToString(" < ") { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
-                        .ifEmpty { st.take(2).joinToString(" < ") { it.className.substringAfterLast('.') + "." + it.methodName } }
+                    // The top of the stack, as it is (no filtering), with a repeated call shown once.
+                    val spot = st.map { it.className.substringAfterLast('.') + "." + it.methodName + ":" + it.lineNumber }
+                        .fold(ArrayList<String>()) { acc, f -> if (acc.lastOrNull() != f) acc.add(f); acc }
+                        .take(7).joinToString(" < ")
                     stuckAt.merge(spot, 1) { a, b -> a + b }
                 }
                 try { Thread.sleep(60) } catch (_: InterruptedException) { return@Thread }

@@ -1784,6 +1784,7 @@ class LiveTvRepository @Inject constructor(
                 LIVE_REPORT.add("Guide \"${target.name}\" is broken at $err. Kept what was read before that.")
             }
 
+            setStatus(loading = true, message = "Matching guide \"${target.name}\"$step…")
             val entries = if (parsed.channels.isNotEmpty()) {
                 parsed.channels.values.map { EpgChannelEntry(it.id, it.displayNames, it.icon) }
             } else {
@@ -1941,8 +1942,25 @@ class LiveTvRepository @Inject constructor(
     private fun cleanListings(list: List<EpgProgram>): List<EpgProgram> {
         if (list.size < 2) return list
         val real = list.filter { !isPlaceholder(it.title) }
-        val kept = if (real.isEmpty() || real.size == list.size) list else list.filter { p ->
-            !isPlaceholder(p.title) || real.none { r -> r.startMs < p.stopMs && r.stopMs > p.startMs }
+        val kept = if (real.isEmpty() || real.size == list.size) list else {
+            // The real shows' time spans, merged into separate stretches, so each placeholder is
+            // checked against them with a quick search (every placeholder against every real show
+            // took minutes on big guides).
+            val spans = ArrayList<LongArray>()
+            for (r in real.sortedBy { it.startMs }) {
+                val last = spans.lastOrNull()
+                if (last != null && r.startMs <= last[1]) { if (r.stopMs > last[1]) last[1] = r.stopMs }
+                else spans += longArrayOf(r.startMs, r.stopMs)
+            }
+            fun overlapsReal(p: EpgProgram): Boolean {
+                var lo = 0; var hi = spans.size - 1; var idx = -1
+                while (lo <= hi) {
+                    val mid = (lo + hi) ushr 1
+                    if (spans[mid][0] < p.stopMs) { idx = mid; lo = mid + 1 } else hi = mid - 1
+                }
+                return idx >= 0 && spans[idx][1] > p.startMs
+            }
+            list.filter { p -> !isPlaceholder(p.title) || !overlapsReal(p) }
         }
         return resolveOverlaps(kept)
     }
@@ -1972,8 +1990,13 @@ class LiveTvRepository @Inject constructor(
         return placeholders * 10 >= list.size * 8
     }
 
-    private fun isPlaceholder(title: String): Boolean =
-        PLACEHOLDER_TITLES.matches(title.trim().lowercase())
+    // Guides repeat the same few titles a million times: each is checked once.
+    private val placeholderCache = java.util.concurrent.ConcurrentHashMap<String, Boolean>()
+
+    private fun isPlaceholder(title: String): Boolean {
+        if (placeholderCache.size > 50_000) placeholderCache.clear()
+        return placeholderCache.getOrPut(title) { PLACEHOLDER_TITLES.matches(title.trim().lowercase()) }
+    }
 
     /**
      * Assign EPG changes applied straight to the stored guide instead of reading every guide
