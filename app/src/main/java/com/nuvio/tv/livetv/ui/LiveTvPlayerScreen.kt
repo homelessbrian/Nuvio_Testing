@@ -258,7 +258,15 @@ fun LiveTvPlayerScreen(
         n?.let { viewModel.channelByNumber(it) }?.let { viewModel.preview(it) } ?: run { if (n != null) toast = "No channel $n" }
     }
     LaunchedEffect(listVisible) {
-        if (!listVisible) { delay(60); runCatching { rootFocus.requestFocus() } }
+        if (!listVisible) {
+            // Overlay mode took the focus with it when it closed: take it back, trying a few
+            // times (once isn't always enough), or the remote does nothing until you press OK.
+            for (wait in longArrayOf(60, 150, 300, 600, 1000)) {
+                delay(wait)
+                if (dialog != PlayerDialog.NONE) break
+                runCatching { rootFocus.requestFocus() }
+            }
+        }
     }
 
     fun zap(direction: Int) {
