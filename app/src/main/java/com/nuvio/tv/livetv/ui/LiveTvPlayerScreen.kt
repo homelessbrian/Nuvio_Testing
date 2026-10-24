@@ -773,13 +773,18 @@ fun LiveTvPlayerScreen(
                         val start = viewModel.playback.shiftEarliestWallMs() ?: shiftStartedAt ?: tick
                         val pos = viewModel.playback.shiftPositionWallMs() ?: start
                         val behind = (tick - pos).coerceAtLeast(0L)
+                        // The whole show, like live and catch-up: the bar covers the full program,
+                        // not just how much has made it into the pause buffer, so reaching "live"
+                        // doesn't look like reaching the end of the show when there's time left.
+                        val showStart = (nowProgram?.startMs ?: start).coerceAtMost(start)
+                        val showEnd = (nowProgram?.stopMs ?: (start + 60_000)).coerceAtLeast(tick)
                         PanelTimeline(
-                            startMs = start,
-                            endMs = maxOf(tick, start + 60_000),
+                            startMs = showStart,
+                            endMs = showEnd,
                             positionMs = pos,
                             liveMs = tick,
                             recordedUntilMs = tick,
-                            leftLabel = "From " + formatClock(start, use24h),
+                            leftLabel = "From " + formatClock(showStart, use24h),
                             rightLabel = "Live " + formatClock(tick, use24h),
                             status = formatDuration(behind) + " behind live",
                             statusLive = true

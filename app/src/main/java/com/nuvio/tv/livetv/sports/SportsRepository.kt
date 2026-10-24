@@ -757,7 +757,12 @@ class SportsRepository @Inject constructor(
         combine(trigger, matchKick) { t, k -> t to k }.debounce(1_500).collect {
             if (!foreground.value && viewers.value == 0) return@collect
             if (!settings.value.showInSidebar && viewers.value == 0) return@collect
-            if (liveRepo.status.value.loading && !liveRepo.status.value.quiet && _matches.value.isNotEmpty() && !pickPending) return@collect
+            val status = liveRepo.status.value
+            // Never the very first match against a playlist that's still importing: it would
+            // both fight the import for the database (which is what made this take minutes) and
+            // match against a guide that isn't fully there yet (so real channels get missed).
+            if (!status.loadedOnce) return@collect
+            if (status.loading && !status.quiet && _matches.value.isNotEmpty() && !pickPending) return@collect
             pickPending = false
             lastRun = System.currentTimeMillis()
             runCatching { runMatch() }.onFailure { Log.w(TAG, "Sports matching failed", it) }

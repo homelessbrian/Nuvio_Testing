@@ -251,7 +251,9 @@ class LiveTvPlaybackController @Inject constructor(
         shiftJob = scope.launch {
             delay(1_500)
             if (timeshift.session != session) return@launch
-            p.setMediaSource(localRecordingSource(session.playUri), positionMs.coerceAtLeast(0L))
+            // Never below what's actually still in the buffer (older parts may have been
+            // trimmed since): a position earlier than that would just fail the same way again.
+            p.setMediaSource(localRecordingSource(session.playUri), positionMs.coerceAtLeast(timeshift.trimmedMs))
             p.prepare()
             p.playWhenReady = true
             shiftPrepared = true
@@ -342,8 +344,6 @@ class LiveTvPlaybackController @Inject constructor(
             p.pause(); return
         }
         val url = currentUrl ?: ch.url
-        // How far behind live the picture was (HLS): resuming starts that far back in the recording.
-        pausedLiveOffsetMs = runCatching { p.currentLiveOffset }.getOrNull()?.takeIf { it != C.TIME_UNSET && it in 0..10 * 60_000L } ?: 0L
         p.pause()
         p.stop() // hand the provider connection over to the recording
         val session = timeshift.start(url, ch.headers, timeshiftMinutes)
@@ -356,8 +356,6 @@ class LiveTvPlaybackController @Inject constructor(
         _shiftStartedAt.value = session.startedAtMs
         reconnectJob?.cancel()
     }
-
-    @Volatile private var pausedLiveOffsetMs = 0L
 
     /** Play from the recording (first time: once there's something recorded to play). */
     private fun resumeShift() {
@@ -385,14 +383,15 @@ class LiveTvPlaybackController @Inject constructor(
             }
             // Both kinds are a local playlist of pieces now (TS streams are cut up as recorded).
             val source = localRecordingSource(session.playUri)
-            // Start where you paused: the start position is given with the source (a seek to 0
-            // made before the player has read the playlist is ignored, and a growing playlist
-            // would otherwise start near its end).
-            // HLS: the first parts saved run up to the live edge; you were watching a little
-            // behind it, so start that far back from their end (not at the newest part).
-            val startAt = if (session.kind == LiveTvTimeshift.Kind.HLS && timeshift.firstBatchMs > 0 && pausedLiveOffsetMs > 0)
-                (timeshift.firstBatchMs - pausedLiveOffsetMs).coerceIn(0L, timeshift.firstBatchMs) else 0L
-            p.setMediaSource(source, startAt)
+            // Start where you paused: the recording began the instant you paused, so its very
+            // start (0) is where you paused, near enough. The start position is given with the
+            // source itself (a seek to 0 made after the player has already read the playlist
+            // would be ignored, and a growing playlist would otherwise start near its end) —
+            // and it has to be 0 exactly: an offset guessed from the provider's own look-back
+            // window could land outside what the player considers the valid live window and
+            // get rejected, which is what made resuming slow and land back near live instead of
+            // where you paused.
+            p.setMediaSource(source, 0L)
             p.prepare()
             p.playWhenReady = true
             shiftPrepared = true
