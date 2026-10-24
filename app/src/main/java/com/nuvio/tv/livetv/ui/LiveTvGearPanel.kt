@@ -61,6 +61,9 @@ internal fun GearPanel(
     audioLabel: String,
     captionsOn: Boolean,
     sizeLabel: String,
+    /** Every screen size (Fit, Crop…) with whether it's the one on; shown on the Screen size page. */
+    sizeOptions: List<Pair<String, Boolean>>,
+    onPickSize: (Int) -> Unit,
     sleepLabel: String,
     /** "Watch from the beginning" (live, catch-up channel), "Back to live" (replay) or "Go live" (paused). */
     timeAction: String?,
@@ -71,7 +74,6 @@ internal fun GearPanel(
     onAudio: () -> Unit,
     onSubtitles: () -> Unit,
     onFavorite: () -> Unit,
-    onSize: () -> Unit,
     onSleep: () -> Unit,
     onTimeAction: () -> Unit,
     onPrevious: () -> Unit,
@@ -83,9 +85,10 @@ internal fun GearPanel(
     onDismiss: () -> Unit
 ) {
     var customizing by remember { mutableStateOf(false) }
+    var sizing by remember { mutableStateOf(false) }
     val first = remember { FocusRequester() }
-    BackHandler { if (customizing) customizing = false else onDismiss() }
-    LaunchedEffect(customizing) { delay(60); runCatching { first.requestFocus() } }
+    BackHandler { if (customizing || sizing) { customizing = false; sizing = false } else onDismiss() }
+    LaunchedEffect(customizing, sizing) { delay(60); runCatching { first.requestFocus() } }
 
     Box(Modifier.fillMaxSize()) {
         Column(
@@ -96,7 +99,29 @@ internal fun GearPanel(
                 .glass(glassColor(if (background == "standard") "darker" else background), RoundedCornerShape(20.dp))
                 .padding(12.dp)
         ) {
-            if (!customizing) {
+            if (sizing) {
+                // ---- Screen size: the same choices as the movie player; the picture changes as you pick
+                Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) {
+                    LiveText("‹  Screen size", size = 14.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    LiveText("Applies to every channel", size = 11.sp, color = Color.White.copy(alpha = 0.55f))
+                }
+                Spacer(Modifier.height(6.dp))
+                var firstSet = false
+                fun f(on: Boolean): Modifier = if (on && !firstSet) { firstSet = true; Modifier.focusRequester(first) } else Modifier
+                // The one that's on takes focus; the first one if none is.
+                val focusIndex = sizeOptions.indexOfFirst { it.second }.coerceAtLeast(0)
+                sizeOptions.withIndex().toList().chunked(2).forEach { pair ->
+                    Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                        pair.forEach { (i, opt) ->
+                            GearRow(Modifier.weight(1f).then(f(i == focusIndex)), onClick = { onPickSize(i) }) { focused ->
+                                LiveText(opt.first, size = 13.sp, weight = if (focused || opt.second) FontWeight.Bold else FontWeight.Medium, color = gearText(focused), modifier = Modifier.weight(1f))
+                                if (opt.second) LiveText("✓", size = 13.sp, color = gearText(focused, dim = true))
+                            }
+                        }
+                        if (pair.size == 1) Spacer(Modifier.weight(1f))
+                    }
+                }
+            } else if (!customizing) {
                 // ---- the four everyday ones, as tiles
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     var firstSet = false
@@ -115,7 +140,7 @@ internal fun GearPanel(
                 Spacer(Modifier.height(8.dp))
                 // ---- the rest, two to a line
                 val items = buildList<Triple<String, String?, () -> Unit>> {
-                    add(Triple("Screen size", sizeLabel, onSize))
+                    add(Triple("Screen size", sizeLabel, { sizing = true }))
                     add(Triple("Sleep timer", sleepLabel, onSleep))
                     timeAction?.let { add(Triple(it, null, onTimeAction)) }
                     add(Triple("Previous channel", null, onPrevious))

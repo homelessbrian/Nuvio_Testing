@@ -158,20 +158,40 @@ private fun backdropBlobs(style: String): List<Blob> = when (style) {
 
 /** Paints the backdrop; scales with the screen (fixed-pixel sizes looked tiny on 4K, huge at 720p). */
 internal fun Modifier.guideBackdrop(style: String): Modifier = this.drawWithCache {
-    val base = backdropBase(style)
-    val blobs = backdropBlobs(style)
-    val big = maxOf(size.width, size.height)
-    val brushes = blobs.map { b ->
+    // Painted once into a half-size picture, then just copied to the screen: drawing five
+    // full-screen gradients again on every redraw (each scroll step) made the guide sluggish
+    // on slower boxes. The gradients are soft, so the half-size picture looks the same.
+    val w = size.width.toInt().coerceAtLeast(1)
+    val h = size.height.toInt().coerceAtLeast(1)
+    val bw = (w / 2).coerceAtLeast(1)
+    val bh = (h / 2).coerceAtLeast(1)
+    val bmp = androidx.compose.ui.graphics.ImageBitmap(bw, bh)
+    androidx.compose.ui.graphics.drawscope.CanvasDrawScope().draw(
+        this, layoutDirection, androidx.compose.ui.graphics.Canvas(bmp), androidx.compose.ui.geometry.Size(bw.toFloat(), bh.toFloat())
+    ) { drawGuideBackdrop(style, bw.toFloat(), bh.toFloat()) }
+    onDrawBehind {
+        drawImage(bmp, dstSize = androidx.compose.ui.unit.IntSize(w, h))
+    }
+}
+
+private fun backdropBrushes(style: String, w: Float, h: Float): List<Brush> {
+    val big = maxOf(w, h)
+    return backdropBlobs(style).map { b ->
         Brush.radialGradient(
             colors = listOf(b.color.copy(alpha = b.a), b.color.copy(alpha = b.a * 0.45f), Color.Transparent),
-            center = Offset(size.width * b.x, size.height * b.y),
+            center = Offset(w * b.x, h * b.y),
             radius = (big * b.r).coerceAtLeast(1f)
         )
     }
-    onDrawBehind {
-        drawRect(base)
-        brushes.forEach { drawRect(it) }
-    }
+}
+
+/**
+ * The same backdrop drawn by hand over a [w] x [h] area (the whole screen): the preview window's
+ * rounded corners are painted over the video's square corners with exactly what's behind them.
+ */
+internal fun androidx.compose.ui.graphics.drawscope.DrawScope.drawGuideBackdrop(style: String, w: Float, h: Float) {
+    drawRect(backdropBase(style), size = androidx.compose.ui.geometry.Size(w, h))
+    backdropBrushes(style, w, h).forEach { drawRect(it, size = androidx.compose.ui.geometry.Size(w, h)) }
 }
 
 /**

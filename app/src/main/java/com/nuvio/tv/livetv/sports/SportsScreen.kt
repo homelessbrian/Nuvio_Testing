@@ -70,6 +70,7 @@ import com.nuvio.tv.livetv.ui.ChannelLogo
 import com.nuvio.tv.livetv.ui.LivePlayerSurface
 import com.nuvio.tv.livetv.ui.LiveText
 import com.nuvio.tv.livetv.ui.guideBackdrop
+import com.nuvio.tv.livetv.ui.drawGuideBackdrop
 import com.nuvio.tv.livetv.ui.LiveTextField
 import com.nuvio.tv.livetv.ui.ThemeGlow
 import com.nuvio.tv.livetv.ui.drawThemeGlow
@@ -377,7 +378,7 @@ fun SportsScreen(
         }
         // The picture, on top of the page where its slot is (one view for every page, so it
         // never restarts), then the rounded corners and the "nothing playing" note over it.
-        if (videoOn) VideoLayer(slot, root, playerRef ?: viewModel.player, playing = playingKey != null, onAttached = { viewModel.onSurfaceAttached() })
+        if (videoOn) VideoLayer(slot, root, playerRef ?: viewModel.player, playing = playingKey != null, backdrop = backdrop, onAttached = { viewModel.onSurfaceAttached() })
     }
     fixFor?.let { ev -> FixChannelDialog(ev, matches[ev.id].orEmpty(), settings.hideScores, viewModel) { fixFor = null } }
 }
@@ -398,7 +399,7 @@ private fun VideoSlot(modifier: Modifier, onBounds: (Rect?) -> Unit) {
 }
 
 @Composable
-private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.Player?, playing: Boolean, onAttached: () -> Unit) {
+private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.Player?, playing: Boolean, backdrop: String, onAttached: () -> Unit) {
     val density = LocalDensity.current
     val placed = slot != null && root != null && slot.width > 1f
     val place = if (placed) with(density) {
@@ -419,8 +420,7 @@ private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.
                 // the picture's square corners, then the rounded window cut back out.
                 val dx = slot!!.left - root!!.left
                 val dy = slot.top - root.top
-                drawRect(bg)
-                translate(-dx, -dy) { drawThemeGlow(accent, glowTop, root.width, SPORTS_GLOW_HEIGHT.toPx()) }
+                translate(-dx, -dy) { drawGuideBackdrop(backdrop, root.width, root.height) }
                 drawRoundRect(
                     color = Color.Black,
                     cornerRadius = CornerRadius(14.dp.toPx(), 14.dp.toPx()),

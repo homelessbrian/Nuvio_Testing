@@ -170,10 +170,6 @@ private fun settingsSectionSpec(category: SettingsCategory): SettingsSectionSpec
     SettingsCategory.DEBUG -> SettingsSectionSpec(category, stringResource(R.string.settings_debug), Icons.Default.BugReport, destination = SettingsSectionDestination.Inline)
     // Live TV fork
     SettingsCategory.LIVE_TV -> SettingsSectionSpec(category, "Live TV", Icons.Default.LiveTv, destination = SettingsSectionDestination.Inline)
-    SettingsCategory.LIVE_TV_GUIDE -> SettingsSectionSpec(category, "Live TV \u00B7 Guide", Icons.Default.GridView, destination = SettingsSectionDestination.Inline)
-    SettingsCategory.LIVE_TV_PLAYBACK -> SettingsSectionSpec(category, "Live TV \u00B7 Playback", Icons.Rounded.PlayArrow, destination = SettingsSectionDestination.Inline)
-    SettingsCategory.LIVE_TV_ON_DEMAND -> SettingsSectionSpec(category, "Live TV \u00B7 On Demand", Icons.Default.Explore, destination = SettingsSectionDestination.Inline)
-    SettingsCategory.LIVE_TV_INTEGRATION -> SettingsSectionSpec(category, "Live TV \u00B7 Integration", Icons.Default.Link, destination = SettingsSectionDestination.Inline)
     SettingsCategory.SPORTS -> SettingsSectionSpec(category, "Sports", Icons.Default.EmojiEvents, destination = SettingsSectionDestination.Inline)
     SettingsCategory.EXPERIENCE -> SettingsSectionSpec(category, stringResource(R.string.settings_experience), Icons.Default.Tune, destination = SettingsSectionDestination.Inline)
 }
@@ -246,10 +242,6 @@ fun SettingsScreen(
             SettingsCategory.INTEGRATION to FocusRequester(),
             SettingsCategory.TRACKING to FocusRequester(),
             SettingsCategory.LIVE_TV to FocusRequester(),
-            SettingsCategory.LIVE_TV_GUIDE to FocusRequester(),
-            SettingsCategory.LIVE_TV_PLAYBACK to FocusRequester(),
-            SettingsCategory.LIVE_TV_ON_DEMAND to FocusRequester(),
-            SettingsCategory.LIVE_TV_INTEGRATION to FocusRequester(),
             SettingsCategory.SPORTS to FocusRequester(),
             SettingsCategory.PLAYBACK to FocusRequester(),
             SettingsCategory.ADVANCED to FocusRequester(),
@@ -985,41 +977,9 @@ private fun SettingsDetailPane(
         )
         SettingsCategory.DEBUG -> DebugSettingsContent()
         SettingsCategory.LIVE_TV -> LiveTvSettingsContent(
-            page = LiveTvPage.MAIN,
+            page = LiveTvPage.HUB,
             initialFocusRequester = if (allowDetailAutofocus) {
                 contentFocusRequesters[SettingsCategory.LIVE_TV]
-            } else {
-                null
-            }
-        )
-        SettingsCategory.LIVE_TV_GUIDE -> LiveTvSettingsContent(
-            page = LiveTvPage.GUIDE,
-            initialFocusRequester = if (allowDetailAutofocus) {
-                contentFocusRequesters[SettingsCategory.LIVE_TV_GUIDE]
-            } else {
-                null
-            }
-        )
-        SettingsCategory.LIVE_TV_PLAYBACK -> LiveTvSettingsContent(
-            page = LiveTvPage.PLAYBACK,
-            initialFocusRequester = if (allowDetailAutofocus) {
-                contentFocusRequesters[SettingsCategory.LIVE_TV_PLAYBACK]
-            } else {
-                null
-            }
-        )
-        SettingsCategory.LIVE_TV_ON_DEMAND -> LiveTvSettingsContent(
-            page = LiveTvPage.ON_DEMAND,
-            initialFocusRequester = if (allowDetailAutofocus) {
-                contentFocusRequesters[SettingsCategory.LIVE_TV_ON_DEMAND]
-            } else {
-                null
-            }
-        )
-        SettingsCategory.LIVE_TV_INTEGRATION -> LiveTvSettingsContent(
-            page = LiveTvPage.INTEGRATION,
-            initialFocusRequester = if (allowDetailAutofocus) {
-                contentFocusRequesters[SettingsCategory.LIVE_TV_INTEGRATION]
             } else {
                 null
             }

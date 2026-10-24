@@ -942,6 +942,14 @@ fun LiveTvPlayerScreen(
                 audioLabel = viewModel.playback.audioLabel(),
                 captionsOn = captionsOn,
                 sizeLabel = context.getString(aspectModeOf(settings.aspectMode).labelResId),
+                sizeOptions = com.nuvio.tv.ui.screens.player.AspectMode.entries.map {
+                    context.getString(it.labelResId) to (it == aspectModeOf(settings.aspectMode))
+                },
+                onPickSize = { i ->
+                    // Remembered for every channel, until you change it again.
+                    val mode = com.nuvio.tv.ui.screens.player.AspectMode.entries[i]
+                    viewModel.updateSettings { it.copy(aspectMode = mode.name) }
+                },
                 sleepLabel = sleepAt?.let { "${((it - System.currentTimeMillis()) / 60_000 + 1).coerceAtLeast(1)} min left" } ?: "Off",
                 timeAction = timeAction,
                 hidden = BarPart.parse(settings.barHidden),
@@ -960,7 +968,6 @@ fun LiveTvPlayerScreen(
                 onAudio = { dialog = PlayerDialog.AUDIO },
                 onSubtitles = { dialog = PlayerDialog.SUBTITLES },
                 onFavorite = { viewModel.toggleFavorite(ch) },
-                onSize = { dialog = PlayerDialog.SCREEN_SIZE },
                 onSleep = { dialog = PlayerDialog.SLEEP },
                 onTimeAction = {
                     dialog = PlayerDialog.NONE

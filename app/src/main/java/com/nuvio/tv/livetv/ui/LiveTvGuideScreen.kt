@@ -955,8 +955,8 @@ fun LiveTvGuideScreen(
                 )
                 if (groupsWidth > 1.dp) androidx.compose.runtime.CompositionLocalProvider(LocalGuideScale provides guideScale(settings)) { GroupColumn(
                     width = groupsWidth,
-                    // A channel row's height minus its 3dp above and below.
-                    tileHeight = guideRowHeight(settings) - 6.dp,
+                    // A channel row's height minus its 2dp above and below.
+                    tileHeight = guideRowHeight(settings) - 4.dp,
                     groups = when {
                         groupVisibilityList != null -> groupVisibilityList!!
                         groupReorderId != null -> ui.groups.filter { it.special } + groupWorking
@@ -1440,12 +1440,8 @@ fun LiveTvGuideScreen(
                         .size(pb.width.toDp(), pb.height.toDp())
                         .graphicsLayer { compositingStrategy = androidx.compose.ui.graphics.CompositingStrategy.Offscreen }
                 ) {
-                    drawRect(bg)
-                    if (showGlow) {
-                        translate(-left, -top) {
-                            drawThemeGlow(accent, glowTop, rootW, glowH)
-                        }
-                    }
+                    // Exactly what's behind the window: the guide's freeform backdrop.
+                    translate(-left, -top) { drawGuideBackdrop(settings.guideBackdrop, rootW, rb.height) }
                     // Cut the rounded window back out, leaving only the corners.
                     drawRoundRect(
                         color = Color.Black,
@@ -2200,7 +2196,7 @@ private fun GuideRow(
         modifier = Modifier
             .fillMaxWidth()
             .height(rowHeight)
-            .padding(vertical = 3.dp)
+            .padding(vertical = 2.dp)
             .graphicsLayer { alpha = if (visible == false) 0.45f else 1f }
     ) {
         // Channel cell
@@ -2389,11 +2385,8 @@ private fun GuideRow(
                 val isFocused = focusColumn != null && focusedBlock?.program == p
                 val colors = liveCellColors(
                     focused = isFocused,
-                    idle = when {
-                        live -> guideSurfaceVariant()
-                        past -> guideSurface().copy(alpha = 0.5f)
-                        else -> guideSurface()
-                    },
+                    // One color for every show (the progress bar already marks what's on now).
+                    idle = guideSurface(),
                     idleText = if (past) NuvioTheme.colors.TextSecondary else NuvioTheme.colors.TextPrimary
                 )
                 val marks = titleMarks(p.title)
@@ -2662,10 +2655,10 @@ private fun GroupColumn(
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
-            // Each channel row has 3dp above its tile: the same here, so the lines run straight across.
-            verticalArrangement = Arrangement.spacedBy(6.dp),
+            // Each channel row has 2dp above its tile: the same here, so the lines run straight across.
+            verticalArrangement = Arrangement.spacedBy(4.dp),
             // Room for one more row at the end, so the list can always line up with the channels.
-            contentPadding = PaddingValues(top = 3.dp, bottom = 3.dp + tileHeight + 6.dp)
+            contentPadding = PaddingValues(top = 2.dp, bottom = 2.dp + tileHeight + 4.dp)
         ) {
             fun groupItem(g: ChannelGroup) {
                 item(key = g.id) {

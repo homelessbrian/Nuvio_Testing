@@ -1,6 +1,10 @@
 package com.nuvio.tv.ui.screens.settings
 
 import androidx.compose.foundation.focusGroup
+import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.PaddingValues
@@ -76,18 +80,55 @@ private const val LIVE_TV_TITLE = "Live TV"
 private const val LIVE_TV_SUBTITLE = "Playlists, TV guide and channel options"
 
 /**
- * Which tab of Live TV settings is showing. Settings has "Live TV" and four tabs next to it
- * (Guide, Playback, On Demand, Integration); [ALL] is the old single long list, kept for the
- * guide's long-press menu.
+ * Live TV settings are one place in Settings with a row of tabs across the top of it (Setup,
+ * Guide, Playback, On Demand, Integration): [HUB] is that tabbed page. [ALL] is the old single
+ * long list, kept for the guide's long-press menu. The others are the tabs themselves.
  */
-internal enum class LiveTvPage(val title: String, val subtitle: String) {
+internal enum class LiveTvPage(val title: String, val subtitle: String, val tab: String = "") {
     ALL("Live TV", "Playlists, TV guide and channel options"),
-    MAIN("Live TV", "Playlists, channels, groups and help"),
-    GUIDE("Live TV \u00B7 Guide", "How the guide looks and behaves while you're browsing"),
-    PLAYBACK("Live TV \u00B7 Playback", "Picture, sound, pausing and recording"),
-    ON_DEMAND("Live TV \u00B7 On Demand", "Movies and shows from your provider"),
-    INTEGRATION("Live TV \u00B7 Integration", "How Live TV shows up in the rest of Nuvio")
+    HUB("Live TV", "Playlists, TV guide and channel options"),
+    MAIN("Live TV", "Your playlists, guides, channels, groups and parental controls", "Setup"),
+    GUIDE("Live TV", "How the guide looks and behaves while you're browsing", "Guide"),
+    PLAYBACK("Live TV", "Picture, sound, pausing and recording", "Playback"),
+    ON_DEMAND("Live TV", "Movies and shows from your provider", "On Demand"),
+    INTEGRATION("Live TV", "How Live TV shows up in the rest of Nuvio", "Integration")
 }
+
+private val LIVE_TABS = listOf(LiveTvPage.MAIN, LiveTvPage.GUIDE, LiveTvPage.PLAYBACK, LiveTvPage.ON_DEMAND, LiveTvPage.INTEGRATION)
+
+/** The row of tabs across the top of Live TV settings; moving onto one shows it. */
+@Composable
+private fun LiveTabRow(selected: LiveTvPage, first: FocusRequester?, onSelect: (LiveTvPage) -> Unit) {
+    androidx.compose.foundation.layout.Row(
+        Modifier.fillMaxWidth().focusGroup(),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        LIVE_TABS.forEach { tab ->
+            var focused by remember { mutableStateOf(false) }
+            val on = tab == selected
+            val shape = androidx.compose.foundation.shape.RoundedCornerShape(50)
+            Text(
+                tab.tab,
+                color = if (focused) NuvioTheme.colors.OnSecondary else if (on) NuvioTheme.colors.TextPrimary else NuvioTheme.colors.TextSecondary,
+                style = MaterialTheme.typography.labelLarge,
+                modifier = Modifier
+                    .then(if (on && first != null) Modifier.focusRequester(first) else Modifier)
+                    .clip(shape)
+                    .background(
+                        when {
+                            focused -> NuvioTheme.colors.Secondary
+                            on -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.14f)
+                            else -> androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f)
+                        }
+                    )
+                    .onFocusChanged { focused = it.isFocused; if (it.isFocused) onSelect(tab) }
+                    .clickable { onSelect(tab) }
+                    .padding(horizontal = 18.dp, vertical = 9.dp)
+            )
+        }
+    }
+}
+
 
 /** On the four sub-tabs the sections sit open (there are only a few per tab), not folded. */
 private val LocalLiveFlat = androidx.compose.runtime.compositionLocalOf { false }
@@ -220,10 +261,15 @@ internal fun LiveTvSettingsContent(
     initialFocusRequester: FocusRequester? = null,
     page: LiveTvPage = LiveTvPage.ALL
 ) {
+    // HUB: one Live TV page with its own row of tabs; the tab picked is the page shown.
+    val hub = page == LiveTvPage.HUB
+    var tab by remember { mutableStateOf(LiveTvPage.MAIN) }
+    @Suppress("NAME_SHADOWING") val page = if (hub) tab else page
     fun show(p: LiveTvPage) = page == LiveTvPage.ALL || page == p
     val flat = page != LiveTvPage.ALL && page != LiveTvPage.MAIN
-    /** The first section on a sub-tab takes the focus when you come down from the tab bar. */
-    fun firstFocus(p: LiveTvPage): FocusRequester? = initialFocusRequester.takeIf { page == p }
+    /** The first section takes the focus when you come in from the list on the left (the tab row does, in a hub). */
+    val firstRequester = if (hub) null else initialFocusRequester
+    fun firstFocus(p: LiveTvPage): FocusRequester? = firstRequester.takeIf { page == p }
     val playlists by viewModel.playlists.collectAsStateWithLifecycle()
     val epgs by viewModel.epgSources.collectAsStateWithLifecycle()
     val s by viewModel.settings.collectAsStateWithLifecycle()
@@ -256,6 +302,8 @@ internal fun LiveTvSettingsContent(
             title = page.title,
             subtitle = if (status.loading && !flat) (status.message ?: "Updating…") else page.subtitle
         )
+        if (hub) LiveTabRow(selected = tab, first = initialFocusRequester, onSelect = { tab = it })
+        androidx.compose.runtime.key(page) {
         androidx.compose.runtime.CompositionLocalProvider(LocalLiveFlat provides flat) {
         LazyColumn(
             modifier = Modifier
@@ -267,7 +315,7 @@ internal fun LiveTvSettingsContent(
             // ------------------------------------------------------------ Backup & Sync
             if (show(LiveTvPage.MAIN)) item(key = "drive") {
                 DriveSyncCard(
-                    modifier = if (initialFocusRequester != null) Modifier.focusRequester(initialFocusRequester) else Modifier,
+                    modifier = if (firstRequester != null) Modifier.focusRequester(firstRequester) else Modifier,
                     state = drive,
                     expanded = "drive" in open,
                     onToggleExpanded = { toggle("drive") },
@@ -1384,6 +1432,7 @@ internal fun LiveTvSettingsContent(
             }
         }
         } // LocalLiveFlat
+        } // key(page)
     }
 
     drive.signIn?.let { prompt ->

@@ -602,14 +602,16 @@ class LiveTvRepository @Inject constructor(
                 now - file.lastModified() > settings.epgRefreshHours.coerceAtLeast(1) * HOUR
             // A playlist saved again (its login, user agent…): its own guide is downloaded again too.
             val forcedHere = target.sourceId in forceIds || target.playlistId in forceIds
-            if (forceEpg || stale || forcedHere || (target.sourceId == null && changed && !file.exists())) {
+            if (forceEpg || stale || forcedHere || guideHoles || (target.sourceId == null && changed && !file.exists())) {
                 setStatus(loading = true, message = "Downloading guide \"${target.name}\"…")
                 LIVE_REPORT.add("Downloading guide \"${target.name}\" (user agent: ${target.userAgent.ifBlank { "app default" }})")
                 val result = runCatching {
                     download(
                         target.url, file, target.userAgent,
                         progressLabel = "Downloading guide \"${target.name}\"",
-                        full = forceEpg || forcedHere,
+                        // Also whole when the guide has gone stale: a provider that keeps answering
+                        // "not changed" to the short check left channels without listings overnight.
+                        full = forceEpg || forcedHere || stale || guideHoles,
                         reportAs = target.name
                     )
                 }
@@ -632,8 +634,9 @@ class LiveTvRepository @Inject constructor(
         // "Update guide now" always matches the guides again, even when the files came back
         // unchanged: a guide matched wrong or stored empty was otherwise kept until a file
         // changed, so pressing Update did nothing for it.
-        if (changed || forceEpg || (_programs.value.isEmpty() && (!guideInDb || storedGuideEmpty))) {
+        if (changed || forceEpg || guideHoles || (_programs.value.isEmpty() && (!guideInDb || storedGuideEmpty))) {
             storedGuideEmpty = false
+            guideHoles = false
             outOfTheWay()
             setStatus(loading = true, message = "Matching guide data…")
             buildPrograms(settings, epgTargets)
@@ -914,6 +917,9 @@ class LiveTvRepository @Inject constructor(
     @Volatile private var guideInDb = false
     /** The stored guide turned out to have no listings around now: match the guides again. */
     @Volatile private var storedGuideEmpty = false
+
+    /** The stored guide is missing listings for many channels that were matched (it ran out for them). */
+    @Volatile private var guideHoles = false
     private val rangeMutex = Mutex()
 
     private fun defaultWindow(now: Long = System.currentTimeMillis()) = (now - 3 * HOUR) to (now + 12 * HOUR + RANGE_SLACK_MS)
@@ -1017,6 +1023,18 @@ class LiveTvRepository @Inject constructor(
             // all of it has run out): it was still taken as up to date, so the guide stayed
             // empty until a playlist or guide changed. Match the guide files again now (and
             // download them again if they're old too).
+            // Same when it only ran out for many of the channels (not all of them): the guide
+            // was used as up to date and those channels stayed empty until Update was pressed.
+            val matched = _autoMatches.value.keys
+            val missing = matched.count { _programs.value[it].isNullOrEmpty() }
+            // At most once every 3 hours (a download, even an unchanged one, resets the file's
+            // date), so a guide that simply has no listings for many channels isn't fetched at every start.
+            val checkedRecently = targets.none { System.currentTimeMillis() - epgFile(it.fileId).lastModified() > 3 * HOUR }
+            if (!checkedRecently && _programs.value.isNotEmpty() && matched.size >= 20 && missing * 100 > matched.size * 15 && targets.isNotEmpty()) {
+                guideHoles = true
+                LIVE_REPORT.add("Stored guide has no listings now for $missing of ${matched.size} matched channels: updating the guides")
+                scope.launch { runCatching { refreshStale() } }
+            }
             if (_programs.value.isEmpty() && _channels.value.isNotEmpty() && targets.isNotEmpty()) {
                 storedGuideEmpty = true
                 LIVE_REPORT.add("Stored guide has no listings for now: reading the guides again")
