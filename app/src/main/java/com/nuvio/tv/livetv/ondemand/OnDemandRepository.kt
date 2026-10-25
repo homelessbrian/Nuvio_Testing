@@ -310,6 +310,15 @@ class OnDemandRepository @Inject constructor(
     }
 
     private fun importKind(pl: PlaylistSource, kind: VodKind) {
+        val t0 = System.currentTimeMillis()
+        try { importKindInner(pl, kind) } finally {
+            com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
+                "On Demand \"${pl.name}\": ${if (kind == VodKind.MOVIE) "movies" else "series"} imported in ${(System.currentTimeMillis() - t0) / 1000} s"
+            )
+        }
+    }
+
+    private fun importKindInner(pl: PlaylistSource, kind: VodKind) {
         val api = pl.xtreamApiUrl()
         val catAction = if (kind == VodKind.MOVIE) "get_vod_categories" else "get_series_categories"
         val listAction = if (kind == VodKind.MOVIE) "get_vod_streams" else "get_series"
@@ -334,6 +343,7 @@ class OnDemandRepository @Inject constructor(
             pl.id, kind, categories,
             streamItems(pl, kind, "$api&action=$listAction", onStop = { stoppedEarly = it }, onItem = ::progress)
         )
+        com.nuvio.tv.livetv.model.LiveTvLoadReport.add("On Demand \"${pl.name}\": ${"%,d".format(saved)} $what, ${categories.size} categories")
         val firstProblem = stoppedEarly ?: return
 
         // 2. Some panels cut off huge lists part-way (an "EOFException" partway through).
