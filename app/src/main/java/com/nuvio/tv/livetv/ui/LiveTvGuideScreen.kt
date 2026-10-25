@@ -2362,7 +2362,8 @@ private fun GuideRow(
                     color = cell.text,
                     size = gsp(14f),
                     weight = if (isPlaying) FontWeight.Bold else FontWeight.Normal,
-                    marquee = focusColumn != null
+                    // The row you're on scrolls a long name (also when the name itself has the highlight).
+                    marquee = focusColumn != null || nameFocused || moving
                 )
             } else {
                 Spacer(Modifier.weight(1f))

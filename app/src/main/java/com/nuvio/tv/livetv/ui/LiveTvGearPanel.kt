@@ -1,5 +1,6 @@
 package com.nuvio.tv.livetv.ui
 
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
@@ -108,7 +109,20 @@ internal fun GearPanel(
     BackHandler { if (customizing || sizing || page != "") { customizing = false; sizing = false; page = "" } else onDismiss() }
     LaunchedEffect(customizing, sizing, page) { delay(60); runCatching { first.requestFocus() } }
 
-    Box(Modifier.fillMaxSize()) {
+    // Opened by holding OK: that press is still down. Its repeats and its release must not
+    // click whatever the panel highlights first (Record), which started a recording by itself.
+    val openedAt = remember { android.os.SystemClock.uptimeMillis() }
+    Box(
+        Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+            val k = e.nativeKeyEvent.keyCode
+            val okKey = k == android.view.KeyEvent.KEYCODE_DPAD_CENTER || k == android.view.KeyEvent.KEYCODE_ENTER ||
+                k == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER || k == android.view.KeyEvent.KEYCODE_BUTTON_A
+            okKey && (
+                android.os.SystemClock.uptimeMillis() - openedAt < 900 ||
+                    (e.type == androidx.compose.ui.input.key.KeyEventType.KeyUp && e.nativeKeyEvent.downTime < openedAt)
+                )
+        }
+    ) {
         Column(
             Modifier
                 .align(Alignment.BottomEnd)

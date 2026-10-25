@@ -222,8 +222,15 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             if (list.isEmpty()) continue
             out[eventId] = sortMatches(list, input.settings.bestChannelFirst, rank).take(8)
         }
+        // Events that run for days (golf, race weekends): what was looked for and found, for the report.
+        val multi = teamEvents.filter { it.id in noStart }.joinToString(" | ") { ev ->
+            val t = terms[ev.id]
+            "${ev.title.take(32)}: looked for ${t?.leagueWords?.joinToString("/")}, " +
+                "channels named like that ${names.count { (_, nn) -> t?.leagueInName(nn) == true }}, matched ${out[ev.id]?.size ?: 0}"
+        }
         val summary = "Sports: ${wanted.size} games and events in the next day or so · channels found for ${out.size} " +
-            "(guide $byGuide, channel names $byName, networks $byNetwork)"
+            "(guide $byGuide, channel names $byName, networks $byNetwork)" +
+            (if (multi.isNotEmpty()) " · multi-day: $multi" else "")
         return Result(out, summary)
     }
 
