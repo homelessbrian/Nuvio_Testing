@@ -862,6 +862,8 @@ class OnDemandViewModel @Inject constructor(
     private companion object {
         const val HOME_PAGE = 30
         private val AFTER_SEPARATOR = Regex("""^.{1,40}?\s(?:-|–|—|:)\s+(.+)$""")
+        /** A season at the end of a series name: "Loki S02", "Dark Season 1", "Casa Temporada 3". */
+        private val SEASON_TAIL = Regex("(?i)[\\s\\-–—:._]*(?:(?:season|saison|temporada|staffel)\\s*\\d{1,2}|s\\d{1,2})(?:\\s*(?:e|ep|episode|x)\\s*\\d{1,4})?\\s*$")
         private val YEAR = Regex("""\b(19|20)\d{2}\b""")
         const val ENRICH_PER_ROW = 12
         /** The sort you picked, kept while the app is open. */
