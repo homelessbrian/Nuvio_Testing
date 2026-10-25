@@ -73,7 +73,7 @@ internal data class PanelTimeline(
     val statusLive: Boolean = false
 )
 
-/** The parts of the bar you can switch off (⚙ → Customize the bar). Saved by these names. */
+/** The parts of the bar you can switch off (⚙ → Play bar layout). Saved by these names. */
 internal object BarPart {
     const val POSTER = "poster"
     const val CHANNEL = "channel"
@@ -140,7 +140,7 @@ internal fun Modifier.glass(color: Color, shape: androidx.compose.ui.graphics.Sh
  * progress bar and ⚙ on one line; the clock and what's next on the right.
  *  - compact ([full] = false): changing channels and channel surfing (no buttons);
  *  - full (OK, or paused): the buttons too, and the Recent row underneath.
- * Parts in [hidden] are left out and the rest closes up (⚙ → Customize the bar).
+ * Parts in [hidden] are left out and the rest closes up (⚙ → Play bar layout).
  */
 @Composable
 internal fun LiveTvPlayerPanel(

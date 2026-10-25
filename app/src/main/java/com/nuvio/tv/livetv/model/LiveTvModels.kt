@@ -404,7 +404,7 @@ data class LiveTvSettings(
     val panelRow: String = "RECENT",
     /** Channel surfing: Up / Down show other channels on the info bar; OK switches. */
     val channelSurf: Boolean = false,
-    /** Parts of the full-screen bar switched off (⚙ → Customize the bar), comma separated. */
+    /** Parts of the full-screen bar switched off (⚙ → Play bar layout), comma separated. */
     val barHidden: String = "",
     /** Parts of the guide's info panel that are switched off (see GuideInfoPart), comma separated. */
     val guideInfoHidden: String = "",
@@ -519,7 +519,6 @@ val LiveTvSettings.effectiveStartPage: String
  * or symbol group, so "US" never cuts the start of "USA Network".
  */
 object ChannelNameEditor {
-    private const val SEP = """[\s:|\-–—/.•*]*"""
 
     fun terms(raw: String): List<String> =
         raw.split(',').map { it.trim() }.filter { it.isNotEmpty() }.distinct().sortedByDescending { it.length }
@@ -547,27 +546,43 @@ object ChannelNameEditor {
      * through all the patterns and made channel lists with these terms slow to load.
      */
     private fun atEdge(lower: String, terms: List<String>): Boolean {
-        val start = lower.trimStart('[', '(', '|', ' ')
-        val end = lower.trimEnd(']', ')', '|', ' ')
-        return terms.any { t -> start.startsWith(t) || end.endsWith(t) }
+        // Providers wrap names in all sorts of symbols ("US ➤ ESPN", "★ UK | Sky", "|US| ESPN"),
+        // so look past any leading or trailing symbols, not just brackets.
+        val start = lower.trimStart { !it.isLetterOrDigit() }
+        val end = lower.trimEnd { !it.isLetterOrDigit() }
+        val rawStart = lower.trimStart()
+        val rawEnd = lower.trimEnd()
+        return terms.any { t ->
+            start.startsWith(t) || end.endsWith(t) || rawStart.startsWith(t) || rawEnd.endsWith(t)
+        }
     }
 
     private fun compile(terms: List<String>): List<Compiled> {
         if (terms == compiledFor) return compiled
         val list = terms.map { t ->
             val q = Regex.escape(t)
-            // Prefix: "USA: ESPN", "[USA] ESPN", "|US| ESPN", "USA - ESPN". A plain word needs
-            // brackets or punctuation after it, so "USA" never eats "USA Network".
+            val opts = setOf(RegexOption.IGNORE_CASE)
+            // A plain ASCII word or number must stand alone ("HD" is not the end of "XHD", "4K"
+            // is not the start of "4KIDS"). Tags written in special letters (ᴴᴰ) can be stuck on.
+            val ascii = t.all { it.code < 128 && it.isLetterOrDigit() }
+            val before = if (ascii) """(?<![\p{L}\p{N}])""" else ""
+            val after = if (ascii) """(?![\p{L}\p{N}])""" else ""
+            // Prefix: "USA: ESPN", "[USA] ESPN", "|US| ESPN", "USA - ESPN", "US ➤ ESPN". A plain
+            // word needs a symbol after it (closing bracket, colon, bar, arrow...), so "USA"
+            // never eats "USA Network".
             val prefix = if (t.all { it.isLetter() }) {
-                Regex("""^(?:[\[(|]$q[\])|]|$q\s*[:|\-–—/.•*]+)\s*""", RegexOption.IGNORE_CASE)
+                Regex(
+                    """^[^\p{L}\p{N}]*$q\s*[^\p{L}\p{N}\s(\[{<][^\p{L}\p{N}(\[{<]*""",
+                    opts
+                )
             } else {
-                Regex("""^[\[(|]?$q[\])|]?$SEP""", RegexOption.IGNORE_CASE)
+                Regex("""^[^\p{L}\p{N}]*$q$after[^\p{L}\p{N}(\[{<]*""", opts)
             }
-            // Suffix: "ESPN HD", "ESPN (US)", "ESPN | FHD", "ESPN 24/7"
+            // Suffix: "ESPN HD", "ESPN (US)", "ESPN | FHD", "ESPN 24/7", "ESPN ➤ US"
             Compiled(
                 prefix,
-                Regex("""$SEP[\[(|]?$q[\])|]?$""", RegexOption.IGNORE_CASE),
-                Regex("""(^|[\s:|\-–—/.•*\[(])[\[(|]?$q[\])|]?$""", RegexOption.IGNORE_CASE)
+                Regex("""[^\p{L}\p{N}+&)\]}]*$before$q[^\p{L}\p{N}]*$""", opts),
+                Regex("""$before$q[^\p{L}\p{N}]*$""", opts)
             )
         }
         compiled = list

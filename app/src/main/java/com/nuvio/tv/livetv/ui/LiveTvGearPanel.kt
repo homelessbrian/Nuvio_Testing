@@ -54,7 +54,7 @@ import kotlinx.coroutines.delay
 /**
  * ⚙ on the full-screen bar: everything that isn't play, back 30 and forward 30. Record, Audio,
  * Subtitles and Favorite as tiles along the top, the rest underneath in two columns, then
- * "Customize the bar" (a page of switches, the bar changing underneath as you go) and Settings.
+ * "Play bar layout" (a page of switches, the bar changing underneath as you go) and Settings.
  * A glass panel just above the bar ([bottom] = how far up from the bottom of the screen).
  */
 @Composable
@@ -258,7 +258,7 @@ internal fun GearPanel(
                 Box(Modifier.padding(vertical = 6.dp, horizontal = 4.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.10f)))
                 Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
                     GearRow(Modifier.weight(1f), onClick = { customizing = true }) { focused ->
-                        LiveText("Customize the bar", size = 13.sp, weight = FontWeight.Medium, color = gearText(focused), modifier = Modifier.weight(1f))
+                        LiveText("Play bar layout", size = 13.sp, weight = FontWeight.Medium, color = gearText(focused), modifier = Modifier.weight(1f))
                         LiveText("›", size = 15.sp, color = gearText(focused, dim = true))
                     }
                     GearRow(Modifier.weight(1f), onClick = onSettings) { focused ->
@@ -267,10 +267,10 @@ internal fun GearPanel(
                     }
                 }
             } else {
-                // ---- Customize the bar: a switch for each part; the bar below changes as you go
+                // ---- Play bar layout: a switch for each part; the bar below changes as you go
                 Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)) {
-                    LiveText("‹  Customize the bar", size = 14.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
-                    LiveText("The bar below changes as you go", size = 11.sp, color = Color.White.copy(alpha = 0.55f))
+                    LiveText("‹  Play bar layout", size = 14.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
+                    LiveText("The bar changes as you go", size = 11.sp, color = Color.White.copy(alpha = 0.55f))
                 }
                 Spacer(Modifier.height(6.dp))
                 val parts = BarPart.ALL

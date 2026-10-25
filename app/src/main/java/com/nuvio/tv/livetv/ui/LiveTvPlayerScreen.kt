@@ -117,7 +117,6 @@ fun LiveTvPlayerScreen(
     var dialog by remember { mutableStateOf(PlayerDialog.NONE) }
     // Which page the ⚙ panel opens on ("" = the main one; "audio", "subs", "sleep", "size", "info").
     var gearStart by remember { mutableStateOf("") }
-    fun openGear(start: String = "") { gearStart = start; dialog = PlayerDialog.OPTIONS }
     val context = androidx.compose.ui.platform.LocalContext.current
     var numberBuffer by remember { mutableStateOf("") }
     var longPressFired by remember { mutableStateOf(false) }
@@ -147,7 +146,19 @@ fun LiveTvPlayerScreen(
     var rightHoldDone by remember { mutableStateOf(false) }
     // The full panel (OK): timeline, buttons and options. Changing channels shows the compact one.
     var panelFull by remember { mutableStateOf(false) }
+    // Opened with the bar hidden (a long press in full screen): the full bar comes up with the
+    // panel, so changes in "Play bar layout" can be seen, and goes away again after.
+    var gearShowedBar by remember { mutableStateOf(false) }
+    fun openGear(start: String = "") {
+        gearShowedBar = !(bannerVisible || panelFull || playback.userPaused)
+        if (gearShowedBar) { showBanner(); panelFull = true }
+        gearStart = start
+        dialog = PlayerDialog.OPTIONS
+    }
     fun closeFull() { panelFull = false; controlFocus = null; recentFocus = null }
+    LaunchedEffect(dialog) {
+        if (dialog == PlayerDialog.NONE && gearShowedBar) { gearShowedBar = false; closeFull(); bannerVisible = false }
+    }
 
     // Channel surfing (Settings → Live TV → Watching): the channel being looked at on the info
     // bar while the one playing carries on, or null when not browsing.
