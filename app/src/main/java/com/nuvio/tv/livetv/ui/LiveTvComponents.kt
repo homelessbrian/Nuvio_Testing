@@ -435,20 +435,27 @@ internal fun LiveDialog(
     // A dialog opened by a long press appears while OK is still held. Swallow the rest of that
     // press (its repeats and its release) so it can't click the first menu item and close the menu.
     var sawKeyDown by remember { mutableStateOf(false) }
+    val openedAt = remember { android.os.SystemClock.uptimeMillis() }
     Dialog(onDismissRequest = onDismiss, properties = DialogProperties(usePlatformDefaultWidth = false)) {
         Column(
             modifier = Modifier
                 .onPreviewKeyEvent { e ->
+                    val k = e.nativeKeyEvent.keyCode
+                    val okKey = k == android.view.KeyEvent.KEYCODE_DPAD_CENTER || k == android.view.KeyEvent.KEYCODE_ENTER ||
+                        k == android.view.KeyEvent.KEYCODE_NUMPAD_ENTER || k == android.view.KeyEvent.KEYCODE_BUTTON_A
+                    // Some remotes start a fresh "press" in the new window while the button is still
+                    // held: any OK in the first moments is the same long press, never a new click.
+                    val justOpened = okKey && android.os.SystemClock.uptimeMillis() - openedAt < 900
                     when (e.type) {
                         KeyEventType.KeyDown -> {
-                            if (!sawKeyDown && e.nativeKeyEvent.repeatCount > 0) {
+                            if (justOpened || (okKey && !sawKeyDown && e.nativeKeyEvent.repeatCount > 0)) {
                                 true
                             } else {
                                 sawKeyDown = true
                                 false
                             }
                         }
-                        KeyEventType.KeyUp -> !sawKeyDown
+                        KeyEventType.KeyUp -> justOpened || !sawKeyDown
                         else -> false
                     }
                 }

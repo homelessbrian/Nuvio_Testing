@@ -577,11 +577,12 @@ fun LiveTvPlayerScreen(
         // Status in the middle of the screen. "Loading…" only for channels that are actually
         // slow to start (not the moment every channel change takes).
         val slowLoading = rememberDelayedTrue(playback.isBuffering, 1_200)
+        val recStarting by viewModel.playback.recordingStarting.collectAsStateWithLifecycle()
         val centerMessage = when {
             current == null -> "Nothing playing"
             playback.error != null -> null // shown with its reason below
-            slowLoading -> "Loading…"
-            else -> null
+            recStarting -> "Starting the recording…"
+            else -> if (slowLoading) "Loading…" else null
         }
         // A problem: what's happening, and why underneath (wrapped, so it isn't cut off).
         playback.error?.let { reason ->

@@ -1550,9 +1550,11 @@ fun LiveTvGuideScreen(
         // The preview's own messages, drawn over the video.
         if (!fullscreen && pb != null && rb != null && pb.width > 1f) {
             val showLoading = rememberDelayedTrue(playback.isBuffering && playback.error == null, 1_200)
+            val recStarting by viewModel.playback.recordingStarting.collectAsStateWithLifecycle()
             val text = when {
                 playback.channelKey == null -> "Press OK on a channel to preview"
                 playback.error != null -> null // shown with its reason below
+                recStarting -> "Starting the recording…"
                 showLoading -> "Loading…"
                 else -> null
             }

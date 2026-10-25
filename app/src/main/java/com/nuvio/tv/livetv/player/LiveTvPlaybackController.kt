@@ -292,6 +292,9 @@ class LiveTvPlaybackController @Inject constructor(
      * both. Pause and skipping back work as in any recording.
      */
     val recordingPlayback: StateFlow<java.io.File?> = _recordingPlayback.asStateFlow()
+    /** True from pressing Record on the channel being watched until its recording starts playing. */
+    private val _recordingStarting = MutableStateFlow(false)
+    val recordingStarting: StateFlow<Boolean> = _recordingStarting.asStateFlow()
 
     /** Lets go of the provider connection, so a recording of this channel can use it. */
     fun handOverForRecording() {
@@ -309,10 +312,19 @@ class LiveTvPlaybackController @Inject constructor(
     fun playFromRecording(playlist: java.io.File) {
         val p = _player ?: return
         _recordingPlayback.value = playlist
+        _recordingStarting.value = true
         shiftJob?.cancel()
         shiftJob = scope.launch {
+          try {
             var waited = 0
+            // Wait until about 15 s are saved: playing right behind the newest piece stalls
+            // whenever a piece comes in late (the freezes while watching a channel you record).
+            fun savedSec(): Double = runCatching {
+                playlist.readLines().filter { it.startsWith("#EXTINF:") }
+                    .sumOf { it.removePrefix("#EXTINF:").substringBefore(',').toDoubleOrNull() ?: 0.0 }
+            }.getOrDefault(0.0)
             while (waited < 20_000 && !(playlist.exists() && playlist.length() > 0)) { delay(250); waited += 250 }
+            while (waited < 20_000 && savedSec() < 15.0) { delay(250); waited += 250 }
             if (_recordingPlayback.value != playlist) return@launch
             if (!playlist.exists()) {
                 // Nothing came in: back to the live stream.
@@ -320,9 +332,12 @@ class LiveTvPlaybackController @Inject constructor(
                 currentChannel?.let { ch -> currentUrl = null; play(ch) }
                 return@launch
             }
-            p.setMediaSource(localRecordingSource(android.net.Uri.fromFile(playlist)))
+            p.setMediaSource(localRecordingSource(android.net.Uri.fromFile(playlist), 15_000))
             p.prepare()
             p.playWhenReady = true
+          } finally {
+            _recordingStarting.value = false
+          }
         }
     }
 
@@ -418,14 +433,14 @@ class LiveTvPlaybackController @Inject constructor(
      * growing "live" playlist the player would otherwise speed up a little to catch up with the
      * end of it, creeping towards live.
      */
-    internal fun localRecordingSource(uri: android.net.Uri): androidx.media3.exoplayer.source.MediaSource {
+    internal fun localRecordingSource(uri: android.net.Uri, offsetMs: Long = 8_000): androidx.media3.exoplayer.source.MediaSource {
         val item = MediaItem.Builder()
             .setUri(uri)
             .setMimeType(MimeTypes.APPLICATION_M3U8)
             .setLiveConfiguration(
                 // "Live" here means a few seconds behind the newest piece (not 3 target lengths).
                 MediaItem.LiveConfiguration.Builder().setMinPlaybackSpeed(1f).setMaxPlaybackSpeed(1f)
-                    .setTargetOffsetMs(8_000).build()
+                    .setTargetOffsetMs(offsetMs).build()
             )
             .build()
         return androidx.media3.exoplayer.hls.HlsMediaSource.Factory(androidx.media3.datasource.DefaultDataSource.Factory(context))
