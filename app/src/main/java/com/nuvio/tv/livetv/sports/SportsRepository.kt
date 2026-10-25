@@ -224,6 +224,8 @@ class SportsRepository @Inject constructor(
         if (on) {
             liveRepo.ensureLoaded(updateCheckDelayMs = 20_000)
             kick.value++
+            // Nothing matched yet (or not for a while): do it now, don't wait for the next round.
+            if (_matches.value.isEmpty() || System.currentTimeMillis() - lastMatchAt > 3 * MINUTE) matchKick.value++
         }
     }
 
@@ -754,7 +756,16 @@ class SportsRepository @Inject constructor(
                 if (foreground.value && System.currentTimeMillis() - lastRun > 10 * MINUTE) matchKick.value++
             }
         }
-        combine(trigger, matchKick) { t, k -> t to k }.debounce(1_500).collect {
+        // Last time's matches straight away (the games, the channels), so the page isn't empty
+        // while the new round runs.
+        scope.launch {
+            val saved = withContext(Dispatchers.IO) { runCatching { File(dir, "matches.json").takeIf { it.exists() }?.readText() }.getOrNull() }
+            if (saved != null) {
+                val chans = channelStore.displayChannels.first { it.isNotEmpty() }.associateBy { it.key }
+                if (_matches.value.isEmpty()) runCatching { restoreMatches(saved, chans) }
+            }
+        }
+        combine(trigger, matchKick) { t, k -> t to k }.debounce { if (_matches.value.isEmpty()) 0L else 1_500L }.collect {
             if (!foreground.value && viewers.value == 0) return@collect
             if (!settings.value.showInSidebar && viewers.value == 0) return@collect
             val status = liveRepo.status.value
@@ -765,11 +776,52 @@ class SportsRepository @Inject constructor(
             if (status.loading && !status.quiet && _matches.value.isNotEmpty() && !pickPending) return@collect
             pickPending = false
             lastRun = System.currentTimeMillis()
+            val t0 = System.currentTimeMillis()
             runCatching { runMatch() }.onFailure { Log.w(TAG, "Sports matching failed", it) }
+            lastMatchAt = System.currentTimeMillis()
+            val took = lastMatchAt - t0
+            if (took > 2_000) LiveTvLoadReport.add("Sports matching took ${took / 1000.0} s (page open: ${viewers.value > 0})")
+            runCatching { saveMatches() }
         }
     }
 
     private val matchKick = MutableStateFlow(0)
+    @Volatile private var lastMatchAt = 0L
+
+    /** Saves which channels were matched to which games, to show right away next time. */
+    private suspend fun saveMatches() = withContext(Dispatchers.IO) {
+        val arr = org.json.JSONArray()
+        for ((id, list) in _matches.value) {
+            val o = org.json.JSONObject().put("id", id)
+            val items = org.json.JSONArray()
+            list.forEach { m ->
+                items.put(org.json.JSONObject().put("k", m.channel.key).put("s", m.score).put("h", m.how)
+                    .put("q", m.quality ?: org.json.JSONObject.NULL).put("c", m.catchup))
+            }
+            arr.put(o.put("m", items))
+        }
+        File(dir, "matches.json").writeText(arr.toString())
+    }
+
+    private fun restoreMatches(text: String, chans: Map<String, LiveChannel>) {
+        val arr = org.json.JSONArray(text)
+        val out = HashMap<String, List<ChannelMatch>>()
+        for (i in 0 until arr.length()) {
+            val o = arr.getJSONObject(i)
+            val items = o.getJSONArray("m")
+            val list = ArrayList<ChannelMatch>()
+            for (j in 0 until items.length()) {
+                val it = items.getJSONObject(j)
+                val ch = chans[it.getString("k")] ?: continue
+                list += ChannelMatch(ch, it.getInt("s"), it.getString("h"), null, if (it.isNull("q")) null else it.getString("q"), it.optBoolean("c"))
+            }
+            if (list.isNotEmpty()) out[o.getString("id")] = list
+        }
+        if (out.isNotEmpty() && _matches.value.isEmpty()) {
+            _matches.value = out
+            LiveTvLoadReport.add("Sports: showing last time's channels for ${out.size} games while matching again")
+        }
+    }
     @Volatile private var pickPending = false
     private var lastSummary: String? = null
 

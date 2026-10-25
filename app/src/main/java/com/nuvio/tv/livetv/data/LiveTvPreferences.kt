@@ -166,6 +166,7 @@ class LiveTvPreferences @Inject constructor(
         val channelSurf = booleanPreferencesKey("channel_surf")
         val barHidden = stringPreferencesKey("bar_hidden")
         val guideInfoHidden = stringPreferencesKey("guide_info_hidden")
+        val launcherRows = stringPreferencesKey("launcher_rows")
         val lockedGroups = stringSetPreferencesKey("locked_groups")
         val reminders = stringPreferencesKey("reminders")
         val channelQuality = stringPreferencesKey("channel_quality")
@@ -399,7 +400,8 @@ class LiveTvPreferences @Inject constructor(
             panelRow = p[Keys.panelRow] ?: if (p[Keys.recentInPanel] == false) "OFF" else d.panelRow,
             channelSurf = p[Keys.channelSurf] ?: d.channelSurf,
             barHidden = p[Keys.barHidden] ?: d.barHidden,
-            guideInfoHidden = p[Keys.guideInfoHidden] ?: d.guideInfoHidden
+            guideInfoHidden = p[Keys.guideInfoHidden] ?: d.guideInfoHidden,
+            launcherRows = p[Keys.launcherRows] ?: d.launcherRows
         )
     }.distinctUntilChanged()
 
@@ -587,6 +589,7 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.channelSurf] = s.channelSurf
         p[Keys.barHidden] = s.barHidden
         p[Keys.guideInfoHidden] = s.guideInfoHidden
+        p[Keys.launcherRows] = s.launcherRows
     }
 
     // ---------- channel management ----------

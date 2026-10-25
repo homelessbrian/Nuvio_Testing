@@ -818,6 +818,11 @@ internal fun FrameMeter(label: String) {
                 com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
                     "$label frames: $total drawn, $slow slower than 35 ms, $bad slower than 100 ms, worst $worst ms" + if (final) " (screen closed)" else ""
                 )
+                // How full the app's memory is (a full one makes everything stall while it cleans up).
+                val rt = Runtime.getRuntime()
+                com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
+                    "  memory: ${(rt.totalMemory() - rt.freeMemory()) / (1024 * 1024)} MB used of ${rt.maxMemory() / (1024 * 1024)} MB allowed"
+                )
                 stuckAt.entries.sortedByDescending { it.value }.take(3).forEach {
                     com.nuvio.tv.livetv.model.LiveTvLoadReport.add("  stuck x${it.value}: ${it.key}")
                 }

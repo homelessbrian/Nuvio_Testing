@@ -1698,6 +1698,14 @@ class LiveTvRepository @Inject constructor(
             "Guide matching: ${channels.size} of ${all.size} channels shown somewhere" +
                 " (${channels.count { !it.tvgId.isNullOrBlank() }} with a tvg-id)"
         )
+        // Which playlist the channels come from (so "171,518 channels" can be told apart: one huge
+        // playlist, or several), and how full the app's memory is to begin with.
+        run {
+            val counts = all.groupingBy { it.sourceId }.eachCount()
+            LIVE_REPORT.add("Playlists: " + counts.entries.sortedByDescending { it.value }.joinToString { "${it.key.take(12)} ${it.value}" })
+            val rt = Runtime.getRuntime()
+            LIVE_REPORT.add("Memory before matching: ${(rt.totalMemory() - rt.freeMemory()) / 1048576} of ${rt.maxMemory() / 1048576} MB")
+        }
         val now = System.currentTimeMillis()
         val windowStart = now - settings.epgPastHours.coerceAtLeast(1) * HOUR
         val windowEnd = now + settings.epgFutureDays.coerceAtLeast(1) * 24 * HOUR
@@ -1734,6 +1742,18 @@ class LiveTvRepository @Inject constructor(
         for ((order, target) in targets.withIndex()) {
             val file = epgFile(target.fileId)
             if (!file.exists()) { LIVE_REPORT.add("Guide \"${target.name}\": no file downloaded yet"); continue }
+            // Memory nearly full from the guides read so far (a huge playlist): reading another
+            // one would freeze the app, so it's left for later and the report says so.
+            if (order > 0) {
+                val rt = Runtime.getRuntime()
+                fun used() = rt.totalMemory() - rt.freeMemory()
+                if (used() > rt.maxMemory() * 0.85) System.gc()
+                if (used() > rt.maxMemory() * 0.85) {
+                    LIVE_REPORT.add("Guide \"${target.name}\" skipped: memory nearly full (${used() / 1048576} of ${rt.maxMemory() / 1048576} MB)")
+                    setStatus(loading = true, message = "Not enough memory for guide \"${target.name}\" — skipped")
+                    continue
+                }
+            }
             // How far through each guide file it is, so a big guide doesn't look frozen.
             val fileSize = file.length().coerceAtLeast(1L)
             val step = if (targets.size > 1) " (${order + 1} of ${targets.size})" else ""
@@ -1841,6 +1861,10 @@ class LiveTvRepository @Inject constructor(
             // What this guide matched, and when it's nothing, a few ids from each side, so a
             // "0 programs matched" can be told apart: ids that don't line up, a guide with no
             // listings for these days, or no channels left to match.
+            run {
+                val rt = Runtime.getRuntime()
+                LIVE_REPORT.add("  memory after reading \"${target.name}\": ${(rt.totalMemory() - rt.freeMemory()) / 1048576} of ${rt.maxMemory() / 1048576} MB")
+            }
             val matchedChannels = (idHits.values.flatten() + nameHits.values.flatten()).mapTo(HashSet()) { it.key }.size
             LIVE_REPORT.add(
                 "Guide \"${target.name}\": ${entries.size} guide channels, ${parsed.programs.size} with listings kept; " +

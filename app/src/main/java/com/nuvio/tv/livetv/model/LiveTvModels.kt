@@ -407,7 +407,9 @@ data class LiveTvSettings(
     /** Parts of the full-screen bar switched off (⚙ → Customize the bar), comma separated. */
     val barHidden: String = "",
     /** Parts of the guide's info panel that are switched off (see GuideInfoPart), comma separated. */
-    val guideInfoHidden: String = ""
+    val guideInfoHidden: String = "",
+    /** Rows on the launcher home screen: "sports", "favorites", "recent" (comma separated; empty = none). */
+    val launcherRows: String = ""
 )
 
 data class LiveUserState(
