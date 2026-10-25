@@ -289,7 +289,7 @@ internal fun GearPanel(
                         LiveText("How dark the play bar is", size = 10.sp, color = gearText(focused, dim = true))
                     }
                     LiveText(
-                        when (background) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
+                        when (background) { "darker" -> "Standard"; "solid" -> "Darkest"; else -> "Lightest" },
                         size = 13.sp, weight = FontWeight.Medium, color = gearText(focused)
                     )
                 }

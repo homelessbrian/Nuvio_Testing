@@ -337,12 +337,14 @@ class LiveTvPlaybackController @Inject constructor(
      */
     fun pauseLive() {
         val p = _player ?: return
-        if (_recordingPlayback.value != null) { p.pause(); return }
+        if (_recordingPlayback.value != null) { com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: paused a saved recording"); p.pause(); return }
         val ch = currentChannel
-        if (_shiftStartedAt.value != null) { p.pause(); return }
+        if (_shiftStartedAt.value != null) { com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: paused again inside the buffer"); p.pause(); return }
         if (ch == null || _state.value.catchupTitle != null || !timeshiftEnabled || !timeshift.hasRoomFor(timeshiftMinutes)) {
+            com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: plain pause, no recording (channel=${ch != null}, catchup=${_state.value.catchupTitle != null}, setting on=$timeshiftEnabled, room=${timeshift.hasRoomFor(timeshiftMinutes)})")
             p.pause(); return
         }
+        com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: pausing; recording started")
         val url = currentUrl ?: ch.url
         p.pause()
         p.stop() // hand the provider connection over to the recording
@@ -361,8 +363,9 @@ class LiveTvPlaybackController @Inject constructor(
     /** Play from the recording (first time: once there's something recorded to play). */
     private fun resumeShift() {
         val p = _player ?: return
-        val session = timeshift.session ?: return
-        if (shiftPrepared) { p.play(); return }
+        val session = timeshift.session
+        if (session == null) { com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: play pressed but there is no recording session"); return }
+        if (shiftPrepared) { com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: play pressed (playing from the buffer)"); p.play(); return }
         shiftJob?.cancel()
         shiftJob = scope.launch {
             // Wait until the first part is saved (a few seconds). Never left stuck: if the
@@ -384,6 +387,7 @@ class LiveTvPlaybackController @Inject constructor(
                 goLive()
                 return@launch
             }
+            com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: first piece saved after ${waited / 1000.0}s; playing from the pause point")
             // Both kinds are a local playlist of pieces now (TS streams are cut up as recorded).
             val source = localRecordingSource(session.playUri)
             // Start where you paused: the recording began the instant you paused, so its very

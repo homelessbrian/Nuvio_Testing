@@ -24,6 +24,9 @@ import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -81,57 +84,90 @@ internal fun GuideGearPanel(
                 LiveText("The guide changes as you go", size = 11.sp, color = Color.White.copy(alpha = 0.55f))
             }
             Spacer(Modifier.height(6.dp))
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                toggle(Modifier.weight(1f).focusRequester(first), "Info panel", "Poster, title, time", settings.showProgramDetails) {
-                    onChange { it.copy(showProgramDetails = !it.showProgramDetails) }
-                }
-                toggle(Modifier.weight(1f), "Preview window", "Small live video", settings.showPreview) {
-                    onChange { it.copy(showPreview = !it.showPreview) }
-                }
+            val hidden = BarPart.parse(settings.guideInfoHidden)
+            fun flip(key: String) = onChange {
+                val cur = BarPart.parse(it.guideInfoHidden)
+                it.copy(guideInfoHidden = BarPart.join(if (key in cur) cur - key else cur + key))
             }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                toggle(Modifier.weight(1f), "Smaller top", "More channels fit", settings.smallHeader) {
-                    onChange { it.copy(smallHeader = !it.smallHeader) }
+            @Composable
+            fun part(modifier: Modifier, key: String, title: String, note: String? = null) =
+                toggle(modifier, title, note, key !in hidden) { flip(key) }
+            @Composable
+            fun heading(text: String) = LiveText(
+                text.uppercase(), size = 10.sp, weight = FontWeight.Bold, color = Color.White.copy(alpha = 0.5f),
+                modifier = Modifier.padding(start = 10.dp, top = 8.dp, bottom = 2.dp)
+            )
+            Column(Modifier.heightIn(max = 360.dp).verticalScroll(rememberScrollState())) {
+                heading("Info panel")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    toggle(Modifier.weight(1f).focusRequester(first), "Show info panel", "Off hides all of it", settings.showProgramDetails) {
+                        onChange { it.copy(showProgramDetails = !it.showProgramDetails) }
+                    }
+                    toggle(Modifier.weight(1f), "Poster", "Off: channel logo", settings.showPosters) {
+                        onChange { it.copy(showPosters = !it.showPosters) }
+                    }
                 }
-                toggle(Modifier.weight(1f), "Posters", "Off: channel logo", settings.showPosters) {
-                    onChange { it.copy(showPosters = !it.showPosters) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    part(Modifier.weight(1f), GuideInfoPart.CHANNEL, "Channel name & logo")
+                    part(Modifier.weight(1f), GuideInfoPart.TAGS, "Tags", "Live, catch-up")
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                toggle(Modifier.weight(1f), "Playlist name", "In the info panel", settings.showPlaylistInInfo) {
-                    onChange { it.copy(showPlaylistInInfo = !it.showPlaylistInInfo) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    part(Modifier.weight(1f), GuideInfoPart.TITLE, "Show title")
+                    part(Modifier.weight(1f), GuideInfoPart.TIME, "Start – end time")
                 }
-                toggle(Modifier.weight(1f), "Episode numbers", null, settings.showEpisodeNumbers) {
-                    onChange { it.copy(showEpisodeNumbers = !it.showEpisodeNumbers) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    part(Modifier.weight(1f), GuideInfoPart.LEFT, "Time left")
+                    toggle(Modifier.weight(1f), "Episode number", null, settings.showEpisodeNumbers) {
+                        onChange { it.copy(showEpisodeNumbers = !it.showEpisodeNumbers) }
+                    }
                 }
-            }
-            Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                toggle(Modifier.weight(1f), "24-hour clock", null, settings.use24HourClock) {
-                    onChange { it.copy(use24HourClock = !it.use24HourClock) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    part(Modifier.weight(1f), GuideInfoPart.CATEGORY, "Category")
+                    toggle(Modifier.weight(1f), "Playlist name", null, settings.showPlaylistInInfo) {
+                        onChange { it.copy(showPlaylistInInfo = !it.showPlaylistInInfo) }
+                    }
                 }
-                GearRow(Modifier.weight(1f), onClick = {
-                    onChange { it.copy(guideInfoBackground = when (it.guideInfoBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" }) }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    part(Modifier.weight(1f), GuideInfoPart.PROGRESS, "Progress bar")
+                    part(Modifier.weight(1f), GuideInfoPart.DESCRIPTION, "Description")
+                }
+                heading("Layout")
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    toggle(Modifier.weight(1f), "Preview window", "Small live video", settings.showPreview) {
+                        onChange { it.copy(showPreview = !it.showPreview) }
+                    }
+                    toggle(Modifier.weight(1f), "Smaller top", "More channels fit", settings.smallHeader) {
+                        onChange { it.copy(smallHeader = !it.smallHeader) }
+                    }
+                }
+                Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    toggle(Modifier.weight(1f), "24-hour clock", null, settings.use24HourClock) {
+                        onChange { it.copy(use24HourClock = !it.use24HourClock) }
+                    }
+                    GearRow(Modifier.weight(1f), onClick = {
+                        onChange { it.copy(guideInfoBackground = when (it.guideInfoBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" }) }
+                    }) { focused ->
+                        Column(Modifier.weight(1f)) {
+                            LiveText("Panel darkness", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                        }
+                        LiveText(
+                            when (settings.guideInfoBackground) { "darker" -> "Standard"; "solid" -> "Darkest"; else -> "Lightest" },
+                            size = 12.sp, color = gearText(focused, dim = true)
+                        )
+                    }
+                }
+                GearRow(Modifier.fillMaxWidth(), onClick = {
+                    onChange { it.copy(guideBackdrop = when (it.guideBackdrop) { "oled" -> "midnight"; "midnight" -> "graphite"; "graphite" -> "red"; else -> "oled" }) }
                 }) { focused ->
                     Column(Modifier.weight(1f)) {
-                        LiveText("Panel darkness", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                        LiveText("Background color", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                        LiveText("Behind the guide and Sports", size = 10.sp, color = gearText(focused, dim = true))
                     }
                     LiveText(
-                        when (settings.guideInfoBackground) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
+                        when (settings.guideBackdrop) { "graphite" -> "Graphite"; "midnight" -> "Midnight Blue"; "red" -> "Dark Red"; else -> "Onyx" },
                         size = 12.sp, color = gearText(focused, dim = true)
                     )
                 }
-            }
-            GearRow(Modifier.fillMaxWidth(), onClick = {
-                onChange { it.copy(guideBackdrop = when (it.guideBackdrop) { "oled" -> "midnight"; "midnight" -> "graphite"; "graphite" -> "red"; else -> "oled" }) }
-            }) { focused ->
-                Column(Modifier.weight(1f)) {
-                    LiveText("Background color", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
-                    LiveText("Behind the guide and Sports", size = 10.sp, color = gearText(focused, dim = true))
-                }
-                LiveText(
-                    when (settings.guideBackdrop) { "graphite" -> "Graphite"; "midnight" -> "Midnight Blue"; "red" -> "Dark Red"; else -> "Onyx" },
-                    size = 12.sp, color = gearText(focused, dim = true)
-                )
             }
             Box(Modifier.padding(vertical = 6.dp, horizontal = 4.dp).fillMaxWidth().height(1.dp).background(Color.White.copy(alpha = 0.10f)))
             GearRow(Modifier.fillMaxWidth(), onClick = onSettings) { focused ->

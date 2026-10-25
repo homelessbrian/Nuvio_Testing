@@ -297,6 +297,8 @@ fun LiveTvGuideScreen(
     var upTopPending by remember { mutableStateOf(false) }
     var upTopFired by remember { mutableStateOf(false) }
     var upTopJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
+    // Holding Up down the list: when it gets to the top it stops there; held on a moment, it goes to the ⚙.
+    var heldTopSince by remember { mutableStateOf(0L) }
     var lastVerticalAt by remember { mutableStateOf(0L) }
     var okHoldJob by remember { mutableStateOf<kotlinx.coroutines.Job?>(null) }
     var okDuringScroll by remember { mutableStateOf(false) }
@@ -860,8 +862,10 @@ fun LiveTvGuideScreen(
     val idleMinutes = GUIDE_IDLE_FULL_SCREEN_MINUTES
     // Coming back from full screen or closing a dialog starts the wait again.
     LaunchedEffect(windowFocused, fullscreen) { lastKeyAt = System.currentTimeMillis() }
-    LaunchedEffect(idleMinutes, lastKeyAt, fullscreen, guideHasFocus, windowFocused, playback.channelKey) {
-        if (idleMinutes <= 0 || fullscreen || !guideHasFocus || !windowFocused || playback.channelKey == null) return@LaunchedEffect
+    // The ⚙ panel open counts as in use, and never stays up over full screen.
+    LaunchedEffect(fullscreen) { if (fullscreen) guideGearOpen = false }
+    LaunchedEffect(idleMinutes, lastKeyAt, fullscreen, guideHasFocus, windowFocused, playback.channelKey, guideGearOpen) {
+        if (idleMinutes <= 0 || fullscreen || guideGearOpen || !guideHasFocus || !windowFocused || playback.channelKey == null) return@LaunchedEffect
         val wait = idleMinutes * 60_000L - (System.currentTimeMillis() - lastKeyAt)
         delay(wait.coerceAtLeast(5_000L))
         if (viewModel.playbackState.value.channelKey == null || viewModel.playbackState.value.error != null) return@LaunchedEffect
@@ -1317,6 +1321,7 @@ fun LiveTvGuideScreen(
                                     }
                                     return@onPreviewKeyEvent true
                                 }
+                                if (event.key == Key.DirectionUp && event.type == KeyEventType.KeyUp) heldTopSince = 0L
                                 if (event.key == Key.DirectionUp && event.type == KeyEventType.KeyUp && upTopPending) {
                                     upTopPending = false
                                     upTopJob?.cancel()
@@ -1337,6 +1342,15 @@ fun LiveTvGuideScreen(
                                             upTopJob = scope.launch {
                                                 delay(LONG_PRESS_MS)
                                                 upTopFired = true
+                                                runCatching { guideGearFocus.requestFocus() }
+                                            }
+                                        } else if (row == 0 && event.nativeKeyEvent.repeatCount > 0 && !visibilityMode && channels.size > 1) {
+                                            // Scrolled up to the top while holding: stay there (no wrap-around);
+                                            // held on for another moment, on to the ⚙.
+                                            val nowMs = android.os.SystemClock.uptimeMillis()
+                                            if (heldTopSince == 0L) heldTopSince = nowMs
+                                            else if (heldTopSince > 0L && nowMs - heldTopSince >= 600L) {
+                                                heldTopSince = -1L
                                                 runCatching { guideGearFocus.requestFocus() }
                                             }
                                         } else moveRow(-1)
@@ -2113,10 +2127,13 @@ private fun GuideHeader(
                 }
             }
         }
+        // Each part of the panel can be switched off on its own (⚙ → Guide display).
+        val hid = remember(settings.guideInfoHidden) { BarPart.parse(settings.guideInfoHidden) }
         Column(modifier = Modifier.weight(1f).fillMaxHeight()) {
             if (settings.showProgramDetails && channel != null) {
-                if (!small) {
+                if (!small && (GuideInfoPart.CHANNEL !in hid || GuideInfoPart.TAGS !in hid)) {
                     Row(verticalAlignment = Alignment.CenterVertically) {
+                        if (GuideInfoPart.CHANNEL !in hid) {
                         if (settings.showChannelLogos) {
                             ChannelLogo(channel.logo, 28.dp)
                             Spacer(Modifier.width(10.dp))
@@ -2127,12 +2144,13 @@ private fun GuideHeader(
                             playlistName?.let { append("  ·  $it") }
                         }
                         LiveText(label, color = NuvioTheme.colors.TextSecondary, size = 14.sp, weight = FontWeight.Medium)
+                        }
                         // On now (red LIVE tag) and catch-up, as tags beside the channel.
-                        if (block != null && now in block.startMs until block.stopMs) {
+                        if (GuideInfoPart.TAGS !in hid && block != null && now in block.startMs until block.stopMs) {
                             Spacer(Modifier.width(10.dp))
                             LiveTag("LIVE", LIVE_RED, Color.White)
                         }
-                        if (channel.catchup != null) {
+                        if (GuideInfoPart.TAGS !in hid && channel.catchup != null) {
                             Spacer(Modifier.width(6.dp))
                             LiveTag("CATCH-UP", Color.Transparent, NuvioTheme.colors.TextSecondary,
                                 Modifier.border(1.dp, NuvioTheme.colors.Border, RoundedCornerShape(5.dp)))
@@ -2141,28 +2159,30 @@ private fun GuideHeader(
                     Spacer(Modifier.height(6.dp))
                 }
                 val p = rememberShowDetails(channel.key, block?.program)
-                LiveText(
-                    text = p?.title?.let { titleMarks(it).title } ?: channel.name,
-                    modifier = Modifier.fillMaxWidth(),
-                    size = if (small) 22.sp else 28.sp,
-                    weight = FontWeight.ExtraBold,
-                    maxLines = 1,
-                    marquee = true
-                )
-                Spacer(Modifier.height(if (small) 2.dp else 4.dp))
+                if (GuideInfoPart.TITLE !in hid) {
+                    LiveText(
+                        text = p?.title?.let { titleMarks(it).title } ?: channel.name,
+                        modifier = Modifier.fillMaxWidth(),
+                        size = if (small) 22.sp else 28.sp,
+                        weight = FontWeight.ExtraBold,
+                        maxLines = 1,
+                        marquee = true
+                    )
+                    Spacer(Modifier.height(if (small) 2.dp else 4.dp))
+                }
                 if (block != null) {
                     val meta = buildList {
-                        add(formatDayClock(block.startMs, now, settings.use24HourClock) + " – " + formatClock(block.stopMs, settings.use24HourClock))
-                        if (now in block.startMs until block.stopMs) add(minutesLeftLabel(block.stopMs, now))
+                        if (GuideInfoPart.TIME !in hid) add(formatDayClock(block.startMs, now, settings.use24HourClock) + " – " + formatClock(block.stopMs, settings.use24HourClock))
+                        if (GuideInfoPart.LEFT !in hid && now in block.startMs until block.stopMs) add(minutesLeftLabel(block.stopMs, now))
                         p?.episode?.takeIf { settings.showEpisodeNumbers }?.let { add(it) }
-                        p?.category?.let { add(it) }
+                        if (GuideInfoPart.CATEGORY !in hid) p?.category?.let { add(it) }
                         // The standard panel shows catch-up as a tag; the small one has no room for it.
                         if (small && channel.catchup != null) add("Catch-up")
                         // The small info panel has no channel line, so the playlist goes here.
                         if (small) playlistName?.let { add(it) }
                     }.joinToString("  ·  ")
-                    LiveText(meta, color = NuvioTheme.colors.TextSecondary, size = if (small) 13.sp else 14.sp)
-                    if (now in block.startMs until block.stopMs) {
+                    if (meta.isNotBlank()) LiveText(meta, color = NuvioTheme.colors.TextSecondary, size = if (small) 13.sp else 14.sp)
+                    if (GuideInfoPart.PROGRESS !in hid && now in block.startMs until block.stopMs) {
                         Spacer(Modifier.height(if (small) 4.dp else 6.dp))
                         ProgressBar(fraction = ((now - block.startMs).toFloat() / (block.stopMs - block.startMs).coerceAtLeast(1)).coerceIn(0f, 1f))
                     }
@@ -2170,7 +2190,7 @@ private fun GuideHeader(
                 Spacer(Modifier.height(if (small) 4.dp else 6.dp))
                 // 24/7 channels (no episode info): what the channel plays, from your addons.
                 val about = rememberChannelAbout(channel, p)
-                if (about != null) {
+                if (GuideInfoPart.DESCRIPTION !in hid && about != null) {
                     aboutLine(about).takeIf { it.isNotBlank() }?.let {
                         LiveText(it, color = NuvioTheme.colors.TextSecondary, size = if (small) 13.sp else 14.sp)
                         Spacer(Modifier.height(if (small) 2.dp else 4.dp))
@@ -2178,7 +2198,8 @@ private fun GuideHeader(
                 }
                 // As many lines as fit in the space left (it was one line on the small panel and
                 // two on the standard one, however much room there was).
-                BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
+                if (GuideInfoPart.DESCRIPTION in hid) Spacer(Modifier.weight(1f))
+                else BoxWithConstraints(Modifier.weight(1f).fillMaxWidth()) {
                     val textSize = if (small) 13.sp else 14.sp
                     val lineHeight = with(androidx.compose.ui.platform.LocalDensity.current) { textSize.toDp() } * 1.45f
                     val lines = (maxHeight / lineHeight).toInt().coerceIn(1, 8)
@@ -3699,6 +3720,18 @@ private fun ActionMenuDialog(title: String, actions: List<Pair<String, () -> Uni
         }
     }
     LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
+}
+
+/** The parts of the guide's info panel that can be switched off (⚙ → Guide display). Saved by these names. */
+internal object GuideInfoPart {
+    const val CHANNEL = "channel"
+    const val TAGS = "tags"
+    const val TITLE = "title"
+    const val TIME = "time"
+    const val LEFT = "left"
+    const val CATEGORY = "category"
+    const val PROGRESS = "progress"
+    const val DESCRIPTION = "description"
 }
 
 /** A small heading that groups the items under it in a menu. */

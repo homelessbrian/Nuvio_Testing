@@ -676,8 +676,8 @@ internal fun LiveTvSettingsContent(
                     )
                     SettingsActionRow(
                         title = "Info Panel Darkness",
-                        subtitle = "How dark the box behind the show info is. Standard matches the guide rows. Darker or Solid makes the text easier to read.",
-                        value = when (s.guideInfoBackground) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
+                        subtitle = "How dark the box behind the show info is. Lightest matches the guide rows. Standard or Darkest makes the text easier to read.",
+                        value = when (s.guideInfoBackground) { "darker" -> "Standard"; "solid" -> "Darkest"; else -> "Lightest" },
                         onClick = {
                             update {
                                 it.copy(guideInfoBackground = when (it.guideInfoBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" })
@@ -695,6 +695,103 @@ internal fun LiveTvSettingsContent(
                         "Which playlist the highlighted channel comes from",
                         s.showPlaylistInInfo,
                         { update { it.copy(showPlaylistInInfo = !it.showPlaylistInInfo) } }
+                    )
+                    SubHeading("Info Panel Parts")
+                    SettingsToggleRow(
+                        "Show Channel Name & Logo",
+                        "The channel line at the top of the info panel",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.CHANNEL !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.CHANNEL
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show LIVE & Catch-up Tags",
+                        "The small tags beside the channel name",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.TAGS !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.TAGS
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show Title",
+                        "The big show title",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.TITLE !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.TITLE
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show Start & End Time",
+                        "Like 8:00 PM – 9:00 PM",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.TIME !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.TIME
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show Time Left",
+                        "Like 25 min left",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.LEFT !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.LEFT
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show Category",
+                        "Like Drama or Sports",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.CATEGORY !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.CATEGORY
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show Progress Bar",
+                        "How far into the show you are",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.PROGRESS !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.PROGRESS
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
+                    )
+                    SettingsToggleRow(
+                        "Show Description",
+                        "The text about the show",
+                        com.nuvio.tv.livetv.ui.GuideInfoPart.DESCRIPTION !in com.nuvio.tv.livetv.ui.BarPart.parse(s.guideInfoHidden),
+                        {
+                            update {
+                                val cur = com.nuvio.tv.livetv.ui.BarPart.parse(it.guideInfoHidden)
+                                val key = com.nuvio.tv.livetv.ui.GuideInfoPart.DESCRIPTION
+                                it.copy(guideInfoHidden = com.nuvio.tv.livetv.ui.BarPart.join(if (key in cur) cur - key else cur + key))
+                            }
+                        }
                     )
                     SubHeading("Channel Rows")
                     SettingsToggleRow(
@@ -878,8 +975,8 @@ internal fun LiveTvSettingsContent(
                     )
                     SettingsActionRow(
                         title = "Play Bar Background",
-                        subtitle = "How dark the play bar is. Darker or Solid makes the text easier to read over bright, busy pictures.",
-                        value = when (s.panelBackground) { "darker" -> "Darker"; "solid" -> "Solid"; else -> "Standard" },
+                        subtitle = "How dark the play bar is. Standard or Darkest makes the text easier to read over bright, busy pictures.",
+                        value = when (s.panelBackground) { "darker" -> "Standard"; "solid" -> "Darkest"; else -> "Lightest" },
                         onClick = {
                             update {
                                 it.copy(panelBackground = when (it.panelBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" })

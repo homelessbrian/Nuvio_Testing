@@ -393,9 +393,9 @@ data class LiveTvSettings(
     /** A soft dark pill behind the always-on clock. */
     val clockBackground: Boolean = true,
     /** How dark the info panel's background is: "standard", "darker" or "solid". */
-    val panelBackground: String = "standard",
+    val panelBackground: String = "darker",
     /** How dark the info bar above the guide is (the play bar has its own, [panelBackground]). */
-    val guideInfoBackground: String = "standard",
+    val guideInfoBackground: String = "darker",
     /** The backdrop behind the guide and Sports hub: "oled" (shown as Onyx, the default), "midnight", "graphite" or "red". */
     val guideBackdrop: String = "oled",
     /** The row of recently watched channels at the bottom of the full info panel (OK). */
@@ -405,7 +405,9 @@ data class LiveTvSettings(
     /** Channel surfing: Up / Down show other channels on the info bar; OK switches. */
     val channelSurf: Boolean = false,
     /** Parts of the full-screen bar switched off (⚙ → Customize the bar), comma separated. */
-    val barHidden: String = ""
+    val barHidden: String = "",
+    /** Parts of the guide's info panel that are switched off (see GuideInfoPart), comma separated. */
+    val guideInfoHidden: String = ""
 )
 
 data class LiveUserState(
