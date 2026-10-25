@@ -787,7 +787,7 @@ class SportsRepository @Inject constructor(
             }
             lastRun = System.currentTimeMillis()
             val t0 = System.currentTimeMillis()
-            runCatching { runMatch() }.onFailure { Log.w(TAG, "Sports matching failed", it) }
+            runCatching { com.nuvio.tv.livetv.data.BackgroundWork.heavy { runMatch() } }.onFailure { Log.w(TAG, "Sports matching failed", it) }
             lastMatchAt = System.currentTimeMillis()
             val took = lastMatchAt - t0
             if (took > 2_000) LiveTvLoadReport.add("Sports matching took ${took / 1000.0} s (page open: ${viewers.value > 0})")
