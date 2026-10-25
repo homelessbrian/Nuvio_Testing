@@ -49,6 +49,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         // Events that run for days (a golf tournament, an F1 weekend from practice to the race) have
         // no single start time: while they're on, treat them as starting now.
         fun multiDay(ev: SportsEvent) = !ev.hasTime && ev.endMs != null
+        // Their ids: with no start time of their own, only a show that names the competition ("Formula 1",
+        // "Grand Prix"…) counts, not one that merely shares a word or two with the title ("United States").
+        val noStart = HashSet<String>()
         val events = input.events.mapNotNull { ev ->
             when {
                 ev.hasTime -> ev
@@ -56,7 +59,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                 ev.endMs!! < input.now - 8 * HOUR -> null
                 ev.startMs >= input.now -> ev
                 else -> ev.copy(startMs = input.now)
-            }
+            }?.also { if (!ev.hasTime) noStart.add(ev.id) }
         }
         val wanted = events.filter { ev ->
             ev.state != GameState.OFF &&
@@ -109,6 +112,11 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                     val (nt, nd) = texts
                     if (p.startMs > ev.startMs + 60 * MINUTE || p.stopMs < ev.startMs + 15 * MINUTE) continue
                     var score = t.scoreText(nt, nd)
+                    // No start time (a race weekend, a tournament): a show on now that names the competition is enough.
+                    if (ev.id in noStart) {
+                        if (!t.namesLeague(nt, nd)) continue
+                        if (score <= 0) score = 70
+                    }
                     if (score <= 0) continue
                     // Pre-game shows often start an hour early on the same channel; much earlier or later is less likely the game.
                     if (p.startMs < ev.startMs - 80 * MINUTE || p.startMs > ev.startMs + 25 * MINUTE) score -= 10
@@ -124,6 +132,8 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             val t = terms[ev.id] ?: continue
             for ((ch, nn) in names) {
                 if (t.inName(nn)) { add(ev.id, ch.key, 95, "Channel name", null); byName++ }
+                // A channel named for the competition ("Sky Sports F1") carries it while it's on.
+                else if (ev.id in noStart && t.leagueInName(nn)) { add(ev.id, ch.key, 78, "Channel name", null); byName++ }
             }
         }
 
@@ -155,6 +165,8 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                 for (b in ev.broadcasts) {
                     val n = networkKey(b)
                     input.settings.networkChannels[n]?.let { key -> add(ev.id, key, 75, "Your channel for $b", onNow[key]) }
+                    // No start time (a race weekend, a tournament): the network's listing says nothing about what's on now.
+                    if (ev.id in noStart) continue
                     val national = n in NATIONAL
                     candidates[n].orEmpty()
                         .map { ch ->
@@ -331,6 +343,12 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             if (us) return false
             return MATCHUP.containsMatchIn(text)
         }
+
+        /** The show's title or description names the competition itself ("Formula 1", "Grand Prix"). */
+        fun namesLeague(nt: String, nd: String): Boolean = leagueWords.any { hasWord(nt, it) || hasWord(nd, it) }
+
+        /** The channel's own name carries the competition's name ("Sky Sports F1", "Formula 1 HD"). */
+        fun leagueInName(nn: String): Boolean = leagueWords.any { it.length >= 2 && it != "grand prix" && hasWord(nn, it) }
 
         fun inName(nn: String): Boolean {
             if (a.isNotEmpty() && b.isNotEmpty()) {

@@ -103,10 +103,11 @@ private val LIVE_TABS = listOf(LiveTvPage.MAIN, LiveTvPage.GUIDE, LiveTvPage.PLA
 @OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 private fun LiveTabRow(selected: LiveTvPage, first: FocusRequester?, onSelect: (LiveTvPage) -> Unit) {
     // Coming up from the page below lands on the tab you're on, not whichever one is nearest.
-    val selectedTab = remember { FocusRequester() }
+    // Only the tab you're on can take focus from outside the row; once focus is in the row, all can.
+    var rowHasFocus by remember { mutableStateOf(false) }
     androidx.compose.foundation.layout.Row(
         Modifier.fillMaxWidth()
-            .focusProperties { enter = { selectedTab } }
+            .onFocusChanged { rowHasFocus = it.hasFocus }
             .focusGroup(),
         horizontalArrangement = Arrangement.spacedBy(8.dp)
     ) {
@@ -120,7 +121,7 @@ private fun LiveTabRow(selected: LiveTvPage, first: FocusRequester?, onSelect: (
                 style = MaterialTheme.typography.labelLarge,
                 modifier = Modifier
                     .then(if (on && first != null) Modifier.focusRequester(first) else Modifier)
-                    .then(if (on) Modifier.focusRequester(selectedTab) else Modifier)
+                    .focusProperties { canFocus = on || rowHasFocus }
                     .clip(shape)
                     .background(
                         when {
@@ -1382,41 +1383,6 @@ internal fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Parental Controls
-            if (show(LiveTvPage.INTEGRATION)) item(key = "launcher") {
-                val rowsContext = androidx.compose.ui.platform.LocalContext.current
-                LiveSection(
-                    title = "Rows on Your TV's Home Screen",
-                    summary = "Google TV, Projectivy, Monet… (outside Nuvio)",
-                    icon = Icons.Default.Folder,
-                    open = "launcher" in open,
-                    onToggle = { toggle("launcher") }
-                ) {
-                    SubHeading("Not the Row Inside Nuvio")
-                    SettingsNote(
-                        "These show on your TV's own home screen, the one you see before opening any app, when your launcher supports them. " +
-                            "They are not the Live TV row inside Nuvio's home page (see Home Screen & Nuvio). " +
-                            "Your launcher may ask you to turn them on in its own settings."
-                    )
-                    for ((rowKey, rowTitle, rowText) in listOf(
-                        Triple("sports", "Live Now in Sports", "Games on right now. OK opens the best channel for the game"),
-                        Triple("favorites", "Favorite Channels", "Your favorite channels, with what's on now"),
-                        Triple("recent", "Recently Watched Channels", "The channels you watched last")
-                    )) {
-                        SettingsToggleRow(
-                            rowTitle,
-                            rowText,
-                            rowKey in com.nuvio.tv.livetv.home.LiveTvLauncherRows.parse(s.launcherRows),
-                            {
-                                update {
-                                    val cur = com.nuvio.tv.livetv.home.LiveTvLauncherRows.parse(it.launcherRows)
-                                    it.copy(launcherRows = com.nuvio.tv.livetv.home.LiveTvLauncherRows.join(if (rowKey in cur) cur - rowKey else cur + rowKey))
-                                }
-                                com.nuvio.tv.livetv.home.LiveTvLauncherRows.refresh(rowsContext, afterMs = 800)
-                            }
-                        )
-                    }
-                }
-            }
             if (show(LiveTvPage.MAIN)) item(key = "parental") {
                 LiveSection(
                     title = "Parental Controls",
