@@ -253,7 +253,9 @@ class LiveTvPlaybackController @Inject constructor(
             if (timeshift.session != session) return@launch
             // Never below what's actually still in the buffer (older parts may have been
             // trimmed since): a position earlier than that would just fail the same way again.
-            p.setMediaSource(localRecordingSource(session.playUri), positionMs.coerceAtLeast(timeshift.trimmedMs))
+            val startAt = positionMs.coerceAtLeast(timeshift.trimmedMs)
+            shiftStartPending = startAt == 0L
+            p.setMediaSource(localRecordingSource(session.playUri), startAt)
             p.prepare()
             p.playWhenReady = true
             shiftPrepared = true
@@ -267,6 +269,8 @@ class LiveTvPlaybackController @Inject constructor(
     /** Non-null while playing from a pause-and-rewind recording: when the recording started. */
     val shiftStartedAt: StateFlow<Long?> = _shiftStartedAt.asStateFlow()
     private var shiftPrepared = false
+    /** Pause buffer: a start position of 0 that still has to be applied once the buffer's real timeline is in (see onTimelineChanged). */
+    @Volatile private var shiftStartPending = false
     private var shiftJob: Job? = null
 
     /** Wall-clock time of what's on screen while playing a recording, or null. */
@@ -398,6 +402,10 @@ class LiveTvPlaybackController @Inject constructor(
             // window could land outside what the player considers the valid live window and
             // get rejected, which is what made resuming slow and land back near live instead of
             // where you paused.
+            // A start of 0 given with the source is read as "no start given" and a growing
+            // playlist then begins at its newest end (live). So it's set again as a real seek
+            // as soon as the stream's own timeline arrives (onTimelineChanged).
+            shiftStartPending = true
             p.setMediaSource(source, 0L)
             p.prepare()
             p.playWhenReady = true
@@ -452,6 +460,7 @@ class LiveTvPlaybackController @Inject constructor(
 
     private fun stopShift() {
         alwaysBuffer = false
+        shiftStartPending = false
         shiftReloads = 0
         shiftJob?.cancel()
         shiftJob = null
@@ -569,6 +578,7 @@ class LiveTvPlaybackController @Inject constructor(
         // Something chosen to play (back from the background through a launcher row, say):
         // that wins over picking up what was on before.
         resumeAfterBackground = null
+        shiftStartPending = false
         if (_shiftStartedAt.value != null) stopShift()
         if (_recordingPlayback.value != null) { _recordingPlayback.value = null; shiftJob?.cancel() }
         archiveStartWallMs = if (catchupTitle != null) catchupStartMs else null
@@ -1378,6 +1388,17 @@ class LiveTvPlaybackController @Inject constructor(
         }
 
         override fun onTimelineChanged(timeline: androidx.media3.common.Timeline, reason: Int) {
+            if (shiftStartPending && !timeline.isEmpty) {
+                val pl = _player
+                if (pl != null) {
+                    val w = timeline.getWindow(pl.currentMediaItemIndex.coerceIn(0, timeline.windowCount - 1), androidx.media3.common.Timeline.Window())
+                    if (!w.isPlaceholder) {
+                        shiftStartPending = false
+                        pl.seekTo(0L)
+                        com.nuvio.tv.livetv.model.LiveTvLoadReport.add("Pause buffer: timeline in (buffer holds ${if (w.durationMs != C.TIME_UNSET) w.durationMs / 1000 else -1} s); started at the pause point (was at ${pl.currentPosition / 1000} s)")
+                    }
+                }
+            }
             if (!archiveStartPending || timeline.isEmpty) return
             val p = _player ?: return
             val window = timeline.getWindow(p.currentMediaItemIndex.coerceIn(0, timeline.windowCount - 1), androidx.media3.common.Timeline.Window())

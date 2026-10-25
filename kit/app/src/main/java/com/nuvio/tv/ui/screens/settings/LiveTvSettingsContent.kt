@@ -456,7 +456,7 @@ internal fun LiveTvSettingsContent(
                         text = "Tip: long-press a channel in the guide to rename, renumber, hide or favorite it. Long-press a group to rename, move or hide it.",
                         style = MaterialTheme.typography.bodySmall,
                         color = NuvioTheme.colors.TextSecondary,
-                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.xs)
+                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.sm)
                     )
                     SubHeading("Channel Names")
                     SettingsActionRow(
@@ -544,26 +544,6 @@ internal fun LiveTvSettingsContent(
                         s.showAllChannelsGroup,
                         { update { it.copy(showAllChannelsGroup = !it.showAllChannelsGroup) } }
                     )
-                    SubHeading("Home Screen Rows")
-                    val rowsContext = androidx.compose.ui.platform.LocalContext.current
-                    for ((rowKey, rowTitle, rowText) in listOf(
-                        Triple("sports", "Live Now in Sports", "A row on your launcher's home screen with the games on right now"),
-                        Triple("favorites", "Favorite Channels", "A row on your launcher's home screen with your favorite channels"),
-                        Triple("recent", "Recently Watched Channels", "A row on your launcher's home screen with the channels you watched last")
-                    )) {
-                        SettingsToggleRow(
-                            rowTitle,
-                            rowText,
-                            rowKey in com.nuvio.tv.livetv.home.LiveTvLauncherRows.parse(s.launcherRows),
-                            {
-                                update {
-                                    val cur = com.nuvio.tv.livetv.home.LiveTvLauncherRows.parse(it.launcherRows)
-                                    it.copy(launcherRows = com.nuvio.tv.livetv.home.LiveTvLauncherRows.join(if (rowKey in cur) cur - rowKey else cur + rowKey))
-                                }
-                                com.nuvio.tv.livetv.home.LiveTvLauncherRows.refresh(rowsContext, afterMs = 800)
-                            }
-                        )
-                    }
                     SubHeading("The List")
                     SettingsToggleRow(
                         "Group by Playlist",
@@ -623,7 +603,7 @@ internal fun LiveTvSettingsContent(
                         text = "Movies and series from Xtream logins with movies & series switched on below.",
                         style = MaterialTheme.typography.bodySmall,
                         color = NuvioTheme.colors.TextSecondary,
-                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.xs)
+                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.sm)
                     )
                     if (onDemandStatus.loading) LoadingLine(onDemandStatus.message ?: "Importing movies and series…")
                     SubHeading("Providers")
@@ -1214,7 +1194,7 @@ internal fun LiveTvSettingsContent(
             if (show(LiveTvPage.INTEGRATION)) item(key = "nuvio") {
                 LiveSection(
                     title = "Home Screen & Nuvio",
-                    summary = "The Live TV row and the menu",
+                    summary = "The Live TV row inside Nuvio's home page, and the menu",
                     icon = Icons.Default.Home,
                     open = "nuvio" in open,
                     onToggle = { toggle("nuvio") },
@@ -1229,7 +1209,7 @@ internal fun LiveTvSettingsContent(
                         ).profileManager()
                     }.activeProfileId.collectAsStateWithLifecycle()
                     val homeRowOn = homeProfileId !in s.homeRowHiddenProfiles
-                    SubHeading("Home Screen Row")
+                    SubHeading("Row Inside Nuvio's Home Page")
                     SettingsToggleRow(
                         "Live TV Row on the Home Screen",
                         "For this profile. Tucked above your top row: press Up to show it.",
@@ -1402,6 +1382,41 @@ internal fun LiveTvSettingsContent(
             }
 
             // ------------------------------------------------------------ Parental Controls
+            if (show(LiveTvPage.INTEGRATION)) item(key = "launcher") {
+                val rowsContext = androidx.compose.ui.platform.LocalContext.current
+                LiveSection(
+                    title = "Rows on Your TV's Home Screen",
+                    summary = "Google TV, Projectivy, Monet… (outside Nuvio)",
+                    icon = Icons.Default.Folder,
+                    open = "launcher" in open,
+                    onToggle = { toggle("launcher") }
+                ) {
+                    SubHeading("Not the Row Inside Nuvio")
+                    SettingsNote(
+                        "These show on your TV's own home screen, the one you see before opening any app, when your launcher supports them. " +
+                            "They are not the Live TV row inside Nuvio's home page (see Home Screen & Nuvio). " +
+                            "Your launcher may ask you to turn them on in its own settings."
+                    )
+                    for ((rowKey, rowTitle, rowText) in listOf(
+                        Triple("sports", "Live Now in Sports", "Games on right now. OK opens the best channel for the game"),
+                        Triple("favorites", "Favorite Channels", "Your favorite channels, with what's on now"),
+                        Triple("recent", "Recently Watched Channels", "The channels you watched last")
+                    )) {
+                        SettingsToggleRow(
+                            rowTitle,
+                            rowText,
+                            rowKey in com.nuvio.tv.livetv.home.LiveTvLauncherRows.parse(s.launcherRows),
+                            {
+                                update {
+                                    val cur = com.nuvio.tv.livetv.home.LiveTvLauncherRows.parse(it.launcherRows)
+                                    it.copy(launcherRows = com.nuvio.tv.livetv.home.LiveTvLauncherRows.join(if (rowKey in cur) cur - rowKey else cur + rowKey))
+                                }
+                                com.nuvio.tv.livetv.home.LiveTvLauncherRows.refresh(rowsContext, afterMs = 800)
+                            }
+                        )
+                    }
+                }
+            }
             if (show(LiveTvPage.MAIN)) item(key = "parental") {
                 LiveSection(
                     title = "Parental Controls",
@@ -1414,7 +1429,7 @@ internal fun LiveTvSettingsContent(
                         text = "Locked groups and categories need the PIN to open, and stay out of All Channels and search until unlocked.",
                         style = MaterialTheme.typography.bodySmall,
                         color = NuvioTheme.colors.TextSecondary,
-                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.xs)
+                        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.sm)
                     )
                     SettingsActionRow(
                         if (hasPin) "Change PIN" else "Set a PIN",
@@ -2447,6 +2462,16 @@ private fun LiveSection(
 }
 
 /** A small label inside an open section ("Top of the Guide"), like Nuvio's group titles. */
+@Composable
+private fun SettingsNote(text: String) {
+    Text(
+        text = text,
+        style = MaterialTheme.typography.bodySmall,
+        color = NuvioTheme.colors.TextSecondary,
+        modifier = Modifier.padding(horizontal = NuvioTheme.spacing.lg, vertical = NuvioTheme.spacing.sm)
+    )
+}
+
 @Composable
 private fun SubHeading(text: String) {
     Text(
