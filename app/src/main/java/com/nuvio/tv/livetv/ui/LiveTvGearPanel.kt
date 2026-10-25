@@ -219,9 +219,10 @@ internal fun GearPanel(
                 Spacer(Modifier.height(8.dp))
                 // ---- the rest, two to a line
                 val items = buildList<Triple<String, String?, () -> Unit>> {
+                    // Watch from the beginning / Go live: first, where it's easiest to reach.
+                    timeAction?.let { add(Triple(it, null, onTimeAction)) }
                     add(Triple("Screen size", sizeLabel, { sizing = true }))
                     add(Triple("Sleep timer", sleepLabel, { page = "sleep" }))
-                    timeAction?.let { add(Triple(it, null, onTimeAction)) }
                     add(Triple("Previous channel", null, onPrevious))
                     add(Triple("Stream info", null, { page = "info" }))
                     onSearch?.let { add(Triple("Search", null, it)) }

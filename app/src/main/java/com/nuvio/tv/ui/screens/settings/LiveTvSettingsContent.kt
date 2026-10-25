@@ -700,8 +700,8 @@ internal fun LiveTvSettingsContent(
                         { update { it.copy(smallHeader = !it.smallHeader) } }
                     )
                     SettingsActionRow(
-                        title = "Info Panel Darkness",
-                        subtitle = "How dark the box behind the show info is. Lightest matches the guide rows. Standard or Darkest makes the text easier to read.",
+                        title = "Guide Darkness",
+                        subtitle = "How dark the info panel at the top and the bars in the guide are. Lightest lets more of the background show through. Darkest makes the text easiest to read.",
                         value = when (s.guideInfoBackground) { "darker" -> "Standard"; "solid" -> "Darkest"; else -> "Lightest" },
                         onClick = {
                             update {
@@ -894,18 +894,9 @@ internal fun LiveTvSettingsContent(
                     SubHeading("Look")
                     SettingsActionRow(
                         title = "Guide & Sports Background",
-                        subtitle = "The backdrop behind the TV Guide and the Sports hub",
-                        value = when (s.guideBackdrop) { "graphite" -> "Graphite"; "midnight" -> "Midnight Blue"; "red" -> "Dark Red"; else -> "Onyx" },
-                        onClick = {
-                            update {
-                                it.copy(guideBackdrop = when (it.guideBackdrop) {
-                                    "oled" -> "midnight"
-                                    "midnight" -> "graphite"
-                                    "graphite" -> "red"
-                                    else -> "oled"
-                                })
-                            }
-                        }
+                        subtitle = "The backdrop behind the TV Guide and the Sports hub. Follows your color theme, or pick one of the app icon colors.",
+                        value = com.nuvio.tv.livetv.ui.GuideBackdrops.label(s.guideBackdrop),
+                        onClick = { update { it.copy(guideBackdrop = com.nuvio.tv.livetv.ui.GuideBackdrops.next(it.guideBackdrop)) } }
                     )
                     SettingsActionRow(
                         title = "Highlight Style",

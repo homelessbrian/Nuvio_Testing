@@ -942,7 +942,7 @@ fun LiveTvPlayerScreen(
             val shifting = shiftStartedAt != null
             val timeAction = when {
                 archive -> "Back to live"
-                canRestart -> "Watch from the beginning"
+                canRestart -> viewModel.restartLabel(ch)
                 shifting -> "Go live"
                 else -> null
             }

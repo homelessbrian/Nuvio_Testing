@@ -309,7 +309,7 @@ class LiveTvPlaybackController @Inject constructor(
         currentUrl?.takeIf { currentChannel?.key == channel.key && _state.value.catchupTitle == null } ?: channel.url
 
     /** Plays [playlist] (a recording that's still being made), a few seconds behind live. */
-    fun playFromRecording(playlist: java.io.File) {
+    fun playFromRecording(playlist: java.io.File, fromStart: Boolean = false) {
         val p = _player ?: return
         _recordingPlayback.value = playlist
         _recordingStarting.value = true
@@ -324,7 +324,7 @@ class LiveTvPlaybackController @Inject constructor(
                     .sumOf { it.removePrefix("#EXTINF:").substringBefore(',').toDoubleOrNull() ?: 0.0 }
             }.getOrDefault(0.0)
             while (waited < 20_000 && !(playlist.exists() && playlist.length() > 0)) { delay(250); waited += 250 }
-            while (waited < 20_000 && savedSec() < 15.0) { delay(250); waited += 250 }
+            while (!fromStart && waited < 20_000 && savedSec() < 15.0) { delay(250); waited += 250 }
             if (_recordingPlayback.value != playlist) return@launch
             if (!playlist.exists()) {
                 // Nothing came in: back to the live stream.
@@ -335,6 +335,12 @@ class LiveTvPlaybackController @Inject constructor(
             p.setMediaSource(localRecordingSource(android.net.Uri.fromFile(playlist), 15_000))
             p.prepare()
             p.playWhenReady = true
+            if (fromStart) {
+                // A growing playlist opens near its newest piece: once it's ready, go back to the start.
+                var ready = 0
+                while (ready < 8_000 && p.playbackState != androidx.media3.common.Player.STATE_READY) { delay(100); ready += 100 }
+                if (_recordingPlayback.value == playlist) p.seekTo(0L)
+            }
           } finally {
             _recordingStarting.value = false
           }

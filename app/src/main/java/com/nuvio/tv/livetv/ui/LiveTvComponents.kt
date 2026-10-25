@@ -11,6 +11,8 @@ import androidx.compose.foundation.combinedClickable
 import androidx.compose.foundation.interaction.MutableInteractionSource
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.RowScope
@@ -39,6 +41,7 @@ import androidx.compose.ui.input.key.KeyEventType
 import androidx.compose.ui.input.key.onPreviewKeyEvent
 import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.luminance
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
@@ -70,6 +73,9 @@ import java.util.Locale
 
 /** True = focused items are filled with the accent color; false = tinted fill with an accent outline. */
 internal val LocalLiveSolidHighlight = staticCompositionLocalOf { false }
+
+/** "Guide darkness" setting ("standard" = Lightest, "darker" = Standard, "solid" = Darkest): the guide bars follow it. */
+internal val LocalGuideDarkness = staticCompositionLocalOf { "darker" }
 
 private val TEXT_OVER_PICTURE = androidx.compose.ui.graphics.Shadow(
     color = Color.Black.copy(alpha = 0.55f),
@@ -116,6 +122,49 @@ internal fun LiveText(
 }
 
 /**
+ * A description that fits [maxLines] lines, or, when it's longer than that, scrolls up slowly
+ * so the whole thing can be read, waits at the end, then starts again from the top.
+ */
+@Composable
+internal fun ScrollingDescription(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = NuvioTheme.colors.TextSecondary,
+    size: TextUnit = 14.sp,
+    maxLines: Int = 2,
+    weight: FontWeight = FontWeight.Normal
+) {
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    val lineHeight = size * 1.3f
+    val boxHeight = with(density) { lineHeight.toDp() } * maxLines.coerceAtLeast(1)
+    val scroll = androidx.compose.foundation.rememberScrollState()
+    val max = scroll.maxValue
+    LaunchedEffect(text, max, maxLines) {
+        if (max <= 0) return@LaunchedEffect
+        val pxPerSecond = with(density) { 16.dp.toPx() }
+        while (true) {
+            scroll.scrollTo(0)
+            kotlinx.coroutines.delay(3_000)
+            scroll.animateScrollTo(
+                max,
+                androidx.compose.animation.core.tween((max / pxPerSecond * 1000).toInt().coerceAtLeast(500), easing = androidx.compose.animation.core.LinearEasing)
+            )
+            kotlinx.coroutines.delay(2_500)
+        }
+    }
+    Box(modifier.heightIn(max = boxHeight).clipToBounds()) {
+        Text(
+            text = text,
+            color = color,
+            fontSize = size,
+            fontWeight = weight,
+            lineHeight = lineHeight,
+            modifier = Modifier.verticalScroll(scroll, enabled = false)
+        )
+    }
+}
+
+/**
  * The backdrop behind the whole guide / Sports hub (Settings → "Guide & Sports Background"). A
  * flat near-black background made the glass cards' translucency invisible — the fill and what's
  * behind it were nearly the same tone, so alpha blending had nothing to show against. Several soft
@@ -124,42 +173,99 @@ internal fun LiveText(
  */
 private class Blob(val x: Float, val y: Float, val r: Float, val color: Color, val a: Float)
 
-private fun backdropBase(style: String): Color = when (style) {
-    "graphite" -> Color(0xFF0E0F11)
-    "oled" -> Color(0xFF000000)
-    "red" -> Color(0xFF140609)
-    else -> Color(0xFF050D1A) // "midnight"
+/** The choices for the guide / Sports / On Demand background: the app icon colors, plus Onyx. */
+internal object GuideBackdrops {
+    val all: List<Pair<String, String>> = listOf(
+        "auto" to "Match Theme",
+        "onyx" to "Onyx",
+        "original" to "Original",
+        "arctic" to "Arctic Blue",
+        "emerald" to "Emerald",
+        "rose" to "Rose Gold",
+        "copper" to "Copper",
+        "graphite" to "Graphite"
+    )
+
+    /** Settings saved by earlier versions: Midnight Blue is now Arctic Blue, Dark Red is Rose Gold. */
+    fun normalize(key: String): String = when {
+        key.startsWith("auto:") -> key // already resolved to the theme's colors
+        // "oled" was the default, so it follows the theme until someone picks Onyx themselves.
+        key == "oled" -> "auto"
+        key == "midnight" -> "arctic"
+        key == "red" -> "rose"
+        all.any { it.first == key } -> key
+        else -> "auto"
+    }
+
+    fun label(key: String): String = all.firstOrNull { it.first == normalize(key) }?.second ?: "Match Theme"
+
+    fun next(key: String): String {
+        val i = all.indexOfFirst { it.first == normalize(key) }.coerceAtLeast(0)
+        return all[(i + 1) % all.size].first
+    }
 }
 
-private fun backdropBlobs(style: String): List<Blob> = when (style) {
-    "graphite" -> listOf(
-        Blob(0.10f, 0.05f, 0.75f, Color(0xFF59606E), 0.55f),
-        Blob(0.96f, 0.48f, 0.55f, Color(0xFF6B5E5A), 0.30f),
-        Blob(0.58f, 1.02f, 0.65f, Color(0xFF3E5566), 0.40f),
-        Blob(0.40f, 0.42f, 0.30f, Color(0xFF4A4F5C), 0.18f)
-    )
-    "oled" -> listOf(
+/** The glow colors of each app icon (the banner's colors), two per choice. */
+private fun accentOf(style: String): Pair<Color, Color> = when {
+    style.startsWith("auto:") -> {
+        val p = style.split(':')
+        Color(p[1].toLong().toInt()) to Color(p[2].toLong().toInt())
+    }
+    else -> accentOfKey(style)
+}
+
+private fun accentOfKey(style: String): Pair<Color, Color> = when (style) {
+    "original" -> Color(0xFF6A4FD0) to Color(0xFF3A2D7A)
+    "arctic" -> Color(0xFF2B5FB0) to Color(0xFF3B3C9E)
+    "emerald" -> Color(0xFF1FA58B) to Color(0xFF1B6C5F)
+    "rose" -> Color(0xFFB05A9A) to Color(0xFF7A3A6E)
+    "copper" -> Color(0xFFC8773A) to Color(0xFF8A4A2A)
+    else -> Color(0xFF59606E) to Color(0xFF3E5566) // "graphite"
+}
+
+private fun backdropBase(style: String): Color = if (style.startsWith("auto:")) {
+    androidx.compose.ui.graphics.lerp(accentOf(style).first, Color.Black, 0.94f)
+} else when (GuideBackdrops.normalize(style)) {
+    "onyx" -> Color(0xFF000000)
+    "original" -> Color(0xFF0B0A18)
+    "arctic" -> Color(0xFF050D1A)
+    "emerald" -> Color(0xFF05130F)
+    "rose" -> Color(0xFF140711)
+    "copper" -> Color(0xFF140B07)
+    else -> Color(0xFF0E0F11) // "graphite"
+}
+
+private fun backdropBlobs(styleKey: String): List<Blob> {
+    val style = GuideBackdrops.normalize(styleKey)
+    if (style == "onyx") return listOf(
         Blob(0.14f, 0.00f, 0.60f, Color(0xFF2A2F4A), 0.40f),
         Blob(0.92f, 0.82f, 0.55f, Color(0xFF3A2440), 0.30f),
         Blob(0.55f, 0.45f, 0.28f, Color(0xFF1E2A33), 0.20f)
     )
-    "red" -> listOf(
-        Blob(0.08f, 0.04f, 0.75f, Color(0xFF9A2A3A), 0.55f),
-        Blob(0.96f, 0.28f, 0.58f, Color(0xFF6B1F5E), 0.40f),
-        Blob(0.60f, 1.02f, 0.62f, Color(0xFF8A3A1F), 0.30f),
-        Blob(0.42f, 0.46f, 0.28f, Color(0xFF7A2442), 0.18f)
+    val (a, b) = accentOf(style)
+    return listOf(
+        Blob(0.10f, 0.04f, 0.75f, a, 0.55f),
+        Blob(0.94f, 0.34f, 0.58f, b, 0.42f),
+        Blob(0.56f, 1.02f, 0.65f, androidx.compose.ui.graphics.lerp(a, b, 0.5f), 0.38f),
+        Blob(0.44f, 0.44f, 0.28f, androidx.compose.ui.graphics.lerp(a, Color.White, 0.2f), 0.18f)
     )
-    else -> listOf( // "midnight"
-        Blob(0.10f, 0.04f, 0.75f, Color(0xFF2B5FB0), 0.55f),
-        Blob(0.94f, 0.34f, 0.58f, Color(0xFF3B3C9E), 0.42f),
-        Blob(0.56f, 1.02f, 0.65f, Color(0xFF1B6C8F), 0.38f),
-        Blob(0.44f, 0.44f, 0.28f, Color(0xFF2AA9C9), 0.18f)
-    )
+}
+
+/** "Match Theme" becomes the current theme's two accent colors (so the picture follows the theme); other choices stay as they are. */
+@Composable
+internal fun resolveBackdrop(style: String): String {
+    val key = GuideBackdrops.normalize(style)
+    if (key != "auto") return key
+    val c = NuvioTheme.colors
+    val a = androidx.compose.ui.graphics.lerp(c.Secondary, Color.Black, 0.25f)
+    val b = androidx.compose.ui.graphics.lerp(c.SecondaryVariant, Color.Black, 0.25f)
+    return "auto:${a.toArgb().toLong() and 0xFFFFFFFFL}:${b.toArgb().toLong() and 0xFFFFFFFFL}"
 }
 
 /** Paints the backdrop; scales with the screen (fixed-pixel sizes looked tiny on 4K, huge at 720p). */
 @Composable
-internal fun Modifier.guideBackdrop(style: String): Modifier {
+internal fun Modifier.guideBackdrop(styleKey: String): Modifier {
+    val style = resolveBackdrop(styleKey)
     // One modifier per style, kept across redraws. Built fresh on every pass, its picture was
     // painted again (by the processor, five full-screen gradients) each time anything on the
     // screen changed: that was the guide's freezing.
@@ -215,7 +321,8 @@ internal fun guideSurface(): Color {
     // next to it. The tiles also get a soft white edge (see ProgramBlock/channel cell) — the
     // alpha alone barely shows, the edge is what reads as "glass".
     val c = NuvioTheme.colors.Background
-    return (if (c.luminance() < 0.003f) Color(0xFF0E0E12) else c).copy(alpha = 0.66f)
+    val alpha = when (LocalGuideDarkness.current) { "solid" -> 0.94f; "standard" -> 0.50f; else -> 0.66f }
+    return (if (c.luminance() < 0.003f) Color(0xFF0E0E12) else c).copy(alpha = alpha)
 }
 
 /** Shows on now, and the group on screen: a step lighter than [guideSurface] (same glass, lifted with white). */
@@ -223,7 +330,8 @@ internal fun guideSurface(): Color {
 internal fun guideSurfaceVariant(): Color {
     val c = NuvioTheme.colors.Background
     val base = if (c.luminance() < 0.003f) Color(0xFF0E0E12) else c
-    return androidx.compose.ui.graphics.lerp(base, Color.White, 0.10f).copy(alpha = 0.72f)
+    val alpha = when (LocalGuideDarkness.current) { "solid" -> 0.96f; "standard" -> 0.58f; else -> 0.72f }
+    return androidx.compose.ui.graphics.lerp(base, Color.White, 0.10f).copy(alpha = alpha)
 }
 
 /** The faint edge every glass surface in the guide shares (tiles, groups, the info panel). */

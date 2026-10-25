@@ -846,7 +846,7 @@ fun LiveTvGuideScreen(
         if (now >= landed.startMs && now < landed.stopMs && ch.catchup == null) resetToNow()
     }
 
-    CompositionLocalProvider(LocalLiveSolidHighlight provides settings.solidHighlight) {
+    CompositionLocalProvider(LocalLiveSolidHighlight provides settings.solidHighlight, LocalGuideDarkness provides settings.guideInfoBackground) {
     val hostActivity = androidx.compose.ui.platform.LocalContext.current as? com.nuvio.tv.MainActivity
     // Where the preview window is (the video view sits there when not full screen).
     var rootBounds by remember { mutableStateOf<androidx.compose.ui.geometry.Rect?>(null) }
@@ -1501,6 +1501,7 @@ fun LiveTvGuideScreen(
         // them (the background and the theme glow), which looks the same.
         if (!fullscreen && pb != null && rb != null && pb.width > 1f) {
             val bg = NuvioTheme.colors.Background
+            val backdropResolved = resolveBackdrop(settings.guideBackdrop)
             val accent = NuvioTheme.colors.Secondary
             val glowTop = NuvioTheme.colors.BackgroundElevated
             val showGlow = settings.showProgramDetails || settings.showPreview
@@ -1519,7 +1520,7 @@ fun LiveTvGuideScreen(
                 ) {
                     // Exactly what's behind the window: the guide's freeform backdrop.
                     translate(-left, -top) {
-                        drawGuideBackdrop(settings.guideBackdrop, rootW, rb.height)
+                        drawGuideBackdrop(backdropResolved, rootW, rb.height)
                         if (showGlow) drawThemeGlow(accent, glowTop, rootW, glowH)
                         // The preview sits on the header's glass panel; paint that too.
                         val gb = headerGlassBounds
@@ -1730,6 +1731,7 @@ fun LiveTvGuideScreen(
                 onSeries = { p -> menuTarget = null; doSeries(target.channel, p) },
                 onScheduleRecording = { menuTarget = null; manualRecordingFor = target.channel },
                 canRestart = viewModel.canWatchFromStart(target.channel),
+                restartLabel = viewModel.restartLabel(target.channel),
                 onRestart = {
                     menuTarget = null
                     if (viewModel.watchFromStart(target.channel)) goFullscreen()
@@ -2094,11 +2096,11 @@ private fun GuideHeader(
     Row(
         modifier = Modifier
             .fillMaxWidth()
-            .height(if (small) 110.dp else 176.dp)
+            .height(if (small) 116.dp else 176.dp)
             .padding(start = 56.dp, end = 24.dp, top = if (small) 12.dp else 20.dp, bottom = if (small) 4.dp else 6.dp)
             .onGloballyPositioned { onGlassBounds(it.boundsInRoot()) }
             .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(if (small) 16.dp else 20.dp))
-            .padding(horizontal = 18.dp, vertical = 14.dp),
+            .padding(horizontal = 18.dp, vertical = if (small) 8.dp else 14.dp),
         horizontalArrangement = Arrangement.spacedBy(if (small) 16.dp else 20.dp)
     ) {
         // Posters off: just the channel logo, in a logo-shaped space (not a poster box).
@@ -2205,7 +2207,7 @@ private fun GuideHeader(
                     val textSize = if (small) 13.sp else 14.sp
                     val lineHeight = with(androidx.compose.ui.platform.LocalDensity.current) { textSize.toDp() } * 1.45f
                     val lines = (maxHeight / lineHeight).toInt().coerceIn(1, 8)
-                    LiveText(
+                    ScrollingDescription(
                         text = about?.description?.takeIf { it.isNotBlank() }
                             ?: p?.description ?: if (p == null) "No program information" else "",
                         color = NuvioTheme.colors.TextSecondary,
@@ -3066,6 +3068,7 @@ private fun ChannelContextMenu(
     onSeries: (EpgProgram) -> Unit = {},
     /** The show on now can be restarted (catch-up channel). */
     canRestart: Boolean = false,
+    restartLabel: String = "Watch from the beginning",
     onRestart: () -> Unit = {},
     /** Record a time you pick (channels with no listings: PPV events…). */
     onScheduleRecording: () -> Unit = {},
@@ -3085,11 +3088,11 @@ private fun ChannelContextMenu(
         LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
             item { MenuHeader("Watch", first = true) }
             item { MenuItem("Watch full screen", Modifier.focusRequester(first), onWatch) }
-            if (canCatchup) item { MenuItem("Play from archive: ${program!!.title}", onClick = { onCatchup(program!!) }) }
-            // On now, on a catch-up channel: start it over.
-            if (program != null && now >= program.startMs && now < program.stopMs && canRestart) item {
-                MenuItem("Watch from the beginning", onClick = onRestart)
+            // On now, with catch-up or a recording running: start it over (right under Watch).
+            if (canRestart && (program == null || (now >= program.startMs && now < program.stopMs))) item {
+                MenuItem(restartLabel, onClick = onRestart)
             }
+            if (canCatchup) item { MenuItem("Play from archive: ${program!!.title}", onClick = { onCatchup(program!!) }) }
             if (program != null || streamProgram != null) {
                 item { MenuHeader("This show") }
                 if (program != null) item { MenuItem("Program info", onClick = onProgramInfo) }
@@ -3787,7 +3790,7 @@ private fun ProgramInfoDialog(
             LiveText(meta, color = NuvioTheme.colors.TextSecondary, size = 14.sp, maxLines = 2)
         }
         Spacer(Modifier.height(12.dp))
-        LiveText(p?.description ?: "No description available.", color = NuvioTheme.colors.TextSecondary, size = 16.sp, maxLines = 10)
+        ScrollingDescription(p?.description ?: "No description available.", color = NuvioTheme.colors.TextSecondary, size = 16.sp, maxLines = 10)
         Spacer(Modifier.height(18.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             val live = block != null && now >= block.startMs && now < block.stopMs

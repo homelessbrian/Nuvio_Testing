@@ -276,7 +276,7 @@ internal fun LiveTvPlayerPanel(
                     val line = listOfNotNull(meta.takeIf { it.isNotBlank() }, desc).joinToString("  ·  ")
                     if (on(BarPart.DESCRIPTION) && (line.isNotEmpty() || browsing)) {
                         Spacer(Modifier.height(2.dp))
-                        LiveText(line.ifEmpty { " " }, size = 12.sp, color = colors.TextSecondary, maxLines = if (full) 2 else 1)
+                        ScrollingDescription(line.ifEmpty { " " }, size = 12.sp, color = colors.TextSecondary, maxLines = if (full) 2 else 1)
                     }
                     if (full || showProgress) {
                         Spacer(Modifier.height(6.dp))

@@ -148,7 +148,7 @@ internal fun GuideGearPanel(
                         onChange { it.copy(guideInfoBackground = when (it.guideInfoBackground) { "standard" -> "darker"; "darker" -> "solid"; else -> "standard" }) }
                     }) { focused ->
                         Column(Modifier.weight(1f)) {
-                            LiveText("Panel darkness", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
+                            LiveText("Guide darkness", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
                         }
                         LiveText(
                             when (settings.guideInfoBackground) { "darker" -> "Standard"; "solid" -> "Darkest"; else -> "Lightest" },
@@ -157,14 +157,14 @@ internal fun GuideGearPanel(
                     }
                 }
                 GearRow(Modifier.fillMaxWidth(), onClick = {
-                    onChange { it.copy(guideBackdrop = when (it.guideBackdrop) { "oled" -> "midnight"; "midnight" -> "graphite"; "graphite" -> "red"; else -> "oled" }) }
+                    onChange { it.copy(guideBackdrop = GuideBackdrops.next(it.guideBackdrop)) }
                 }) { focused ->
                     Column(Modifier.weight(1f)) {
                         LiveText("Background color", size = 13.sp, weight = if (focused) FontWeight.Bold else FontWeight.Medium, color = gearText(focused))
                         LiveText("Behind the guide and Sports", size = 10.sp, color = gearText(focused, dim = true))
                     }
                     LiveText(
-                        when (settings.guideBackdrop) { "graphite" -> "Graphite"; "midnight" -> "Midnight Blue"; "red" -> "Dark Red"; else -> "Onyx" },
+                        GuideBackdrops.label(settings.guideBackdrop),
                         size = 12.sp, color = gearText(focused, dim = true)
                     )
                 }

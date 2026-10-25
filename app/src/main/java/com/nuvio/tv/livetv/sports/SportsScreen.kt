@@ -411,6 +411,7 @@ private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.
     LivePlayerSurface(player = player, useSurfaceView = true, modifier = place, onAttached = onAttached)
     if (!placed) return
     val bg = NuvioTheme.colors.Background
+    val backdropResolved = com.nuvio.tv.livetv.ui.resolveBackdrop(backdrop)
     val accent = NuvioTheme.colors.Secondary
     val glowTop = NuvioTheme.colors.BackgroundElevated
     Box(
@@ -422,7 +423,7 @@ private fun VideoLayer(slot: Rect?, root: Rect?, player: androidx.media3.common.
                 val dx = slot!!.left - root!!.left
                 val dy = slot.top - root.top
                 translate(-dx, -dy) {
-                    drawGuideBackdrop(backdrop, root.width, root.height)
+                    drawGuideBackdrop(backdropResolved, root.width, root.height)
                     drawThemeGlow(accent, glowTop, root.width, SPORTS_GLOW_HEIGHT.toPx())
                 }
                 drawRoundRect(

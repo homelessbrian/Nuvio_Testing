@@ -25,7 +25,10 @@ object BackgroundWork {
         val count = java.util.concurrent.atomic.AtomicInteger()
         java.util.concurrent.Executors.newFixedThreadPool(2) { r ->
             Thread({
-                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND)
+                // Just short of Android's "background" class (10): that class is held to a small
+                // slice of the processor whenever anything else is busy, which stretched a guide
+                // update from a minute or two to ten on slower boxes. 9 still yields to the screen.
+                android.os.Process.setThreadPriority(android.os.Process.THREAD_PRIORITY_BACKGROUND - 1)
                 r.run()
             }, "nuvio-quiet-${count.incrementAndGet()}").apply { isDaemon = true }
         }.asCoroutineDispatcher()
