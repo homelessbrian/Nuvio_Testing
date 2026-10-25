@@ -56,7 +56,8 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             when {
                 ev.hasTime -> ev
                 !multiDay(ev) -> null
-                ev.endMs!! < input.now - 8 * HOUR -> null
+                // The feed's end date is the start of the last day (Sunday 00:00): the event runs through that day.
+                ev.endMs!! + 24 * HOUR < input.now -> null
                 ev.startMs >= input.now -> ev
                 else -> ev.copy(startMs = input.now)
             }?.also { if (!ev.hasTime) noStart.add(ev.id) }
