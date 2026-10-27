@@ -283,6 +283,13 @@ data class LiveTvSettings(
     val startOnLiveTv: Boolean = false,
     /** The page Nuvio opens on: HOME, LIVE_TV, ON_DEMAND, SEARCH, LIBRARY or DISCOVER. */
     val startPage: String = "",
+    /**
+     * The page the app opens on: HOME, LIVE_TV, ON_DEMAND or SPORTS. A new setting (not
+     * [startPage], an older one that was taken out), so nobody starts somewhere they didn't pick.
+     */
+    val openOn: String = "HOME",
+    /** The shape of the cards in the launcher's home-screen rows: WIDE, TALL or SQUARE. */
+    val launcherCardShape: String = "WIDE",
     /** Xtream catch-up: ask for HLS (.m3u8) first, which gives replays a length for seeking. */
     val catchupPreferHls: Boolean = true,
     /**
@@ -421,6 +428,8 @@ data class LiveUserState(
     val previousChannelKey: String? = null,
     val lastGroupId: String? = null,
     val channelNames: Map<String, String> = emptyMap(),
+    /** Channel key -> the logo picked with "Change Logo" (an address). */
+    val channelLogos: Map<String, String> = emptyMap(),
     val channelNumbers: Map<String, Int> = emptyMap(),
     val groupNames: Map<String, String> = emptyMap(),
     val groupOrder: List<String> = emptyList(),
@@ -636,7 +645,7 @@ object DeveloperTools {
  */
 object LiveTvLoadReport {
     /** Which Live TV kit this app was built from: changed with every kit, so a report shows the exact build. */
-    const val KIT_STAMP = "2026-10-25 19:05"
+    const val KIT_STAMP = "2026-10-26 22:20"
 
     /** The first line of every report: kit and app version, so it's clear which build wrote it. */
     val buildLine: String
@@ -646,7 +655,84 @@ object LiveTvLoadReport {
     val lines = kotlinx.coroutines.flow.MutableStateFlow<List<String>>(emptyList())
     fun add(text: String) {
         val t = (System.currentTimeMillis() - startedAt) / 100 / 10.0
-        lines.value = (lines.value + "+${t}s  $text").takeLast(80)
+        lines.value = (lines.value + "+${t}s  $text").takeLast(160)
+    }
+
+    /** The device, for the top of the short report. */
+    val deviceLine: String
+        get() = "Android ${android.os.Build.VERSION.RELEASE} · ${android.os.Build.MANUFACTURER} ${android.os.Build.MODEL}"
+
+    /**
+     * The report cut down to fit one Discord message (2,000 characters) without losing what
+     * matters: lines that repeat are kept once with how many times ("×12"), problems and
+     * timings always stay, and routine lines go first (oldest first) when it's still too long.
+     */
+    fun shortText(limit: Int = 1_900): String = ReportShortener.shorten(
+        header = "kit $KIT_STAMP · ${com.nuvio.tv.BuildConfig.VERSION_NAME} (${com.nuvio.tv.BuildConfig.VERSION_CODE}) · $deviceLine",
+        lines = lines.value,
+        limit = limit
+    )
+}
+
+/** Shortens reports for pasting (see [LiveTvLoadReport.shortText]). */
+object ReportShortener {
+    private val TIME = Regex("""^\+(\d+(?:\.\d)?)s\s+""")
+    private val NUMBERS = Regex("""\d+(?:[.,]\d+)*""")
+    private val PROBLEM = Regex(
+        """(?i)\b(fail|failed|couldn'?t|could not|error|timed? ?out|refused|won'?t|denied|missing|out of date|froze|crash|exception|not found|invalid|unreachable|no space|expired|expires|blocked|http [45]\d\d|\b[45]\d\d\b)"""
+    )
+    private val TIMING = Regex("""(?i)(\bin \d+(?:\.\d+)? ?(?:s|ms|min)\b|finished|ready|stored|searched|waited|read and set aside|took)""")
+    private val NOISE = listOf(
+        "Launcher rows:", "Sync: other TV's setup is the same", "display already at", "Assign EPG lists:"
+    )
+
+    private class Line(val index: Int, val time: String, val text: String, val priority: Int, var count: Int = 1)
+
+    fun shorten(header: String, lines: List<String>, limit: Int): String {
+        // Parse, and keep each repeated line once (its last time), with how often it came.
+        val byKey = LinkedHashMap<String, Line>()
+        lines.forEachIndexed { i, raw ->
+            val m = TIME.find(raw)
+            val secs = m?.groupValues?.get(1)?.toDoubleOrNull()
+            val time = when {
+                secs == null -> ""
+                secs < 10 -> "%.1fs".format(java.util.Locale.US, secs)
+                else -> "${secs.toLong()}s"
+            }
+            var text = if (m != null) raw.substring(m.value.length) else raw
+            if (text.length > 220) text = text.take(217) + "..."
+            val prio = when {
+                PROBLEM.containsMatchIn(text) -> 0
+                NOISE.any { text.contains(it) } -> 3
+                TIMING.containsMatchIn(text) -> 1
+                else -> 2
+            }
+            val key = NUMBERS.replace(text, "#")
+            val prev = byKey.remove(key)
+            byKey[key] = Line(i, time, text, prio, (prev?.count ?: 0) + 1)
+        }
+        val kept = byKey.values.sortedBy { it.index }.toMutableList()
+        fun render(list: List<Line>, dropped: Int): String = buildString {
+            append(header)
+            list.forEach { l ->
+                append('\n')
+                if (l.time.isNotEmpty()) append(l.time).append(' ')
+                append(l.text)
+                if (l.count > 1) append(" (×").append(l.count).append(')')
+            }
+            if (dropped > 0) append("\n(").append(dropped).append(" routine lines left out; the full report is on the same page)")
+        }
+        var dropped = 0
+        var out = render(kept, 0)
+        // Too long: routine lines go first, then plain ones, then timings (oldest first each time).
+        while (out.length > limit && kept.size > 1) {
+            val victim = kept.filter { it.priority > 0 }.maxWithOrNull(compareBy<Line>({ it.priority }, { -it.index }))
+                ?: kept.first()
+            kept.remove(victim)
+            dropped++
+            out = render(kept, dropped)
+        }
+        return if (out.length > limit) out.take(limit - 3) + "..." else out
     }
 }
 

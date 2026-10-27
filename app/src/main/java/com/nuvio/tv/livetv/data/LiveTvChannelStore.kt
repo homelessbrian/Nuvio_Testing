@@ -35,7 +35,7 @@ class LiveTvChannelStore @Inject constructor(
         prefs.playlists.map { list -> list.filter { it.logoSource == "epg" }.mapTo(HashSet()) { it.id } as Set<String> }
             .distinctUntilChanged()
     ) { channels, user, s, epgLogos, preferEpg ->
-        withLogos(named(channels, user, s), epgLogos, preferEpg)
+        withPickedLogos(withLogos(named(channels, user, s), epgLogos, preferEpg), user.channelLogos)
     }.flowOn(Dispatchers.Default).stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     /**
@@ -172,6 +172,20 @@ class LiveTvChannelStore @Inject constructor(
         val parts = key.split('|', limit = 3)
         if (parts.size < 3 || parts[1].isBlank()) return null
         return parts[0] + "|" + parts[1]
+    }
+
+    /**
+     * Logos picked with "Change Logo", over everything else. Like renames, kept by the channel's
+     * key and also by playlist + tvg-id, so a provider renaming "ESPN HD" to "ESPN FHD" keeps it.
+     */
+    private fun withPickedLogos(channels: List<LiveChannel>, picked: Map<String, String>): List<LiveChannel> {
+        if (picked.isEmpty()) return channels
+        val current = channels.mapTo(HashSet()) { it.key }
+        val byId = stableIndex(picked.filterKeys { it !in current })
+        return channels.map { c ->
+            val logo = picked[c.key] ?: stableId(c.key)?.let { byId[it] }
+            if (logo == null || logo == c.logo) c else c.copy(logo = logo)
+        }
     }
 
     private fun <T> stableIndex(byKey: Map<String, T>): Map<String, T> {

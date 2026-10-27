@@ -102,6 +102,8 @@ class LiveTvPreferences @Inject constructor(
         val overlayMode = booleanPreferencesKey("overlay_mode")
         val startOnLiveTv = booleanPreferencesKey("start_on_live_tv")
         val startPage = stringPreferencesKey("start_page")
+        val openOn = stringPreferencesKey("open_on")
+        val launcherCardShape = stringPreferencesKey("launcher_card_shape")
         val catchupPreferHls = booleanPreferencesKey("catchup_prefer_hls")
         val catchupShift = intPreferencesKey("catchup_shift_minutes")
         val parentalPin = stringPreferencesKey("parental_pin")
@@ -188,6 +190,7 @@ class LiveTvPreferences @Inject constructor(
         val previousChannel = stringPreferencesKey("previous_channel")
         val lastGroup = stringPreferencesKey("last_group")
         val channelNames = stringPreferencesKey("channel_names")
+        val channelLogos = stringPreferencesKey("channel_logos")
         val channelNumbers = stringPreferencesKey("channel_numbers")
         val groupNames = stringPreferencesKey("group_names")
         val groupOrder = stringPreferencesKey("group_order")
@@ -339,6 +342,8 @@ class LiveTvPreferences @Inject constructor(
             overlayMode = p[Keys.overlayMode] ?: d.overlayMode,
             startOnLiveTv = p[Keys.startOnLiveTv] ?: d.startOnLiveTv,
             startPage = p[Keys.startPage] ?: d.startPage,
+            openOn = p[Keys.openOn] ?: d.openOn,
+            launcherCardShape = p[Keys.launcherCardShape] ?: d.launcherCardShape,
             catchupPreferHls = p[Keys.catchupPreferHls] ?: d.catchupPreferHls,
             catchupShiftMinutes = p[Keys.catchupShift] ?: d.catchupShiftMinutes,
             parentalPin = p[Keys.parentalPin] ?: d.parentalPin,
@@ -443,6 +448,7 @@ class LiveTvPreferences @Inject constructor(
             previousChannelKey = p[Keys.previousChannel],
             lastGroupId = p[Keys.lastGroup],
             channelNames = decodeStringMap(p[Keys.channelNames]),
+            channelLogos = decodeStringMap(p[Keys.channelLogos]),
             channelNumbers = decodeStringMap(p[Keys.channelNumbers]).mapNotNull { (k, v) -> v.toIntOrNull()?.let { k to it } }.toMap(),
             groupNames = decodeStringMap(p[Keys.groupNames]),
             groupOrder = decodeStringList(p[Keys.groupOrder]),
@@ -561,6 +567,8 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.overlayMode] = s.overlayMode
         p[Keys.startOnLiveTv] = s.startOnLiveTv
         p[Keys.startPage] = s.startPage
+        p[Keys.openOn] = s.openOn
+        p[Keys.launcherCardShape] = s.launcherCardShape
         p[Keys.catchupPreferHls] = s.catchupPreferHls
         p[Keys.catchupShift] = s.catchupShiftMinutes
         p[Keys.parentalPin] = s.parentalPin
@@ -631,6 +639,15 @@ class LiveTvPreferences @Inject constructor(
             val m = decodeStringMap(p[Keys.channelNames]).toMutableMap()
             if (name.isNullOrBlank()) m.remove(key) else m[key] = name.trim()
             p[Keys.channelNames] = encodeStringMap(m)
+        }
+    }
+
+    /** The logo picked for a channel ("Change Logo"); null puts its own back. */
+    suspend fun setChannelLogo(key: String, url: String?) {
+        store.edit { p ->
+            val m = decodeStringMap(p[Keys.channelLogos]).toMutableMap()
+            if (url.isNullOrBlank()) m.remove(key) else m[key] = url.trim()
+            p[Keys.channelLogos] = encodeStringMap(m)
         }
     }
 

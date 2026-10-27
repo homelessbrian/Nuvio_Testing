@@ -152,10 +152,18 @@ private fun OverlayModeContent(
     var futurePrompt by remember { mutableStateOf<Pair<LiveChannel, EpgProgram>?>(null) }
     val focus = remember { FocusRequester() }
 
-    // After changing group, keep the cursor on the playing channel if it's in the new list.
+    // Opening: the cursor on the playing channel. Picking another group: its first channel
+    // (it used to stay at the same position as in the last group, somewhere in the middle).
+    var shownGroup by remember { mutableStateOf<String?>(null) }
     LaunchedEffect(ui.selectedGroupId, channels.size) {
+        val changed = shownGroup != null && shownGroup != ui.selectedGroupId
+        shownGroup = ui.selectedGroupId
         val playing = channels.indexOfFirst { it.key == playback.channelKey }
-        chIndex = if (playing >= 0) playing else chIndex.coerceIn(0, (channels.size - 1).coerceAtLeast(0))
+        chIndex = when {
+            changed -> 0
+            playing >= 0 -> playing
+            else -> chIndex.coerceIn(0, (channels.size - 1).coerceAtLeast(0))
+        }
     }
     LaunchedEffect(Unit) { delay(60); runCatching { focus.requestFocus() } }
     // Closes itself after a while without a key press.
@@ -447,15 +455,35 @@ private fun OverlayModeContent(
 private val PanelDark = Color(0xE6141416)
 private val PanelMid = Color(0x99141416)
 
+/**
+ * Keeps the highlighted row on screen the way a normal list does: the list moves one row at a
+ * time once the highlight reaches the top or bottom row (with the next row peeking in), instead
+ * of jumping so the highlight sat near the middle again. A big jump (wrapping round, a page at
+ * a time, another group) lands it with a few rows above it.
+ */
 @Composable
 private fun keepVisible(state: LazyListState, index: Int) {
     LaunchedEffect(index) {
         if (index < 0) return@LaunchedEffect
-        val visible = state.layoutInfo.visibleItemsInfo
-        val first = visible.firstOrNull()?.index ?: 0
-        val last = visible.lastOrNull()?.index ?: 0
-        if (visible.isEmpty() || index <= first + 1 || index >= last - 1) {
+        val info = state.layoutInfo
+        val visible = info.visibleItemsInfo
+        if (visible.isEmpty()) {
             state.scrollToItem((index - 3).coerceAtLeast(0))
+            return@LaunchedEffect
+        }
+        // Rows fully on screen.
+        val full = visible.filter { it.offset >= info.viewportStartOffset && it.offset + it.size <= info.viewportEndOffset }
+        val first = full.firstOrNull()?.index ?: visible.first().index
+        val last = full.lastOrNull()?.index ?: visible.last().index
+        val rows = (last - first + 1).coerceAtLeast(1)
+        val lastItem = info.totalItemsCount - 1
+        when {
+            index in (first + 1) until last -> Unit
+            index == first && first == 0 -> Unit
+            index == last && last == lastItem -> Unit
+            index > last + rows || index < first - rows -> state.scrollToItem((index - 3).coerceAtLeast(0))
+            index >= last -> state.animateScrollToItem((index - rows + 2).coerceIn(0, maxOf(0, lastItem - rows + 1)))
+            else -> state.animateScrollToItem((index - 1).coerceAtLeast(0))
         }
     }
 }

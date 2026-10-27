@@ -414,6 +414,14 @@ open class MainActivity : ComponentActivity() {
         // Live TV fork: start reading the saved channel list and guide as the app opens (before
         // any screen, even the profile picker), so Live TV is ready when you get to it.
         lifecycleScope.launch { runCatching { com.nuvio.tv.livetv.startup.LiveTvPreload.start(this@MainActivity) } }
+        // Live TV fork: "Open the App On" kept where the first screen can read it instantly.
+        lifecycleScope.launch {
+            runCatching {
+                liveTvPreferences.settings.collect { st ->
+                    com.nuvio.tv.livetv.startup.StartPage.save(this@MainActivity, com.nuvio.tv.livetv.startup.StartPage.routeFor(st))
+                }
+            }
+        }
         // Live TV fork: scheduled recordings (sets their alarms; series look for new airings).
         runCatching { liveTvRecordingScheduler.start() }
         isFirstResumeAfterCreate = true
@@ -910,9 +918,12 @@ open class MainActivity : ComponentActivity() {
                         mainUiPrefs.modernSidebarBlurPref && android.os.Build.VERSION.SDK_INT >= android.os.Build.VERSION_CODES.S
                     val hideBuiltInHeadersForFloatingPill = modernSidebarEnabled && !sidebarCollapsed
 
+                    // Live TV fork: "Open the App On": that page is the first screen, in place of
+                    // Home (read once, so the first screen never changes underneath).
+                    val openOnRoute = remember { com.nuvio.tv.livetv.startup.StartPage.cachedRoute(this@MainActivity) }
                     val startDestination = when {
                         needsExperienceSelection -> Screen.ExperienceModeSelection.route
-                        layoutChosen -> Screen.Home.route
+                        layoutChosen -> openOnRoute ?: Screen.Home.route
                         else -> Screen.LayoutSelection.route
                     }
                     val navController = rememberNavController()

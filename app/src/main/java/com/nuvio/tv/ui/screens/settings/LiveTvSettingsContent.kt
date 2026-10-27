@@ -63,7 +63,6 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.livetv.model.ChannelSort
-import com.nuvio.tv.livetv.model.effectiveStartPage
 import com.nuvio.tv.livetv.model.EpgSource
 import com.nuvio.tv.livetv.model.LiveTvSettings
 import com.nuvio.tv.livetv.model.PlaylistSource
@@ -242,12 +241,10 @@ private fun hoursLabel(h: Int): String = when {
 /** Typed into the channel name editor, this turns the hidden developer tools on or off. */
 private const val DEVELOPER_WORD = "#nuviodev"
 
-private fun startPageLabel(page: String): String = when (page) {
+private fun openOnLabel(page: String): String = when (page) {
     "LIVE_TV" -> "Live TV"
     "ON_DEMAND" -> "On Demand"
-    "DISCOVER" -> "Discover"
-    "SEARCH" -> "Search"
-    "LIBRARY" -> "Library"
+    "SPORTS" -> "Sports"
     else -> "Home"
 }
 
@@ -1201,6 +1198,23 @@ internal fun LiveTvSettingsContent(
                         ).profileManager()
                     }.activeProfileId.collectAsStateWithLifecycle()
                     val homeRowOn = homeProfileId !in s.homeRowHiddenProfiles
+                    SubHeading("When the App Starts")
+                    SettingsActionRow(
+                        title = "Open the App On",
+                        subtitle = "The page the app starts on. It opens straight on that page; Back opens the menu as usual. Takes effect the next time the app starts.",
+                        value = openOnLabel(s.openOn),
+                        onClick = { dialog = LiveDialog.StartPage }
+                    )
+                    SubHeading("Rows on Your TV's Home Screen")
+                    SettingsActionRow(
+                        title = "Card Shape",
+                        subtitle = "Match your launcher's row: Wide for Google TV and most launchers, Tall for poster rows, Square for square rows. Each card shows the channel, what's on and until when.",
+                        value = when (s.launcherCardShape) { "TALL" -> "Tall"; "SQUARE" -> "Square"; else -> "Wide" },
+                        onClick = {
+                            update { st -> st.copy(launcherCardShape = when (st.launcherCardShape) { "WIDE" -> "TALL"; "TALL" -> "SQUARE"; else -> "WIDE" }) }
+                            com.nuvio.tv.livetv.home.LiveTvLauncherRows.refresh(homeProfileContext, afterMs = 1_500)
+                        }
+                    )
                     SubHeading("Row Inside Nuvio's Home Page")
                     SettingsToggleRow(
                         "Live TV Row on the Home Screen",
@@ -1775,18 +1789,16 @@ internal fun LiveTvSettingsContent(
             }
         )
         LiveDialog.StartPage -> SettingsSingleChoiceDialog(
-            title = "Start page",
-            // On Demand is only offered once something has been imported.
+            title = "Open the App On",
+            // Live TV while it's in the menu; On Demand once something has been imported.
             options = buildList {
                 add(SettingsPickerOption("HOME", "Home"))
-                add(SettingsPickerOption("LIVE_TV", "Live TV"))
+                if (s.showInSidebar) add(SettingsPickerOption("LIVE_TV", "Live TV"))
                 if (onDemandHas) add(SettingsPickerOption("ON_DEMAND", "On Demand"))
-                add(SettingsPickerOption("DISCOVER", "Discover"))
-                add(SettingsPickerOption("SEARCH", "Search"))
-                add(SettingsPickerOption("LIBRARY", "Library"))
+                add(SettingsPickerOption("SPORTS", "Sports"))
             },
-            selectedValue = s.effectiveStartPage,
-            onOptionSelected = { v -> update { it.copy(startPage = v, startOnLiveTv = v == "LIVE_TV") }; close() },
+            selectedValue = s.openOn,
+            onOptionSelected = { v -> update { it.copy(openOn = v) }; close() },
             onDismiss = close
         )
         LiveDialog.Reminders -> ActionListDialog(

@@ -902,18 +902,31 @@ class SportsRepository @Inject constructor(
 
     // ------------------------------------------------------------------ scores elsewhere in the app
 
-    /** Channel key -> the live game it's showing (sure matches only), for the Live TV info bar. */
+    /**
+     * Channel key -> the live game it's showing, for the Live TV info bar and the guide. A sure
+     * match, or else a likely one when it's the only live game that channel could be showing
+     * (a network channel like ESPN with a game on: those are "maybe" matches, so watching ESPN
+     * from the guide showed no score before).
+     */
     private fun rebuildLiveScores() {
         val evs = events.value.associateBy { it.id }
-        val out = HashMap<String, SportsEvent>()
-        val cards = HashMap<String, SportsEvent>()
+        val perChannel = HashMap<String, MutableList<Pair<SportsEvent, ChannelMatch>>>()
         for ((id, list) in _matches.value) {
             val ev = evs[id] ?: continue
             if (ev.state != GameState.LIVE) continue
-            list.filter { it.sure }.forEach { m ->
-                cards.putIfAbsent(m.channel.key, ev)
-                if (ev.hasScore) out.putIfAbsent(m.channel.key, ev)
-            }
+            list.filter { it.score >= LIKELY_SCORE }.forEach { m -> perChannel.getOrPut(m.channel.key) { ArrayList() } += ev to m }
+        }
+        val out = HashMap<String, SportsEvent>()
+        val cards = HashMap<String, SportsEvent>()
+        for ((key, found) in perChannel) {
+            val sure = found.filter { it.second.sure }
+            val ev = when {
+                sure.isNotEmpty() -> sure.maxByOrNull { it.second.score }?.first
+                found.map { it.first.id }.distinct().size == 1 -> found.first().first
+                else -> null
+            } ?: continue
+            cards[key] = ev
+            if (ev.hasScore) out[key] = ev
         }
         SportsLive.byChannel.value = out
         SportsLive.cardByChannel.value = cards
@@ -1332,6 +1345,9 @@ class SportsRepository @Inject constructor(
 data class SportsAlert(val event: SportsEvent, val team: TeamInfo, val league: League, val id: Long = System.nanoTime())
 
 /** Sports data the rest of the app shows: scores on Live TV's info bar, scoring alerts. */
+/** A "maybe" channel match good enough to show its game's score when nothing else could be on it. */
+private const val LIKELY_SCORE = 52
+
 object SportsLive {
     val byChannel = MutableStateFlow<Map<String, SportsEvent>>(emptyMap())
     /** Channel key -> the live game on it (with or without a score), for the card on the info panel. */

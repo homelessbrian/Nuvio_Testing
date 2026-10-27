@@ -52,6 +52,8 @@ import androidx.compose.material.icons.filled.LinkOff
 import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Search
+import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -349,6 +351,7 @@ fun LiveTvGuideScreen(
     var groupPickerFor by remember { mutableStateOf<LiveChannel?>(null) }
     var groupMenu by remember { mutableStateOf<ChannelGroup?>(null) }
     var epgPickerFor by remember { mutableStateOf<LiveChannel?>(null) }
+    var logoPickerFor by remember { mutableStateOf<LiveChannel?>(null) }
     LaunchedEffect(epgPickerFor) { if (epgPickerFor != null) viewModel.ensureEpgDetails() }
     var epgPanelFocusTick by remember { mutableIntStateOf(0) }
     val epgSources by viewModel.epgSources.collectAsStateWithLifecycle()
@@ -1709,6 +1712,27 @@ fun LiveTvGuideScreen(
             )
         }
 
+        // ---------------------------------------------------------------- Change Logo panel
+        logoPickerFor?.let { picked ->
+            val closeLogoPanel = {
+                logoPickerFor = null
+                scope.launch { delay(60); runCatching { gridFocus.requestFocus() } }
+                Unit
+            }
+            BackHandler { closeLogoPanel() }
+            // The channel as shown now (so a new pick shows straight away in the panel).
+            val shown by viewModel.displayChannels.collectAsStateWithLifecycle()
+            val ch = shown.firstOrNull { it.key == picked.key } ?: picked
+            LogoSidePanel(
+                channel = ch,
+                viewModel = viewModel,
+                style = menuStyle,
+                hazeState = panelHaze,
+                modifier = Modifier.align(Alignment.CenterEnd),
+                onDone = closeLogoPanel
+            )
+        }
+
         // ---------------------------------------------------------------- dialogs
         manualRecordingFor?.let { ch ->
             com.nuvio.tv.livetv.record.ManualRecordingDialog(
@@ -1772,6 +1796,7 @@ fun LiveTvGuideScreen(
                     )
                 },
                 onChangeEpg = { menuTarget = null; epgPickerFor = target.channel },
+                onChangeLogo = { menuTarget = null; logoPickerFor = target.channel },
                 onRenumber = {
                     menuTarget = null
                     textPrompt = TextPrompt(
@@ -2129,7 +2154,12 @@ private fun GuideHeader(
                     .border(1.dp, Color.White.copy(alpha = 0.10f), posterShape),
                 contentAlignment = Alignment.Center
             ) {
-                if (!poster.isNullOrBlank()) {
+                // A game on now (one the Sports hub knows): a game card in the poster's place.
+                val game = com.nuvio.tv.livetv.sports.rememberLiveGameOn(channel.key)
+                    ?.takeIf { block != null && now in block.startMs until block.stopMs }
+                if (game != null) {
+                    com.nuvio.tv.livetv.sports.SportsPosterCard(game, Modifier.fillMaxSize())
+                } else if (!poster.isNullOrBlank()) {
                     LivePosterImage(poster, Modifier.fillMaxSize())
                 } else {
                     ChannelLogo(channel.logo, if (small) 24.dp else 34.dp)
@@ -3069,6 +3099,7 @@ private fun ChannelContextMenu(
     onAddToGroup: () -> Unit,
     onRename: () -> Unit,
     onChangeEpg: () -> Unit,
+    onChangeLogo: () -> Unit,
     onRenumber: () -> Unit,
     onHide: () -> Unit,
     canReorder: Boolean,
@@ -3149,6 +3180,7 @@ private fun ChannelContextMenu(
             item { MenuItem("Rename channel", onClick = onRename) }
             item { MenuItem("Change channel number", onClick = onRenumber) }
             item { MenuItem("Assign EPG", onClick = onChangeEpg) }
+            item { MenuItem("Change logo", onClick = onChangeLogo) }
             item { MenuHeader("Hide & arrange") }
             item { MenuItem("Hide channel", onClick = onHide) }
             item { MenuItem("Hide group \"${ch.group}\"", onClick = onHideGroup) }
@@ -3201,7 +3233,12 @@ private fun EpgSidePanel(
     var filterOpen by remember { mutableStateOf(false) }
     val seed = remember(channel.key) { epgSearchSeed(channel.name) }
 
-    val rows = remember(sources, query, sourceFilter, unassignedOnly, current) {
+    // The list is put together away from the screen: with big guides (tens of thousands of
+    // channels) filtering and sorting it here made Assign EPG slow to open and to search. The
+    // previous list stays up while a new search is worked out; null until the first one is ready.
+    var rowsReady by remember { mutableStateOf<List<EpgRow>?>(null) }
+    LaunchedEffect(sources, query, sourceFilter, unassignedOnly, current) {
+        rowsReady = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) {
         val words = query.lowercase().split(Regex("""\s+""")).filter { it.isNotBlank() }
         sources.asSequence()
             .filter { sourceFilter == null || it.sourceId == sourceFilter }
@@ -3218,9 +3255,14 @@ private fun EpgSidePanel(
             .filter { r ->
                 words.isEmpty() || (r.entry.names + r.entry.id).joinToString(" ").lowercase().let { h -> words.all { it in h } }
             }
-            .sortedWith(compareBy<EpgRow>({ it.entry.displayName.lowercase() }, { it.source.label }))
+            // Each name lowered once, not on every comparison.
+            .map { it to it.entry.displayName.lowercase() }
+            .sortedWith(compareBy<Pair<EpgRow, String>>({ it.second }, { it.first.source.label }))
+            .map { it.first }
             .toList()
+        }
     }
+    val rows = rowsReady ?: emptyList()
 
     fun anchorIndex(): Int {
         if (rows.isEmpty()) return 0
@@ -3266,8 +3308,12 @@ private fun EpgSidePanel(
     }
     var jumpToken by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(rows, jumpToken) {
-        val idx = anchorIndex()
+    LaunchedEffect(rowsReady, jumpToken) {
+        // Not put together yet: wait (focus goes in once the list is there).
+        if (rowsReady == null) return@LaunchedEffect
+        // Worked out away from the screen: with a big guide, finding the closest name went through
+        // every guide channel and froze the app until Android closed it.
+        val idx = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.Default) { anchorIndex() }
         focusIndex = idx
         // Only takes the highlight when it opens, or while you're already in the panel: picking
         // a guide channel changes this list too, and that used to pull the highlight back in
@@ -3445,6 +3491,7 @@ private fun EpgSidePanel(
             LiveText(
                 when {
                     loading && sources.isEmpty() -> "Guides are still loading…"
+                    rowsReady == null && sources.isNotEmpty() -> "Loading guide channels…"
                     sources.isEmpty() -> "No guides loaded. Add an EPG source in Live TV settings."
                     else -> "No guide channels match."
                 },
@@ -3653,12 +3700,18 @@ private fun EpgPanelButton(
 
 private const val EPG_PICKER_LIMIT = 300
 
+// Made once: making a pattern is slow, and these run for every guide channel.
+private val EPG_KEY_PREFIX = Regex("""^[a-z]{2,3}\s*[:|]\s*""")
+private val EPG_KEY_BRACKETS = Regex("""\[.*?]|\(.*?\)""")
+private val EPG_KEY_QUALITY = Regex("""\b(fhd|uhd|hd|sd|4k|8k|hevc|h265|h264|1080p|720p|backup|raw)\b""")
+private val EPG_KEY_COUNTRY = Regex("""(\.(com|co|net|tv))?\.[a-z]{2}$""")
+
 /** A name or guide id reduced for comparing: "BR: Globo SP FHD" and "GloboSP.br" -> "globosp". */
 private fun epgKey(s: String): String = s.lowercase().trim()
-    .replace(Regex("""^[a-z]{2,3}\s*[:|]\s*"""), "")
-    .replace(Regex("""\[.*?]|\(.*?\)"""), " ")
-    .replace(Regex("""\b(fhd|uhd|hd|sd|4k|8k|hevc|h265|h264|1080p|720p|backup|raw)\b"""), " ")
-    .replace(Regex("""(\.(com|co|net|tv))?\.[a-z]{2}$"""), "")
+    .replace(EPG_KEY_PREFIX, "")
+    .replace(EPG_KEY_BRACKETS, " ")
+    .replace(EPG_KEY_QUALITY, " ")
+    .replace(EPG_KEY_COUNTRY, "")
     .filter { it.isLetterOrDigit() }
 
 /** The guide channel whose name or id is closest to the playlist channel's, or null if none is close. */
@@ -3988,3 +4041,306 @@ private fun guideWindowMs(s: LiveTvSettings): Long =
 
 /** Minutes the guide can be left alone with a channel playing before it goes full screen. */
 private const val GUIDE_IDLE_FULL_SCREEN_MINUTES = 2
+
+// ==================================================================== Change Logo
+
+/**
+ * "Change Logo" (channel menu): a side panel like Assign EPG with logos for the channel, closest
+ * first: the same channel in your other playlists, your guides, then the tv-logos and iptv-org
+ * libraries (only their lists are fetched, when this opens; the logos load as you scroll).
+ * Search, a logo's address sent from your phone, or back to the channel's own.
+ */
+@Composable
+private fun LogoSidePanel(
+    channel: LiveChannel,
+    viewModel: LiveTvViewModel,
+    style: LiveMenuStyle,
+    hazeState: dev.chrisbanes.haze.HazeState,
+    modifier: Modifier,
+    onDone: () -> Unit
+) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    var query by remember { mutableStateOf("") }
+    var searchOpen by remember { mutableStateOf(false) }
+    var phoneOpen by remember { mutableStateOf(false) }
+    var choices by remember { mutableStateOf<List<com.nuvio.tv.livetv.data.LogoChoice>?>(null) }
+    var libraryLoading by remember { mutableStateOf(false) }
+    val picked = viewModel.hasPickedLogo(channel)
+    LaunchedEffect(channel.key, query) {
+        // Your playlists and guides straight away; the libraries' lists may need fetching first.
+        choices = viewModel.logoChoices(context, channel, query, withLibrary = false)
+        libraryLoading = true
+        choices = viewModel.logoChoices(context, channel, query, withLibrary = true)
+        libraryLoading = false
+    }
+    LaunchedEffect(Unit) { viewModel.ensureEpgLists() }
+
+    val listState = rememberLazyListState()
+    val buttonsFocus = remember { FocusRequester() }
+    val firstFocus = remember { FocusRequester() }
+    var initialFocusDone by remember { mutableStateOf(false) }
+    LaunchedEffect(choices != null) {
+        if (choices == null || initialFocusDone) return@LaunchedEffect
+        initialFocusDone = true
+        delay(60)
+        runCatching { if (!choices.isNullOrEmpty()) firstFocus.requestFocus() else buttonsFocus.requestFocus() }
+    }
+
+    val amoled = NuvioTheme.colors.BackgroundElevated == Color.Black
+    val classic = style == LiveMenuStyle.CLASSIC
+    val panelShape = if (classic) androidx.compose.ui.graphics.RectangleShape
+    else RoundedCornerShape(com.nuvio.tv.ui.theme.NuvioComponents.tokens.sidebar.panelRadius)
+    val panelBackground = when {
+        classic -> NuvioTheme.colors.Background
+        amoled -> Color.Black
+        style == LiveMenuStyle.MODERN_BLUR -> NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.65f)
+        else -> NuvioTheme.colors.BackgroundElevated.copy(alpha = 0.97f)
+    }
+    val panelBlur = NuvioTheme.effects.blurPanel
+
+    Column(
+        modifier = modifier
+            .fillMaxHeight()
+            .width(if (classic) 460.dp else 500.dp)
+            .then(if (classic) Modifier else Modifier.padding(top = 24.dp, bottom = 16.dp, end = 20.dp))
+            .clip(panelShape)
+            .then(
+                if (style == LiveMenuStyle.MODERN_BLUR) {
+                    Modifier.hazeEffect(state = hazeState) {
+                        blurRadius = panelBlur
+                        noiseFactor = 0.04f
+                        inputScale = dev.chrisbanes.haze.HazeInputScale.Fixed(0.66f)
+                    }
+                } else Modifier
+            )
+            .background(panelBackground, panelShape)
+            .then(if (!classic) Modifier.border(1.dp, NuvioTheme.colors.Border.copy(alpha = 0.9f), panelShape) else Modifier)
+            .padding(horizontal = if (classic) NuvioTheme.spacing.card.outer else 16.dp, vertical = 20.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(start = 12.dp)) {
+            Column(Modifier.weight(1f)) {
+                LiveText("Change Logo", size = 24.sp, weight = FontWeight.ExtraBold)
+                val sub = listOfNotNull(
+                    channel.name,
+                    if (picked) "Using your pick" else "Using its own logo",
+                    query.takeIf { it.isNotBlank() }?.let { "\"$it\"" }
+                ).joinToString("  ·  ")
+                LiveText(sub, color = NuvioTheme.colors.TextSecondary, size = 13.sp, marquee = true)
+            }
+            // The logo it has now.
+            Box(
+                Modifier.clip(RoundedCornerShape(10.dp)).background(guideSurface()).padding(horizontal = 8.dp, vertical = 6.dp),
+                contentAlignment = Alignment.Center
+            ) { ChannelLogo(channel.logo, 34.dp) }
+        }
+        Spacer(Modifier.height(14.dp))
+        val buttons = listOf<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit>>(
+            Triple(Icons.Default.Search, "Search") { searchOpen = true },
+            Triple(Icons.Default.PhoneAndroid, "From phone") { phoneOpen = true },
+            Triple(Icons.Default.Refresh, "Its own") { viewModel.setChannelLogo(channel, null) }
+        )
+        Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            buttons.forEachIndexed { i, (icon, label, action) ->
+                EpgPanelButton(
+                    icon = icon,
+                    label = label,
+                    style = style,
+                    modifier = Modifier
+                        .weight(1f)
+                        .then(if (i == 0) Modifier.focusRequester(buttonsFocus) else Modifier)
+                        .onPreviewKeyEvent { e ->
+                            if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                            when {
+                                e.key == Key.DirectionLeft && i == 0 -> true
+                                e.key == Key.DirectionRight && i == buttons.lastIndex -> true
+                                e.key == Key.DirectionUp -> true
+                                e.key == Key.DirectionDown -> { runCatching { firstFocus.requestFocus() }; true }
+                                else -> false
+                            }
+                        },
+                    onClick = action
+                )
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Box(Modifier.fillMaxWidth().height(1.dp).background(NuvioTheme.colors.Border.copy(alpha = 0.5f)))
+        Spacer(Modifier.height(8.dp))
+
+        val list = choices.orEmpty()
+        if (choices == null) {
+            LiveText("Finding logos…", modifier = Modifier.padding(12.dp), color = NuvioTheme.colors.TextSecondary)
+        } else if (list.isEmpty() && !libraryLoading) {
+            LiveText(
+                if (query.isBlank()) "No logos found for this channel. Try Search with another name." else "No logos match \"$query\".",
+                modifier = Modifier.padding(12.dp), color = NuvioTheme.colors.TextSecondary, maxLines = 3
+            )
+        }
+        LazyColumn(
+            state = listState,
+            modifier = Modifier
+                .fillMaxWidth()
+                .weight(1f)
+                .onPreviewKeyEvent { e ->
+                    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+                    when (e.key) {
+                        // Keep the highlight in the panel (the guide is behind it).
+                        Key.DirectionLeft, Key.DirectionRight -> true
+                        else -> false
+                    }
+                },
+            verticalArrangement = Arrangement.spacedBy(6.dp),
+            contentPadding = PaddingValues(vertical = 4.dp)
+        ) {
+            var lastGroup = -1
+            list.forEachIndexed { index, choice ->
+                if (choice.group != lastGroup) {
+                    lastGroup = choice.group
+                    val heading = when (choice.group) {
+                        com.nuvio.tv.livetv.data.LogoChoice.PLAYLISTS -> "From your playlists"
+                        com.nuvio.tv.livetv.data.LogoChoice.GUIDES -> "From your guides"
+                        com.nuvio.tv.livetv.data.LogoChoice.TMDB -> "Show & movie logos (TMDB)"
+                        else -> "Logo libraries"
+                    }
+                    item(key = "h$heading") {
+                        LiveText(heading, modifier = Modifier.padding(start = 12.dp, top = 8.dp, bottom = 2.dp),
+                            color = NuvioTheme.colors.TextSecondary, size = 12.sp, weight = FontWeight.Bold)
+                    }
+                }
+                item(key = "l" + index + choice.url) {
+                    LogoChoiceRow(
+                        choice = choice,
+                        inUse = choice.url == channel.logo,
+                        modifier = (if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
+                            .onPreviewKeyEvent { e ->
+                                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp && index == 0) {
+                                    runCatching { buttonsFocus.requestFocus() }; true
+                                } else false
+                            },
+                        onClick = { viewModel.setChannelLogo(channel, choice.url) }
+                    )
+                }
+            }
+            if (libraryLoading) item(key = "loading") {
+                LiveText("Looking in the logo libraries and TMDB…", modifier = Modifier.padding(12.dp), color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+            }
+        }
+    }
+
+    if (searchOpen) {
+        TextInputDialog(
+            title = "Search logos",
+            initial = query.ifBlank { epgSearchSeed(channel.name) },
+            hint = "Channel name",
+            confirmLabel = "Search",
+            onDismiss = { searchOpen = false },
+            onConfirm = { q -> query = q.trim(); searchOpen = false }
+        )
+    }
+    if (phoneOpen) {
+        LogoFromPhoneDialog(
+            channelName = channel.name,
+            onDismiss = { phoneOpen = false },
+            onUrl = { url -> viewModel.setChannelLogo(channel, url); phoneOpen = false }
+        )
+    }
+}
+
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+private fun LogoChoiceRow(choice: com.nuvio.tv.livetv.data.LogoChoice, inUse: Boolean, modifier: Modifier, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val colors = epgTileColors(focused, inUse)
+    val shape = RoundedCornerShape(liveCorner())
+    Row(
+        modifier = modifier
+            .fillMaxWidth()
+            .clip(shape)
+            .background(colors.background)
+            .border(
+                if (focused) 2.dp else 1.dp,
+                when {
+                    focused -> colors.border
+                    inUse -> NuvioTheme.colors.Secondary.copy(alpha = 0.8f)
+                    else -> Color.Transparent
+                },
+                shape
+            )
+            .onFocusChanged { focused = it.isFocused }
+            .combinedClickable(
+                interactionSource = remember { androidx.compose.foundation.interaction.MutableInteractionSource() },
+                indication = null,
+                onClick = onClick
+            )
+            .padding(horizontal = 10.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        // The logo as the guide shows it: on the guide's own dark background (loads as you scroll).
+        Box(
+            Modifier.width(112.dp).height(60.dp).clip(RoundedCornerShape(8.dp)).background(guideSurface()),
+            contentAlignment = Alignment.Center
+        ) { ChannelLogo(choice.url, 40.dp) }
+        Spacer(Modifier.width(12.dp))
+        Column(Modifier.weight(1f)) {
+            LiveText(choice.name, color = colors.text, size = 15.sp, weight = FontWeight.SemiBold, marquee = focused)
+            LiveText(choice.from, color = focusedSecondaryTextColor(focused), size = 12.sp)
+        }
+        if (inUse) {
+            Spacer(Modifier.width(8.dp))
+            LiveTag("IN USE", NuvioTheme.colors.Secondary, NuvioTheme.colors.OnSecondary)
+        }
+    }
+}
+
+/** A logo's address typed on a phone: a QR code opens a small page on the home network. */
+@Composable
+private fun LogoFromPhoneDialog(channelName: String, onDismiss: () -> Unit, onUrl: (String) -> Unit) {
+    var received by remember { mutableStateOf<String?>(null) }
+    var problem by remember { mutableStateOf<String?>(null) }
+    var handle by remember { mutableStateOf<com.nuvio.tv.livetv.crash.PhoneInputServer.Handle?>(null) }
+    var noNetwork by remember { mutableStateOf(false) }
+    androidx.compose.runtime.DisposableEffect(Unit) {
+        val h = com.nuvio.tv.livetv.crash.PhoneInputServer.start(
+            title = "Logo for $channelName",
+            prompt = "Paste the web address of the logo (a picture link ending in .png, .jpg, .svg…), then tap Send to TV.",
+            placeholder = "https://…/logo.png"
+        ) { v -> received = v }
+        handle = h
+        noNetwork = h == null
+        onDispose { h?.stop() }
+    }
+    LaunchedEffect(received) {
+        val v = received ?: return@LaunchedEffect
+        if (v.startsWith("http://", true) || v.startsWith("https://", true)) onUrl(v)
+        else problem = "That isn't a web address (it should start with http:// or https://). Try again from your phone."
+    }
+    val qr = remember(handle?.url) {
+        handle?.url?.let { runCatching { com.nuvio.tv.core.qr.QrCodeGenerator.generate(it, 360) }.getOrNull() }
+    }
+    LiveDialog(onDismiss = onDismiss, width = 620.dp) {
+        LiveText("Logo from your phone", size = 20.sp, weight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        if (noNetwork) {
+            LiveText("Connect this TV to Wi-Fi to send a logo from your phone.", color = NuvioTheme.colors.TextSecondary, size = 14.sp, maxLines = 3)
+        } else {
+            Row(horizontalArrangement = Arrangement.spacedBy(18.dp), verticalAlignment = Alignment.CenterVertically) {
+                qr?.let {
+                    androidx.compose.foundation.Image(
+                        bitmap = it.asImageBitmap(),
+                        contentDescription = null,
+                        modifier = Modifier.size(170.dp).background(Color.White).padding(6.dp)
+                    )
+                }
+                Column(Modifier.weight(1f)) {
+                    LiveText(
+                        "1. Put your phone on the same Wi-Fi as this TV.\n2. Scan the code with your phone's camera.\n3. Paste the logo's web address and tap Send to TV.",
+                        color = NuvioTheme.colors.TextSecondary, size = 14.sp, maxLines = 6
+                    )
+                    handle?.url?.let { LiveText(it.removePrefix("http://"), size = 13.sp, modifier = Modifier.padding(top = 8.dp)) }
+                    problem?.let { LiveText(it, color = LIVE_RED, size = 13.sp, maxLines = 3, modifier = Modifier.padding(top = 8.dp)) }
+                }
+            }
+        }
+        Spacer(Modifier.height(12.dp))
+        MenuItem("Close", onClick = onDismiss)
+    }
+}
