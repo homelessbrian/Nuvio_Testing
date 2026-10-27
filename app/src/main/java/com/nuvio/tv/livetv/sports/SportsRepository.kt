@@ -778,6 +778,17 @@ class SportsRepository @Inject constructor(
             // The very first search (nothing shown yet) waits for the start-up guide read to finish:
             // both work on the same guide database, which made the search take many minutes, and
             // the guide isn't all there yet anyway.
+            // Same while the guide is being built (a first setup, or new guide files): searching
+            // before it's in found channels for only a few games.
+            if (_matches.value.isEmpty() && com.nuvio.tv.livetv.data.BackgroundWork.guideBuilding.value) {
+                _matching.value = true
+                val w0 = System.currentTimeMillis()
+                kotlinx.coroutines.withTimeoutOrNull(10 * 60_000L) {
+                    com.nuvio.tv.livetv.data.BackgroundWork.guideBuilding.first { !it }
+                }
+                _matching.value = false
+                LiveTvLoadReport.add("Sports matching waited ${(System.currentTimeMillis() - w0) / 1000} s for the guide to be built")
+            }
             if (_matches.value.isEmpty() && liveRepo.guideReadBusy()) {
                 _matching.value = true
                 var waited = 0

@@ -383,7 +383,9 @@ class EpgDatabase @Inject constructor(@ApplicationContext context: Context) :
         )
         db.execSQL("CREATE TABLE IF NOT EXISTS stage_channels (src TEXT NOT NULL, xid TEXT NOT NULL, names TEXT, icon TEXT)")
         db.execSQL("CREATE TABLE IF NOT EXISTS stage_info (src TEXT PRIMARY KEY, stamp TEXT NOT NULL, made INTEGER NOT NULL)")
-        db.execSQL("CREATE INDEX IF NOT EXISTS stage_src_xid ON stage(src, xid)")
+        // No index on the working copy: keeping one up to date for every listing made storing a
+        // big guide several times slower. The final step looks channels up the other way round.
+        db.execSQL("DROP INDEX IF EXISTS stage_src_xid")
     }
 
     /** What's known about one guide channel's staged listings. */
@@ -398,6 +400,7 @@ class EpgDatabase @Inject constructor(@ApplicationContext context: Context) :
         private var open = true
 
         init {
+            db.execSQL("DROP INDEX IF EXISTS stage_src_xid")
             db.beginTransaction()
             db.delete("stage", "src = ?", arrayOf(src))
             db.delete("stage_meta", "src = ?", arrayOf(src))
@@ -493,6 +496,30 @@ class EpgDatabase @Inject constructor(@ApplicationContext context: Context) :
                 if (c.isNull(2)) null else c.getString(2)
             )
         }
+        return out
+    }
+
+    /** Several staged guide channels' listings (full details), in one pass over the guide. */
+    fun stagedProgramsFor(src: String, xids: Collection<String>): Map<String, List<EpgProgram>> {
+        val out = HashMap<String, ArrayList<EpgProgram>>()
+        xids.distinct().chunked(400).forEach { part ->
+            readableDatabase.rawQuery(
+                "SELECT xid, start, stop, title, descr, cat, ep, icon, year, people FROM stage WHERE src = ? AND xid IN (" +
+                    part.joinToString(",") { "?" } + ")",
+                (listOf(src) + part).toTypedArray()
+            ).use { c ->
+                while (c.moveToNext()) out.getOrPut(c.getString(0)) { ArrayList() } += EpgProgram(
+                    startMs = c.getLong(1), stopMs = c.getLong(2), title = c.getString(3),
+                    description = if (c.isNull(4)) null else c.getString(4),
+                    category = if (c.isNull(5)) null else c.getString(5),
+                    episode = if (c.isNull(6)) null else c.getString(6),
+                    icon = if (c.isNull(7)) null else c.getString(7),
+                    year = if (c.isNull(8)) null else c.getInt(8),
+                    people = if (c.isNull(9)) emptyList() else c.getString(9).split('\u001F')
+                )
+            }
+        }
+        out.values.forEach { l -> l.sortBy { it.startMs } }
         return out
     }
 

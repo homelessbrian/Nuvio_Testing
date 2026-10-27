@@ -1681,7 +1681,8 @@ class LiveTvRepository @Inject constructor(
 
     private suspend fun buildPrograms(settings: LiveTvSettings, targets: List<EpgTarget>) {
         val t0 = System.currentTimeMillis()
-        BackgroundWork.heavy { buildProgramsInner(settings, targets) }
+        BackgroundWork.guideBuilding.value = true
+        try { BackgroundWork.heavy { buildProgramsInner(settings, targets) } } finally { BackgroundWork.guideBuilding.value = false }
         LIVE_REPORT.add("Guide matched and stored: ${_programs.value.size} channels in ${System.currentTimeMillis() - t0} ms")
     }
 
@@ -1812,6 +1813,7 @@ class LiveTvRepository @Inject constructor(
                         setStatus(loading = true, message = "Reading guide \"${target.name}\"$step… ${(done * 100 / fileSize).coerceIn(0, 99)}%")
                     }
                 }
+                val readStart = System.currentTimeMillis()
                 val writer = runCatching { guideDb.startStage(src) }
                     .onFailure { Log.w(TAG, "Couldn't start storing ${target.name}", it) }.getOrNull()
                 if (writer == null) { LIVE_REPORT.add("Guide \"${target.name}\": couldn't be stored"); continue }
@@ -1858,6 +1860,7 @@ class LiveTvRepository @Inject constructor(
                 meta = runCatching { writer.finish(stageStamp, entries.map { Triple(it.id, it.names, it.icon) }) }
                     .onFailure { writer.abort(); Log.w(TAG, "Couldn't store ${target.name}", it) }
                     .getOrNull() ?: run { LIVE_REPORT.add("Guide \"${target.name}\": couldn't be stored"); continue }
+                LIVE_REPORT.add("Guide \"${target.name}\": read and set aside in ${(System.currentTimeMillis() - readStart) / 1000} s (${meta.values.sumOf { it.count }} listings)")
             }
             // A reused guide's window copies come from its stored copy.
             if (reuse) runCatching {
@@ -1887,7 +1890,10 @@ class LiveTvRepository @Inject constructor(
                 }
             }
 
-            pinnedHere.forEach { (key, a) -> pinned[key] = runCatching { guideDb.stagedPrograms(src, a.xmltvId) }.getOrDefault(emptyList()) }
+            if (pinnedHere.isNotEmpty()) {
+                val lists = runCatching { guideDb.stagedProgramsFor(src, pinnedHere.values.map { it.xmltvId }) }.getOrDefault(emptyMap())
+                pinnedHere.forEach { (key, a) -> pinned[key] = lists[a.xmltvId].orEmpty() }
+            }
 
             if (idHits.isEmpty() && nameHits.isEmpty()) {
                 // Guide had no <channel> list before programs: match program channel ids directly.
@@ -1972,10 +1978,12 @@ class LiveTvRepository @Inject constructor(
         // The guide shown: from the staged guides, the chosen one for each channel (hand-picked
         // ones as given), all in one step.
         val choice = auto.filterKeys { it !in pinned }
+        val storeStart = System.currentTimeMillis()
         val stored = runCatching {
             val fp = guideFingerprint(settings, targets)
             guideDb.replaceAllFromStage(fp, choice, pinned, auto, guideParts(settings, targets, fp), windowStart, windowEnd)
         }.onFailure { Log.w(TAG, "Couldn't store the guide", it) }.isSuccess
+        LIVE_REPORT.add("Guide: best guide per channel stored in ${(System.currentTimeMillis() - storeStart) / 1000} s")
         // The guides' working copies aren't kept once the guide is built (they'd double the storage).
         runCatching { guideDb.dropStagesExcept(emptyList()) }
         // The hours around now, in memory (short form: details come from the database).
@@ -2481,8 +2489,16 @@ class LiveTvRepository @Inject constructor(
             fastGzip(tmp.outputStream()).bufferedWriter().use { out ->
                 out.write("#EXTM3U\n")
                 android.util.JsonReader(body.charStream()).use { reader ->
-                    reader.beginArray()
+                    // Most panels send a list; some send the channels keyed by number instead
+                    // ({"0": {...}, "1": {...}}), which failed with "Expected BEGIN_ARRAY but was
+                    // BEGIN_OBJECT". Both are read.
+                    val keyed = reader.peek() == android.util.JsonToken.BEGIN_OBJECT
+                    if (keyed) reader.beginObject() else reader.beginArray()
                     while (reader.hasNext()) {
+                        if (keyed) {
+                            reader.nextName()
+                            if (reader.peek() != android.util.JsonToken.BEGIN_OBJECT) { reader.skipValue(); continue }
+                        }
                         val f = HashMap<String, String>()
                         reader.beginObject()
                         while (reader.hasNext()) {
@@ -2517,7 +2533,7 @@ class LiveTvRepository @Inject constructor(
                         count++
                         if (count % 500 == 0) setStatus(loading = true, message = "Loading channels from ${pl.name}… ${"%,d".format(count)}")
                     }
-                    reader.endArray()
+                    if (keyed) reader.endObject() else reader.endArray()
                 }
             }
         }

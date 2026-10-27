@@ -63,6 +63,9 @@ object BackgroundWork {
      */
     val heavyJobs = MutableStateFlow(0)
 
+    /** The guide is being built from the guide files right now. */
+    val guideBuilding = MutableStateFlow(false)
+
     suspend fun <T> heavy(block: suspend () -> T): T {
         heavyJobs.update { it + 1 }
         try { return block() } finally { heavyJobs.update { (it - 1).coerceAtLeast(0) } }
