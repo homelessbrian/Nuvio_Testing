@@ -107,6 +107,7 @@ import dev.chrisbanes.haze.hazeSource
 import dev.chrisbanes.haze.hazeEffect
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 
 private const val SLOT_MS = 30L * 60L * 1000L
 private const val WINDOW_MS = 2L * 60L * 60L * 1000L
@@ -352,6 +353,7 @@ fun LiveTvGuideScreen(
     var groupMenu by remember { mutableStateOf<ChannelGroup?>(null) }
     var epgPickerFor by remember { mutableStateOf<LiveChannel?>(null) }
     var logoPickerFor by remember { mutableStateOf<LiveChannel?>(null) }
+    var logoPanelFocusTick by remember { mutableIntStateOf(0) }
     LaunchedEffect(epgPickerFor) { if (epgPickerFor != null) viewModel.ensureEpgDetails() }
     var epgPanelFocusTick by remember { mutableIntStateOf(0) }
     val epgSources by viewModel.epgSources.collectAsStateWithLifecycle()
@@ -1241,6 +1243,14 @@ fun LiveTvGuideScreen(
                                     }
                                     return@onPreviewKeyEvent true
                                 }
+                                // Change Logo open: Right goes into the panel for the highlighted channel.
+                                if (logoPickerFor != null && event.key == Key.DirectionRight) {
+                                    if (event.type == KeyEventType.KeyDown) {
+                                        focusedChannel?.let { logoPickerFor = it }
+                                        logoPanelFocusTick++
+                                    }
+                                    return@onPreviewKeyEvent true
+                                }
                                 // Assign EPG open: Right goes into the panel for the highlighted channel.
                                 if (epgPickerFor != null && event.key == Key.DirectionRight) {
                                     if (event.type == KeyEventType.KeyDown) {
@@ -1426,7 +1436,7 @@ fun LiveTvGuideScreen(
                                             now = now,
                                             isFavorite = ch.key in user.favorites,
                                             isPlaying = ch.key == playback.channelKey,
-                                            focusColumn = if (index == row && (gridFocused || epgPickerFor != null) && !nameFocus && !reorderActive) column else null,
+                                            focusColumn = if (index == row && (gridFocused || epgPickerFor != null || logoPickerFor != null) && !nameFocus && !reorderActive) column else null,
                                             focusedBlock = if (index == row) focusedBlock else null,
                                             visible = if (visibilityMode) ch.key !in pendingHidden else null,
                                             moving = reorderKey == ch.key,
@@ -1720,6 +1730,11 @@ fun LiveTvGuideScreen(
                 Unit
             }
             BackHandler { closeLogoPanel() }
+            // Moving through the channels with the panel open: the panel follows.
+            val fcLogo = focusedChannel
+            LaunchedEffect(fcLogo?.key, gridFocused) {
+                if (gridFocused && fcLogo != null && fcLogo.key != picked.key) logoPickerFor = fcLogo
+            }
             // The channel as shown now (so a new pick shows straight away in the panel).
             val shown by viewModel.displayChannels.collectAsStateWithLifecycle()
             val ch = shown.firstOrNull { it.key == picked.key } ?: picked
@@ -1729,7 +1744,9 @@ fun LiveTvGuideScreen(
                 style = menuStyle,
                 hazeState = panelHaze,
                 modifier = Modifier.align(Alignment.CenterEnd),
-                onDone = closeLogoPanel
+                onDone = closeLogoPanel,
+                onLeft = { runCatching { gridFocus.requestFocus() } },
+                focusTick = logoPanelFocusTick
             )
         }
 
@@ -4057,10 +4074,14 @@ private fun LogoSidePanel(
     style: LiveMenuStyle,
     hazeState: dev.chrisbanes.haze.HazeState,
     modifier: Modifier,
-    onDone: () -> Unit
+    onDone: () -> Unit,
+    /** Left: back to the guide's channels (the panel stays open and follows the highlight). */
+    onLeft: () -> Unit = {},
+    /** Goes up when the guide asks the panel to take the highlight (Right from the channels). */
+    focusTick: Int = 0
 ) {
     val context = androidx.compose.ui.platform.LocalContext.current
-    var query by remember { mutableStateOf("") }
+    var query by remember(channel.key) { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var phoneOpen by remember { mutableStateOf(false) }
     var choices by remember { mutableStateOf<List<com.nuvio.tv.livetv.data.LogoChoice>?>(null) }
@@ -4068,6 +4089,7 @@ private fun LogoSidePanel(
     val picked = viewModel.hasPickedLogo(channel)
     LaunchedEffect(channel.key, query) {
         // Your playlists and guides straight away; the libraries' lists may need fetching first.
+        choices = null
         choices = viewModel.logoChoices(context, channel, query, withLibrary = false)
         libraryLoading = true
         choices = viewModel.logoChoices(context, channel, query, withLibrary = true)
@@ -4078,12 +4100,82 @@ private fun LogoSidePanel(
     val listState = rememberLazyListState()
     val buttonsFocus = remember { FocusRequester() }
     val firstFocus = remember { FocusRequester() }
+    val focusManager = androidx.compose.ui.platform.LocalFocusManager.current
+    val panelScope = rememberCoroutineScope()
+    var listHasFocus by remember { mutableStateOf(false) }
+    // Each logo's own highlight handle, and which one has it. Up and Down in the list are moved
+    // here, one row at a time: left to Android, holding Up raced ahead of the rows being drawn
+    // and the highlight jumped out of the panel into the guide behind it.
+    val rowFocus = remember { HashMap<Int, FocusRequester>() }
+    fun rowRequester(i: Int): FocusRequester = if (i == 0) firstFocus else rowFocus.getOrPut(i) { FocusRequester() }
+    var focusIndex by remember { mutableIntStateOf(0) }
+    /** Where each logo is in the list (headings take places too). */
+    val lazyIndexOf = remember(choices) {
+        val out = ArrayList<Int>()
+        var at = 0
+        var last = -1
+        choices.orEmpty().forEach { c ->
+            if (c.group != last) { last = c.group; at++ }
+            out += at
+            at++
+        }
+        out
+    }
+    fun moveInList(delta: Int) {
+        val n = choices?.size ?: 0
+        if (n == 0) return
+        val target = focusIndex + delta
+        if (target < 0) { runCatching { buttonsFocus.requestFocus() }; return }
+        if (target >= n) return
+        focusIndex = target
+        panelScope.launch {
+            val li = lazyIndexOf.getOrNull(target) ?: return@launch
+            val visible = listState.layoutInfo.visibleItemsInfo
+            val shown = visible.firstOrNull { it.index == li }
+            val fully = shown != null && shown.offset >= listState.layoutInfo.viewportStartOffset &&
+                shown.offset + shown.size <= listState.layoutInfo.viewportEndOffset
+            if (!fully) {
+                // Off screen (or half): bring it in, a row of room above it going up, below going down.
+                val firstVisible = visible.firstOrNull()?.index ?: 0
+                val lastVisible = visible.lastOrNull()?.index ?: 0
+                val rows = (lastVisible - firstVisible).coerceAtLeast(1)
+                listState.scrollToItem(if (delta < 0) (li - 1).coerceAtLeast(0) else (li - rows + 2).coerceAtLeast(0))
+                androidx.compose.runtime.withFrameNanos { }
+            }
+            runCatching { rowRequester(target).requestFocus() }
+        }
+    }
+    /**
+     * Into the list of logos, on its first one: scrolled to the top first and given a moment to
+     * be laid out (asking a row that wasn't laid out yet did nothing, and the highlight stayed
+     * stuck on the buttons); then, if that still didn't take, the normal move down.
+     */
+    fun focusList() {
+        if (choices.isNullOrEmpty()) return
+        focusIndex = 0
+        panelScope.launch {
+            runCatching { listState.scrollToItem(0) }
+            repeat(2) { androidx.compose.runtime.withFrameNanos { } }
+            runCatching { firstFocus.requestFocus() }
+            androidx.compose.runtime.withFrameNanos { }
+            if (!listHasFocus) focusManager.moveFocus(androidx.compose.ui.focus.FocusDirection.Down)
+        }
+    }
     var initialFocusDone by remember { mutableStateOf(false) }
     LaunchedEffect(choices != null) {
         if (choices == null || initialFocusDone) return@LaunchedEffect
         initialFocusDone = true
         delay(60)
-        runCatching { if (!choices.isNullOrEmpty()) firstFocus.requestFocus() else buttonsFocus.requestFocus() }
+        if (!choices.isNullOrEmpty()) focusList() else runCatching { buttonsFocus.requestFocus() }
+    }
+    // Another channel picked in the guide: its logos from the top.
+    LaunchedEffect(channel.key) { focusIndex = 0; runCatching { listState.scrollToItem(0) } }
+    // Right from the guide's channels: into the panel (once its logos are there).
+    LaunchedEffect(focusTick) {
+        if (focusTick == 0) return@LaunchedEffect
+        delay(40)
+        androidx.compose.runtime.snapshotFlow { choices }.first { it != null }
+        if (!choices.isNullOrEmpty()) focusList() else runCatching { buttonsFocus.requestFocus() }
     }
 
     val amoled = NuvioTheme.colors.BackgroundElevated == Color.Black
@@ -4154,7 +4246,7 @@ private fun LogoSidePanel(
                                 e.key == Key.DirectionLeft && i == 0 -> true
                                 e.key == Key.DirectionRight && i == buttons.lastIndex -> true
                                 e.key == Key.DirectionUp -> true
-                                e.key == Key.DirectionDown -> { runCatching { firstFocus.requestFocus() }; true }
+                                e.key == Key.DirectionDown -> { focusList(); true }
                                 else -> false
                             }
                         },
@@ -4180,11 +4272,15 @@ private fun LogoSidePanel(
             modifier = Modifier
                 .fillMaxWidth()
                 .weight(1f)
+                .onFocusChanged { listHasFocus = it.hasFocus }
                 .onPreviewKeyEvent { e ->
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (e.key) {
-                        // Keep the highlight in the panel (the guide is behind it).
-                        Key.DirectionLeft, Key.DirectionRight -> true
+                        // Left: back to the guide's channels, to pick the next one (the panel follows).
+                        Key.DirectionLeft -> { onLeft(); true }
+                        Key.DirectionRight -> true
+                        Key.DirectionUp -> { moveInList(-1); true }
+                        Key.DirectionDown -> { moveInList(1); true }
                         else -> false
                     }
                 },
@@ -4210,12 +4306,8 @@ private fun LogoSidePanel(
                     LogoChoiceRow(
                         choice = choice,
                         inUse = choice.url == channel.logo,
-                        modifier = (if (index == 0) Modifier.focusRequester(firstFocus) else Modifier)
-                            .onPreviewKeyEvent { e ->
-                                if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp && index == 0) {
-                                    runCatching { buttonsFocus.requestFocus() }; true
-                                } else false
-                            },
+                        modifier = Modifier.focusRequester(rowRequester(index))
+                            .onFocusChanged { if (it.isFocused) focusIndex = index },
                         onClick = { viewModel.setChannelLogo(channel, choice.url) }
                     )
                 }

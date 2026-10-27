@@ -85,6 +85,10 @@ class SportsRepository @Inject constructor(
     /** Non-league football (nuvio-data files): whole seasons, by league id. */
     private val tsdbData = MutableStateFlow<Map<String, LeagueData>>(emptyMap())
     private val tsdbTeams = java.util.concurrent.ConcurrentHashMap<String, List<TeamInfo>>()
+    /** The app's own leagues filled from the nuvio-data files (WWE, MotoGP…): league id -> TheSportsDB id. */
+    @Volatile private var tsdbAlias: Map<String, String> = emptyMap()
+    private fun fromTsdb(id: String) = id.startsWith("tsdb/") || id in tsdbAlias
+    private fun tsdbFileId(id: String) = tsdbAlias[id] ?: id.removePrefix("tsdb/")
     /** Games of teams looked up on a table (their card), by team key: so their game pages open. */
     private val lookedUp = MutableStateFlow<Map<String, LeagueData>>(emptyMap())
     /** Shows found in the guide, by day (the day's start). */
@@ -95,12 +99,15 @@ class SportsRepository @Inject constructor(
         val guide = mergeWrestlingAirings(g.values.flatten())
         val from = dayStart(-DAYS_BACK - 1)
         val to = dayStart(DAYS_AHEAD + 2)
-        val tsdb = t.values.flatMap { it.events }.filter { it.startMs in from until to }
-        // A scheduled event (sporting-events.org, the wrestling schedule) gives way to the same
-        // event found in the guide: one of its league within 3 hours of its start (or, for
+        val tsdbAll = t.values.flatMap { it.events }.filter { it.startMs in from until to }
+        // A league with TheSportsDB's schedule (WWE, MotoGP…) doesn't also take the older one.
+        val tsdbLeagues = t.filterValues { it.events.isNotEmpty() }.keys
+        val (tsdbNamed, tsdb) = tsdbAll.partition { it.home == null }
+        // A scheduled event (sporting-events.org, TheSportsDB's races and shows) gives way to the
+        // same event found in the guide: one of its league within 3 hours of its start (or, for
         // events with a date only, that day). Anything else in the guide doesn't hide it.
         val guideByLeague = guide.groupBy { it.leagueId }
-        val fixtures = f.values.flatMap { it.events }.filter { fx ->
+        val fixtures = (f.values.flatMap { it.events }.filter { it.leagueId !in tsdbLeagues } + tsdbNamed).filter { fx ->
             val same = guideByLeague[fx.leagueId].orEmpty()
             if (fx.hasTime) same.none { kotlin.math.abs(it.startMs - fx.startMs) <= 3 * HOUR || sameShowShifted(it, fx) }
             else same.none { dayOf(it.startMs) == dayOf(fx.startMs) }
@@ -412,7 +419,7 @@ class SportsRepository @Inject constructor(
         // Plus your teams' competitions where ESPN gives no team schedule (rugby): their games
         // further ahead come from the league's months instead.
         val noSchedule = f.teams.flatMap { listOf(it.leagueId) + SportsCatalog.relatedLeagues(it.leagueId) }
-            .filter { it.startsWith("rugby/") || it.startsWith("australian-football/") }
+            .filter { it.startsWith("rugby/") || it.startsWith("rugby-league/") || it.startsWith("australian-football/") }
         val ids = (f.pins + f.leagues + noSchedule).toSet()
         if (aheadData.value.keys.any { it !in ids }) aheadData.update { m -> m.filterKeys { it in ids } }
         val due = ids.mapNotNull { SportsCatalog.league(it) }.filter { l ->
@@ -566,7 +573,7 @@ class SportsRepository @Inject constructor(
         }
         // What you follow, plus the ones shown in your region (rugby league and cricket in the UK…).
         // These are nuvio-data's own files, not TheSportsDB itself.
-        val wanted = (followedLeagueIds(f) + activeLeagues(settings.value, f).map { it.id }).distinct().filter { it.startsWith("tsdb/") }
+        val wanted = (followedLeagueIds(f) + activeLeagues(settings.value, f).map { it.id }).distinct().filter { fromTsdb(it) }
         for (id in wanted) {
             val l = SportsCatalog.league(id) ?: continue
             val cur = tsdbData.value[id]
@@ -578,7 +585,7 @@ class SportsRepository @Inject constructor(
                 else -> 3 * HOUR
             }
             if (cur != null && now - cur.fetchedAt < maxAge) continue
-            val tid = id.removePrefix("tsdb/")
+            val tid = tsdbFileId(id)
             val raw = runCatching { feeds.footballLeagueRaw(tid) }.getOrNull()
             val at = System.currentTimeMillis()
             if (raw == null) {
@@ -597,8 +604,9 @@ class SportsRepository @Inject constructor(
     private fun applyTsdbIndex(raw: String): Boolean {
         val list = runCatching { SportsFeeds.parseFootballIndex(raw) }.getOrNull() ?: return false
         if (list.isEmpty()) return false
-        list.forEach { tsdbTeams[it.league.id] = it.teams }
-        SportsCatalog.setExtra(list.map { it.league })
+        list.forEach { if (!it.alias) tsdbTeams[it.league.id] = it.teams }
+        tsdbAlias = list.filter { it.alias }.associate { it.league.id to it.tsdbId }
+        SportsCatalog.setExtra(list.filterNot { it.alias }.map { it.league })
         return true
     }
 
@@ -634,7 +642,8 @@ class SportsRepository @Inject constructor(
 
     private suspend fun updateFixtures() {
         val s = settings.value
-        val leagues = activeLeagues(s).filter { it.fixtureSlug != null }
+        // (Leagues TheSportsDB's files fill, WWE or MotoGP, are read with those instead.)
+        val leagues = activeLeagues(s).filter { it.fixtureSlug != null && it.id !in tsdbAlias }
         for (l in leagues) {
             val slug = l.fixtureSlug ?: continue
             val file = File(dir, "fx_$slug.json")
@@ -645,7 +654,7 @@ class SportsRepository @Inject constructor(
         }
         // Wrestling's schedule (from TheSportsDB, through a file a GitHub job keeps up to date).
         // (Boxing's fight cards come in the same file.)
-        val wrestling = activeLeagues(s).filter { it.sport == Sport.WRESTLING || it.id == "guide/boxing" }.map { it.id }.toSet()
+        val wrestling = activeLeagues(s).filter { (it.sport == Sport.WRESTLING || it.id == "guide/boxing") && it.id !in tsdbAlias }.map { it.id }.toSet()
         if (wrestling.isNotEmpty()) {
             val file = File(dir, "fx_wrestling.json")
             val raw = runCatching { feeds.wrestlingRaw() }.onSuccess { runCatching { file.writeText(it) } }.getOrNull()
@@ -678,6 +687,8 @@ class SportsRepository @Inject constructor(
                 )
             }
         }
+        // TheSportsDB's list first: which of the app's leagues it fills.
+        runCatching { File(dir, "tsdb_index.json").takeIf { it.exists() }?.readText()?.let { applyTsdbIndex(it) } }
         val fx = HashMap<String, LeagueData>()
         for (l in SportsCatalog.leagues) {
             val slug = l.fixtureSlug ?: continue
@@ -706,7 +717,6 @@ class SportsRepository @Inject constructor(
             }
         }
         weekData.value = wk
-        runCatching { File(dir, "tsdb_index.json").takeIf { it.exists() }?.readText()?.let { applyTsdbIndex(it) } }
         val f = follows.value
         val sched = HashMap<String, LeagueData>()
         for (t in f.teams) {
@@ -725,9 +735,9 @@ class SportsRepository @Inject constructor(
         }
         scheduleData.value = sched
         val ts = HashMap<String, LeagueData>()
-        for (id in followedLeagueIds(f).filter { it.startsWith("tsdb/") }) {
+        for (id in (followedLeagueIds(f).filter { it.startsWith("tsdb/") } + tsdbAlias.keys).distinct()) {
             val l = SportsCatalog.league(id) ?: continue
-            val file = File(dir, "tsdb_${id.removePrefix("tsdb/")}.json")
+            val file = File(dir, "tsdb_${tsdbFileId(id)}.json")
             if (!file.exists()) continue
             runCatching {
                 ts[id] = LeagueData(SportsFeeds.parseFootballLeague(l, file.readText(), tsdbTeams[id].orEmpty().associateBy { it.id }), 0L, null)
@@ -968,8 +978,10 @@ class SportsRepository @Inject constructor(
     fun mayHaveTable(league: League): Boolean {
         if (noTable.containsKey(league.id) && System.currentTimeMillis() - (noTable[league.id] ?: 0L) < 12 * HOUR) return false
         if (league.guideOnly) return false
-        if (league.id.startsWith("tsdb/")) return true
+        if (league.id.startsWith("tsdb/")) return league.kind != LeagueKind.EVENT
         if (league.espnPath == null) return false
+        // HockeyTech, Minor League Baseball and international cricket: scores only.
+        if (!OtherFeeds.espnExtras(league.espnPath)) return false
         if (league.kind == LeagueKind.EVENT) return league.sport == Sport.RACING && league.id in RACING_TABLES
         return league.sport !in setOf(Sport.GOLF, Sport.TENNIS, Sport.FIGHTING, Sport.WRESTLING, Sport.DARTS, Sport.SNOOKER)
     }
