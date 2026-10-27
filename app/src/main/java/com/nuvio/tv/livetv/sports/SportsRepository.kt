@@ -982,6 +982,8 @@ class SportsRepository @Inject constructor(
         if (league.espnPath == null) return false
         // HockeyTech, Minor League Baseball and international cricket: scores only.
         if (!OtherFeeds.espnExtras(league.espnPath)) return false
+        // ESPN's cricket tables come without their columns.
+        if (league.sport == Sport.CRICKET) return false
         if (league.kind == LeagueKind.EVENT) return league.sport == Sport.RACING && league.id in RACING_TABLES
         return league.sport !in setOf(Sport.GOLF, Sport.TENNIS, Sport.FIGHTING, Sport.WRESTLING, Sport.DARTS, Sport.SNOOKER)
     }

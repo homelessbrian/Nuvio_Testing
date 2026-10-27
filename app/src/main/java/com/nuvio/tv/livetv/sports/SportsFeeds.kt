@@ -974,6 +974,17 @@ internal object OtherFeeds {
 
     // ------------------------------------------------------------------ cricket (ESPN)
 
+    /** Cricket's short team names are codes ("KKR", "MR"): the cards use the full name instead. */
+    private fun withFullNames(ev: JSONObject): JSONObject {
+        for (c in competitorsOf(ev)) {
+            val t = c.optJSONObject("team") ?: continue
+            val full = t.optString("displayName").ifBlank { t.optString("name") }
+            val short = t.optString("shortDisplayName")
+            if (full.isNotBlank() && (short.isBlank() || short.length <= 4 || short == t.optString("abbreviation"))) t.put("shortDisplayName", full)
+        }
+        return ev
+    }
+
     /** A franchise league's seasons that touch [span] (ESPN labels them by the year they start or end). */
     private fun cricketSeason(id: String, span: Pair<String, String>, get: (String) -> String): List<JSONObject> {
         val default = runCatching { keep("cricket:$id", 30 * 60_000L) { JSONObject(get("${ESPN}cricket/$id/scoreboard")) } }.getOrNull()
@@ -992,7 +1003,7 @@ internal object OtherFeeds {
             for (i in 0 until evs.length()) {
                 val e = evs.optJSONObject(i) ?: continue
                 val eid = e.optString("id")
-                if (eid.isNotBlank()) out[eid] = e
+                if (eid.isNotBlank()) out[eid] = withFullNames(e)
             }
         }
         add(default)
@@ -1022,7 +1033,7 @@ internal object OtherFeeds {
                     val card = e.optJSONArray("competitions")?.optJSONObject(0)?.optJSONObject("class")?.optString("generalClassCard")?.trim()
                     if (card !in CRICKET_FORMATS) continue
                     val eid = e.optString("id")
-                    if (eid.isNotBlank()) out[eid] = e
+                    if (eid.isNotBlank()) out[eid] = withFullNames(e)
                 }
             }
         }
