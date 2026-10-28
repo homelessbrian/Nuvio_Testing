@@ -225,7 +225,7 @@ fun CalendarScreen(
             val t = System.currentTimeMillis()
             if (record) opts.firstOrNull { viewModel.repo.isRecording(it) }?.let { viewModel.record(e, it); return@launch }
             val usable = if (!record) opts.filter { t in it.startMs until it.stopMs } else opts.filter { it.stopMs > t }
-            val saved = opts.firstOrNull { it.mine }?.channelKey ?: viewModel.repo.pickedChannel(e.network)
+            val saved = opts.firstOrNull { it.mine }?.channelKey ?: viewModel.repo.savedKey(e)
             val direct = usable.firstOrNull { it.channelKey == saved } ?: if (!record) usable.singleOrNull() else null
             if (direct == null) { picker = e to record; return@launch }
             if (record) viewModel.record(e, direct)
@@ -548,14 +548,14 @@ fun CalendarScreen(
                 options = channels(e).filter { it.stopMs > now || it.catchup },
                 now = now,
                 use24h = use24h,
-                pickedKey = viewModel.repo.pickedChannel(e.network),
+                pickedKey = viewModel.repo.savedKey(e),
                 isRecording = { viewModel.repo.isRecording(it) },
                 onDismiss = { picker = null },
                 onPick = { hit, always, holdRecord ->
                     picker = null
-                    val had = viewModel.repo.pickedChannel(e.network)
-                    if (always && had != hit.channelKey) viewModel.setChannelPick(e.network, hit)
-                    else if (!always && had != null) viewModel.setChannelPick(e.network, null)
+                    val had = viewModel.repo.savedKey(e)
+                    if (always && had != hit.channelKey) viewModel.setAlways(e, hit)
+                    else if (!always && had != null) viewModel.setAlways(e, null)
                     // OK on a channel that isn't showing it yet records it there.
                     if (holdRecord || record || now !in hit.startMs until hit.stopMs) viewModel.record(e, hit)
                     else if (viewModel.watchLive(hit)) onOpenLive()

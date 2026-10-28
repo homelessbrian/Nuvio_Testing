@@ -289,7 +289,7 @@ internal fun ChannelPicker(
                         if (isRecording(h)) LiveTag("● REC", LIVE_RED, Color.White)
                         when {
                             h.mine -> LiveTag("YOUR CHANNEL", Color.White.copy(alpha = 0.16f), focusedTextColor(focused))
-                            h.channelKey == pickedKey -> LiveTag("SAVED", Color.White.copy(alpha = 0.16f), focusedTextColor(focused))
+                            h.channelKey == pickedKey -> LiveTag("YOUR CHANNEL", Color.White.copy(alpha = 0.16f), focusedTextColor(focused))
                             i == 0 && !h.later -> LiveTag("BEST MATCH", Color.White.copy(alpha = 0.16f), focusedTextColor(focused))
                             h.later -> LiveTag("LATER", Color.White.copy(alpha = 0.16f), focusedTextColor(focused))
                             else -> Unit
@@ -302,7 +302,7 @@ internal fun ChannelPicker(
                 LiveFocusRow(modifier = Modifier.fillMaxWidth().padding(top = 6.dp), onClick = { always = !always }) { focused ->
                     SwitchMark(always)
                     Spacer(Modifier.width(4.dp))
-                    LiveText("Always use the channel I pick for ${entry.network}", size = 14.sp, color = focusedTextColor(focused))
+                    LiveText("Always use this channel for ${entry.title}", size = 14.sp, color = focusedTextColor(focused))
                 }
             }
             if (onSearchAll != null) item {
@@ -440,7 +440,7 @@ internal fun liveAct(
         val now = System.currentTimeMillis()
         if (record) opts.firstOrNull { repo.isRecording(it) }?.let { LiveTvNotice.show(repo.record(f, it)); return@launch }
         val usable = if (record) opts.filter { it.stopMs > now } else opts.filter { now in it.startMs until it.stopMs }
-        val saved = opts.firstOrNull { it.mine }?.channelKey ?: repo.pickedChannel(f.network)
+        val saved = opts.firstOrNull { it.mine }?.channelKey ?: repo.savedKey(f)
         val direct = usable.firstOrNull { it.channelKey == saved } ?: if (!record) usable.singleOrNull() else null
         if (direct == null) { state.picker = record; return@launch }
         if (record) LiveTvNotice.show(repo.record(f, direct))
@@ -514,15 +514,15 @@ internal fun LiveMenuHost(state: LiveMenuState, kicker: String) {
             options = repo.channelsOf(e).filter { it.stopMs > now || it.catchup },
             now = now,
             use24h = use24h,
-            pickedKey = repo.pickedChannel(e.network),
+            pickedKey = repo.savedKey(e),
             isRecording = { repo.isRecording(it) },
             onDismiss = { state.picker = null },
             onPick = { hit, always, holdRecord ->
                 state.picker = null
                 scope.launch {
-                    val had = repo.pickedChannel(e.network)
-                    if (always && had != hit.channelKey) repo.setChannelPick(e.network, hit)
-                    else if (!always && had != null) repo.setChannelPick(e.network, null)
+                    val had = repo.savedKey(e)
+                    if (always && had != hit.channelKey) repo.setAlways(e, hit)
+                    else if (!always && had != null) repo.setAlways(e, null)
                 }
                 if (holdRecord || record || System.currentTimeMillis() !in hit.startMs until hit.stopMs) LiveTvNotice.show(repo.record(e, hit))
                 else repo.channelOf(hit)?.let { entryPoint.liveTvPlayback().play(it); CalendarNav.openLiveTv() }

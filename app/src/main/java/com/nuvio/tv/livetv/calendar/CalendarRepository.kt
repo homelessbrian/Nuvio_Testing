@@ -838,6 +838,29 @@ class CalendarRepository @Inject constructor(
             if (hit == null) o.remove(k) else o.put(k, hit.channelKey)
             o.toString()
         }
+        infoMemo.clear()
+        delay(300) // the saved pick reaches channelPicks first
+        matchGuide()
+    }
+
+    /** What's saved for [e] right now (its own channel, else its network's). */
+    fun savedKey(e: CalendarEntry): String? = showChannel(e.contentId) ?: pickedChannel(e.network)
+
+    /**
+     * "Always use this channel" from the channel list: saved for this show (it becomes "your
+     * channel"), and an older network-wide choice is dropped so it can't win. Null: forgets both.
+     */
+    suspend fun setAlways(e: CalendarEntry, hit: CalendarGuideHit?) {
+        val net = pickKey(e.network)
+        val sk = showPickKey(e.contentId)
+        prefs.editCalendarChannelPicks { raw ->
+            val o = runCatching { org.json.JSONObject(raw.ifBlank { "{}" }) }.getOrDefault(org.json.JSONObject())
+            if (hit == null) { o.remove(sk); if (net != null) o.remove(net) }
+            else { o.put(sk, hit.channelKey); if (net != null) o.remove(net) }
+            o.toString()
+        }
+        infoMemo.clear()
+        delay(300)
         matchGuide()
     }
 
@@ -876,7 +899,7 @@ class CalendarRepository @Inject constructor(
                 )
             }.getOrDefault(emptyList())
             val net = e.network?.let { LiveTvRepository.normalize(it) }.orEmpty()
-            val picked = picks[pickKey(e.network) ?: ""]
+            val picked = picks[showPickKey(e.contentId)] ?: picks[pickKey(e.network) ?: ""]
             val wantedEp = if (e.season != null && e.episode != null) "s${e.season}e${e.episode}" else null
             val lastEp = e.lastEpisode ?: e.episode
             val epTitle = e.episodeTitle?.let { LiveTvRepository.normalize(it) }?.takeIf { it.length >= 4 }
@@ -967,6 +990,9 @@ class CalendarRepository @Inject constructor(
             scheduler.cancel(hit.channelKey, hit.startMs)
             return "Recording cancelled"
         }
+        // Moving it to another channel: the same episode isn't recorded twice.
+        channelsOf(entry).filter { it.channelKey != hit.channelKey && isRecording(it) }
+            .forEach { scheduler.cancel(it.channelKey, it.startMs) }
         return scheduler.add(ch, EpgProgram(startMs = hit.startMs, stopMs = hit.stopMs, title = hit.title.ifBlank { entry.title }))
     }
 
@@ -999,7 +1025,7 @@ class CalendarRepository @Inject constructor(
     /** The channel to use without asking: the one you picked for the network, else the best match (not a later feed). */
     fun bestHit(e: CalendarEntry): CalendarGuideHit? {
         val opts = channelsOf(e)
-        val picked = pickedChannel(e.network)
+        val picked = savedKey(e)
         return opts.firstOrNull { it.channelKey == picked } ?: opts.firstOrNull { !it.later } ?: opts.firstOrNull()
     }
 

@@ -126,6 +126,11 @@ class CalendarViewModel @Inject constructor(
         viewModelScope.launch { repo.setChannelPick(network, hit) }
     }
 
+    /** "Always use this channel" for the show (null forgets it). */
+    fun setAlways(e: CalendarEntry, hit: CalendarGuideHit?) {
+        viewModelScope.launch { repo.setAlways(e, hit) }
+    }
+
     /** Live TV plans and reminders (badges and menus redraw when they change). */
     val plans = repo.plans
     val reminders = repo.reminders
