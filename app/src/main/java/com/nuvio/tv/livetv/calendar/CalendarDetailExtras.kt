@@ -129,26 +129,34 @@ fun rememberShowBell(id: String, imdbId: String?, name: String, poster: String?,
 
 /**
  * Under a show's buttons: when its next episode airs ("Next episode: S2 · E5 · Fri 9:00 PM ·
- * FX"), with Record when it's in your Live TV guide. Movies: in theaters and at home dates.
+ * FX"), led by a Live TV button (Record on FX HD, Recording new episodes…) that opens the Live
+ * TV options: watch, record it or every new episode, remind, the channel. Movies: in theaters
+ * and at home dates.
  */
 @Composable
 fun CalendarNextLine(meta: Meta, onFocused: () -> Unit = {}) {
     val context = LocalContext.current
-    val repo = remember { repoOf(context) } ?: return
+    val entryPoint = remember {
+        runCatching { EntryPointAccessors.fromApplication(context.applicationContext, CalendarEntryPoint::class.java) }.getOrNull()
+    } ?: return
+    val repo = remember { entryPoint.calendarRepository() }
     val settings by repo.settings.collectAsState()
+    // Live TV changes (recordings, plans, reminders, picks) redraw the button.
+    val plans by repo.plans.collectAsState()
+    val reminders by repo.reminders.collectAsState()
+    val picks by repo.channelPicks.collectAsState()
     if (SideMenuPages.CALENDAR in SideMenuPages.hidden(settings.sideMenuHidden)) return
     val series = meta.isSeriesMeta()
     if (!series && !meta.isMovieMeta()) return
     var line by remember(meta.id) { mutableStateOf<String?>(null) }
     var entry by remember(meta.id) { mutableStateOf<CalendarEntry?>(null) }
-    var recording by remember(meta.id) { mutableStateOf(false) }
-    LaunchedEffect(meta.id) {
+    var reload by remember(meta.id) { mutableStateOf(0) }
+    LaunchedEffect(meta.id, reload) {
         val imdb = meta.imdbOrNull()
         if (series) {
             val info = repo.showInfo(meta.id, imdb, meta.apiType) ?: return@LaunchedEffect
             val next = info.next
             entry = next
-            recording = next?.let { repo.isRecording(it) } == true
             line = next?.let { describe(it) } ?: info.status
         } else {
             val d = repo.movieDates(meta.id, imdb) ?: return@LaunchedEffect
@@ -168,6 +176,14 @@ fun CalendarNextLine(meta: Meta, onFocused: () -> Unit = {}) {
         }
     }
     val text = line ?: return
+    val scope = rememberCoroutineScope()
+    val live = rememberLiveMenuState()
+    val e = entry
+    val now = System.currentTimeMillis()
+    @Suppress("UNUSED_VARIABLE") val redraw = plans.size + reminders.size + picks.size
+    val st = e?.let { repo.liveStatus(it) } ?: CalendarLiveStatus()
+    val hasLiveTv = repo.channelsForPicker().isNotEmpty()
+    val g = e?.let { repo.bestHit(it) }
     // On a dark backing of its own: it sits over the show's picture or trailer, which can be anything.
     Row(
         verticalAlignment = Alignment.CenterVertically,
@@ -177,17 +193,20 @@ fun CalendarNextLine(meta: Meta, onFocused: () -> Unit = {}) {
             .background(Color.Black.copy(alpha = 0.62f))
             .padding(start = 6.dp, end = 14.dp, top = 5.dp, bottom = 5.dp)
     ) {
-        // Record first: Down from the page's buttons lands on it, right under Play.
-        val e = entry
-        val g = e?.guide
-        if (e != null && g != null && g.stopMs > System.currentTimeMillis()) {
+        // The Live TV button first: Down from the page's buttons lands on it, right under Play.
+        // OK: the Live TV options. Hold OK: the channel list (change or forget the channel).
+        if (e != null && hasLiveTv && series) {
             GuideChip(
-                text = if (recording) "Recording on ${g.channelName}" else "Record on ${g.channelName}",
+                text = when {
+                    st.recording && g != null -> "Recording on ${repo.channelLabel(g)}"
+                    st.series -> "Recording new episodes"
+                    g != null && g.stopMs > now -> "Record on ${repo.channelLabel(g)}"
+                    st.waitRecord -> "Records when it's in your guide"
+                    else -> "Live TV options"
+                },
                 onFocused = onFocused,
-                onClick = {
-                    LiveTvNotice.show(repo.record(e))
-                    recording = repo.isRecording(e)
-                }
+                onClick = { live.entry = e; live.menu = true },
+                onLongClick = { liveAct(repo, entryPoint, live, scope, e, record = true, forceList = true) }
             )
             Spacer(Modifier.width(10.dp))
         } else Spacer(Modifier.width(6.dp))
@@ -195,11 +214,56 @@ fun CalendarNextLine(meta: Meta, onFocused: () -> Unit = {}) {
         Spacer(Modifier.width(8.dp))
         androidx.tv.material3.Text(text, color = Color.White, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
     }
+    LiveMenuHost(live, kicker = "LIVE TV · NEXT EPISODE")
+}
+
+/**
+ * Live TV on an episode's own menu (hold OK on an episode on a show's page): when the episode
+ * is coming up, is on, or was recorded, lines for Record and its Live TV options. Call it with
+ * the episode whose menu is open (nulls when none is); it also shows the pop-ups those lines open.
+ */
+@Composable
+fun rememberEpisodeLiveTv(videoId: String?, season: Int?, episode: Int?): List<Pair<String, () -> Unit>> {
+    val context = LocalContext.current
+    val entryPoint = remember {
+        runCatching { EntryPointAccessors.fromApplication(context.applicationContext, CalendarEntryPoint::class.java) }.getOrNull()
+    } ?: return emptyList()
+    val repo = remember { entryPoint.calendarRepository() }
+    val settings by repo.settings.collectAsState()
+    val live = rememberLiveMenuState()
+    val scope = rememberCoroutineScope()
+    var found by remember { mutableStateOf<CalendarEntry?>(null) }
+    LaunchedEffect(videoId, season, episode) {
+        if (videoId == null || season == null || episode == null) return@LaunchedEffect
+        found = null
+        if (repo.channelsForPicker().isEmpty()) return@LaunchedEffect
+        found = repo.episodeEntry(videoId, season, episode)
+    }
+    // The pop-ups stay up after the episode's menu closes.
+    LiveMenuHost(live, kicker = "LIVE TV · THIS EPISODE")
+    if (videoId == null || SideMenuPages.CALENDAR in SideMenuPages.hidden(settings.sideMenuHidden)) return emptyList()
+    val e = found?.takeIf { it.season == season } ?: return emptyList()
+    val now = System.currentTimeMillis()
+    val st = repo.liveStatus(e)
+    val airMs = e.airMs
+    val relevant = (airMs != null && !e.streaming && airMs + (e.runtimeMin ?: 30) * 60_000L > now) ||
+        repo.channelsOf(e).isNotEmpty() || st.recordedId != null || st.series
+    if (!relevant) return emptyList()
+    val g = repo.bestHit(e)
+    return buildList {
+        if (g != null && g.stopMs > now) {
+            add(
+                (if (st.recording) "Cancel the recording" else "Record on ${repo.channelLabel(g)} · ${whenLabel(g.startMs, now, false)}") to
+                    { liveAct(repo, entryPoint, live, scope, e, record = true) }
+            )
+        }
+        add("Live TV options (record, remind, channel…)" to { live.entry = e; live.menu = true })
+    }
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun GuideChip(text: String, onFocused: () -> Unit, onClick: () -> Unit) {
+private fun GuideChip(text: String, onFocused: () -> Unit, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
     Row(
@@ -209,7 +273,7 @@ private fun GuideChip(text: String, onFocused: () -> Unit, onClick: () -> Unit) 
             .background(if (focused) Color.White else Color(0xFF2A2A30))
             .border(1.dp, if (focused) Color.Transparent else Color.White.copy(alpha = 0.35f), shape)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
-            .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 12.dp, vertical = 5.dp),
         verticalAlignment = Alignment.CenterVertically
     ) {

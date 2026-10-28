@@ -125,10 +125,13 @@ class LiveTvPreferences @Inject constructor(
         val calendarCountry = stringPreferencesKey("calendar_country")
         val calendarSkipNewsTalk = booleanPreferencesKey("calendar_skip_news_talk")
         val calendarView = stringPreferencesKey("calendar_view")
+        val calendarOkAction = stringPreferencesKey("calendar_ok_action")
+        val calendarHideWatched = booleanPreferencesKey("calendar_hide_watched")
         val calendarSports = booleanPreferencesKey("calendar_sports")
         val calendarFollows = stringPreferencesKey("calendar_follows")
         val calendarHiddenShows = stringPreferencesKey("calendar_hidden_shows")
         val calendarChannelPicks = stringPreferencesKey("calendar_channel_picks")
+        val calendarPlans = stringPreferencesKey("calendar_plans")
         val onDemandInStreams = booleanPreferencesKey("on_demand_in_streams")
         val onDemandStreamsPosition = stringPreferencesKey("on_demand_streams_position")
         val onDemandAutoPlay = booleanPreferencesKey("on_demand_auto_play")
@@ -380,6 +383,8 @@ class LiveTvPreferences @Inject constructor(
             calendarCountry = p[Keys.calendarCountry] ?: d.calendarCountry,
             calendarSkipNewsTalk = p[Keys.calendarSkipNewsTalk] ?: d.calendarSkipNewsTalk,
             calendarView = p[Keys.calendarView] ?: d.calendarView,
+            calendarOkAction = p[Keys.calendarOkAction] ?: d.calendarOkAction,
+            calendarHideWatched = p[Keys.calendarHideWatched] ?: d.calendarHideWatched,
             calendarSports = p[Keys.calendarSports] ?: d.calendarSports,
             onDemandInStreams = p[Keys.onDemandInStreams] ?: d.onDemandInStreams,
             onDemandStreamsPosition = p[Keys.onDemandStreamsPosition] ?: d.onDemandStreamsPosition,
@@ -564,6 +569,13 @@ class LiveTvPreferences @Inject constructor(
         store.edit { it[Keys.calendarChannelPicks] = transform(it[Keys.calendarChannelPicks] ?: "") }
     }
 
+    /** The Calendar's Live TV plans ("record when it's in my guide", "record every new episode"), as JSON. */
+    val calendarPlans: Flow<String> = store.data.map { it[Keys.calendarPlans] ?: "" }.distinctUntilChanged()
+
+    suspend fun editCalendarPlans(transform: (String) -> String) {
+        store.edit { it[Keys.calendarPlans] = transform(it[Keys.calendarPlans] ?: "") }
+    }
+
     // ---------- settings ----------
 
     suspend fun updateSettings(transform: (LiveTvSettings) -> LiveTvSettings) {
@@ -640,6 +652,8 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.calendarCountry] = s.calendarCountry
         p[Keys.calendarSkipNewsTalk] = s.calendarSkipNewsTalk
         p[Keys.calendarView] = s.calendarView
+        p[Keys.calendarOkAction] = s.calendarOkAction
+        p[Keys.calendarHideWatched] = s.calendarHideWatched
         p[Keys.calendarSports] = s.calendarSports
         p[Keys.onDemandInStreams] = s.onDemandInStreams
         p[Keys.onDemandStreamsPosition] = s.onDemandStreamsPosition

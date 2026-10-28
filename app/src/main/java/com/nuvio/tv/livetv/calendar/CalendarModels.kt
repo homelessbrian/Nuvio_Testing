@@ -111,7 +111,96 @@ data class CalendarGuideHit(
     val catchup: Boolean = false,
     /** Airs well after the episode's first airing (a West Coast feed). */
     val later: Boolean = false,
-    val favorite: Boolean = false
+    val favorite: Boolean = false,
+    /** The channel you set for this show yourself. */
+    val mine: Boolean = false,
+    /** The channel's group in your playlist ("US | Entertainment"): tells same-named channels apart. */
+    val group: String? = null,
+    /** The guide's episode number says it's this very episode (not a rerun). */
+    val confirmed: Boolean = false
+)
+
+/** A team in a game on the Calendar. */
+@Immutable
+data class CalendarTeam(
+    val name: String,
+    /** Short name ("NYY"). */
+    val abbr: String?,
+    val logo: String?,
+    /** The team's colour (0xAARRGGBB), when Sports knows it. */
+    val color: Long? = null,
+    val score: String? = null
+)
+
+/**
+ * A Live TV plan made on the Calendar, for an episode that isn't in your guide yet:
+ *  - [RECORD] / [REMIND]: that episode, set the moment it shows up in your guide;
+ *  - [SERIES]: every new episode of the show, recorded as each one shows up in your guide
+ *    (only new ones: repeats and old episodes aren't).
+ */
+@Immutable
+data class CalendarPlan(
+    /** The episode's Calendar key ("ep|tt…|2|5"), or "series|<show id>". */
+    val id: String,
+    val kind: String,
+    val contentId: String,
+    val title: String,
+    val network: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    val airMs: Long? = null,
+    /** SERIES: the airings it has set to record ("channelKey|startMs"). */
+    val done: List<String> = emptyList(),
+    val addedAt: Long = System.currentTimeMillis()
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id).put("kind", kind).put("content", contentId).put("title", title).put("net", network ?: "")
+        .put("s", season ?: -1).put("e", episode ?: -1).put("air", airMs ?: 0L).put("done", JSONArray(done)).put("at", addedAt)
+
+    companion object {
+        const val RECORD = "record"
+        const val REMIND = "remind"
+        const val SERIES = "series"
+
+        fun seriesId(contentId: String) = "series|$contentId"
+
+        fun fromJson(o: JSONObject) = CalendarPlan(
+            id = o.optString("id"),
+            kind = o.optString("kind"),
+            contentId = o.optString("content"),
+            title = o.optString("title"),
+            network = o.optString("net").ifBlank { null },
+            season = o.optInt("s", -1).takeIf { it >= 0 },
+            episode = o.optInt("e", -1).takeIf { it >= 0 },
+            airMs = o.optLong("air", 0L).takeIf { it > 0 },
+            done = o.optJSONArray("done")?.let { a -> (0 until a.length()).map { a.optString(it) }.filter { it.isNotBlank() } }.orEmpty(),
+            addedAt = o.optLong("at", 0L)
+        )
+
+        fun decode(raw: String?): List<CalendarPlan> = runCatching {
+            if (raw.isNullOrBlank()) return emptyList()
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(::fromJson) }.filter { it.id.isNotBlank() }
+        }.getOrDefault(emptyList())
+
+        fun encode(list: List<CalendarPlan>): String = JSONArray(list.map { it.toJson() }).toString()
+    }
+}
+
+/** Where an entry stands with Live TV, for its badges and menu. */
+@Immutable
+data class CalendarLiveStatus(
+    /** Set to record (on one of its channels). */
+    val recording: Boolean = false,
+    /** Every new episode of the show is being recorded (the Calendar's plan, or a series recording in the guide). */
+    val series: Boolean = false,
+    /** A reminder is set for it. */
+    val reminder: Boolean = false,
+    /** To record / remind the moment it shows up in your guide. */
+    val waitRecord: Boolean = false,
+    val waitRemind: Boolean = false,
+    /** A finished recording of it (its id). */
+    val recordedId: String? = null
 )
 
 /** Why an entry is on your Calendar. */
@@ -162,7 +251,9 @@ data class CalendarEntry(
     val eventId: String? = null,
     val league: String? = null,
     val score: String? = null,
-    val live: Boolean = false
+    val live: Boolean = false,
+    /** Games: both teams, in the order they're written (away first for most sports). */
+    val teams: List<CalendarTeam> = emptyList()
 ) {
     val episodeCode: String?
         get() = if (season == null || episode == null) null else buildString {

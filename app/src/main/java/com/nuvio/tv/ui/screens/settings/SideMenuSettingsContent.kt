@@ -359,10 +359,28 @@ fun CalendarSettingsContent(initialFocusRequester: FocusRequester? = null) {
                     )
                     SettingsActionRow(
                         title = "Opens In",
-                        subtitle = "The list by day, or a month at a time",
-                        value = if (s.calendarView == "MONTH") "Month" else "List",
-                        onClick = { update { it.copy(calendarView = if (it.calendarView == "MONTH") "LIST" else "MONTH") } }
+                        subtitle = "The list by day, a week, or a month at a time",
+                        value = when (s.calendarView) { "MONTH" -> "Month"; "WEEK" -> "Week"; else -> "List" },
+                        onClick = {
+                            update {
+                                it.copy(calendarView = when (it.calendarView) { "MONTH" -> "LIST"; "WEEK" -> "MONTH"; else -> "WEEK" })
+                            }
+                        }
                     )
+                    SettingsActionRow(
+                        title = "Picking an Episode in Your Guide",
+                        subtitle = "OK on an episode that's in your Live TV guide opens its Live TV options (watch, record, remind) or the show's page",
+                        value = if (s.calendarOkAction == "PAGE") "Show page" else "Live TV options",
+                        onClick = { update { it.copy(calendarOkAction = if (it.calendarOkAction == "PAGE") "LIVE" else "PAGE") } }
+                    )
+                    var savedOpen by androidx.compose.runtime.remember { androidx.compose.runtime.mutableStateOf(false) }
+                    SettingsActionRow(
+                        title = "Saved Channels",
+                        subtitle = "Channels you told the Calendar to use, for a network or for one show: change or forget them",
+                        value = "Open",
+                        onClick = { savedOpen = true }
+                    )
+                    if (savedOpen) com.nuvio.tv.livetv.calendar.CalendarSavedChannelsDialog(onDismiss = { savedOpen = false })
                     SettingsActionRow(
                         title = "Your Country",
                         subtitle = "For Airing Today and movie release dates",

@@ -1457,6 +1457,21 @@ private fun PlaybackNavHost(
                     }
                 },
                 onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) },
+                onPlayRecording = { url, title, poster, recordingId ->
+                    // Like Recordings: Nuvio's own player, kept out of Continue Watching and history.
+                    navController.navigate(
+                        Screen.Player.createRoute(
+                            streamUrl = url,
+                            title = title,
+                            contentId = com.nuvio.tv.livetv.record.RecordingResume.contentIdFor(recordingId),
+                            contentType = com.nuvio.tv.livetv.record.RecordingResume.CONTENT_TYPE,
+                            contentName = title,
+                            poster = poster,
+                            startFromBeginning = false,
+                            addonName = "Recordings"
+                        )
+                    )
+                },
                 onOpenGame = { id ->
                     com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(id)
                     // Like picking Sports in the menu: the Calendar keeps its own place, and picking

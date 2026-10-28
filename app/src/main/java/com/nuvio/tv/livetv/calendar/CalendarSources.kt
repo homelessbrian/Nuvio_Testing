@@ -352,6 +352,36 @@ internal class CalendarSources(context: Context) {
         }
     }
 
+    // A show's wide picture from TMDB (TVmaze often only has a poster, which cuts off heads when
+    // it's stretched across the top of the Calendar). Kept on the TV: "" means TMDB had none.
+    private val backdropFile = File(dir, "backdrops.json")
+    private val backdrops: JSONObject by lazy { runCatching { JSONObject(backdropFile.readText()) }.getOrDefault(JSONObject()) }
+    @Volatile private var backdropsDirty = false
+
+    /** The show's backdrop already looked up (null: not looked up yet, or TMDB had none). */
+    fun knownBackdrop(imdb: String?): String? = imdb?.let { synchronized(backdrops) { backdrops.optString(it).ifBlank { null } } }
+
+    /** Whether [imdb]'s backdrop has been looked up (found or not). */
+    fun backdropLooked(imdb: String?): Boolean = imdb == null || synchronized(backdrops) { backdrops.has(imdb) }
+
+    /** The show's backdrop from TMDB (w1280), looked up once and kept. */
+    suspend fun showBackdrop(imdb: String?): String? {
+        if (imdb == null || !imdb.startsWith("tt")) return null
+        if (backdropLooked(imdb)) return knownBackdrop(imdb)
+        val found = tmdb("/find/$imdb?external_source=imdb_id") ?: return null
+        val r = found.optJSONArray("tv_results")?.optJSONObject(0) ?: found.optJSONArray("movie_results")?.optJSONObject(0)
+        val url = r?.optString("backdrop_path")?.takeIf { it.startsWith("/") }?.let { "https://image.tmdb.org/t/p/w1280$it" }
+        synchronized(backdrops) { backdrops.put(imdb, url ?: "") }
+        backdropsDirty = true
+        return url
+    }
+
+    fun saveBackdrops() {
+        if (!backdropsDirty) return
+        backdropsDirty = false
+        synchronized(backdrops) { runCatching { backdropFile.writeText(backdrops.toString()) } }
+    }
+
     /** TheTVDB's id for a show, from TMDB (TVmaze knows shows by it too). */
     private suspend fun tmdbTvdbId(imdb: String?, tmdbId: Int?): Int? {
         val id = tmdbId ?: imdb?.let { tmdb("/find/$it?external_source=imdb_id")?.optJSONArray("tv_results")?.optJSONObject(0)?.optInt("id") }

@@ -13,4 +13,5 @@ interface CalendarEntryPoint {
     fun sportsRepository(): com.nuvio.tv.livetv.sports.SportsRepository
     fun layoutPreferences(): com.nuvio.tv.data.local.LayoutPreferenceDataStore
     fun onDemandRepository(): com.nuvio.tv.livetv.ondemand.OnDemandRepository
+    fun liveTvPlayback(): com.nuvio.tv.livetv.player.LiveTvPlaybackController
 }

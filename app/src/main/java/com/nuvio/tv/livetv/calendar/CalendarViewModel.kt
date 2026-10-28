@@ -126,6 +126,69 @@ class CalendarViewModel @Inject constructor(
         viewModelScope.launch { repo.setChannelPick(network, hit) }
     }
 
+    /** Live TV plans and reminders (badges and menus redraw when they change). */
+    val plans = repo.plans
+    val reminders = repo.reminders
+    val recordings = repo.recordings
+
+    fun status(e: CalendarEntry): CalendarLiveStatus = repo.liveStatus(e)
+
+    fun toggleReminder(e: CalendarEntry, hit: CalendarGuideHit) {
+        viewModelScope.launch { LiveTvNotice.show(repo.toggleReminder(e, hit)) }
+    }
+
+    /** "Record / remind me when it's in my guide" (kind: CalendarPlan.RECORD or REMIND). */
+    fun toggleWait(e: CalendarEntry, kind: String) {
+        viewModelScope.launch { LiveTvNotice.show(repo.toggleWait(e, kind)) }
+    }
+
+    /** "Record every new episode" of the show, or stop it. */
+    fun toggleSeries(e: CalendarEntry) {
+        viewModelScope.launch { LiveTvNotice.show(repo.toggleSeries(e)) }
+    }
+
+    /** Replays [hit] from its start through the channel's catch-up. False when that isn't possible. */
+    fun watchFromStart(e: CalendarEntry, hit: CalendarGuideHit): Boolean {
+        if (!hit.catchup || hit.startMs > System.currentTimeMillis()) return false
+        repo.channelOf(hit) ?: return false
+        com.nuvio.tv.livetv.sports.SportsLaunch.catchup(
+            com.nuvio.tv.livetv.sports.SportsLaunch.Catchup(
+                hit.channelKey,
+                com.nuvio.tv.livetv.model.EpgProgram(startMs = hit.startMs, stopMs = hit.stopMs, title = hit.title.ifBlank { e.title })
+            )
+        )
+        return true
+    }
+
+    /** A finished recording to play: its address and title (null when it's gone). */
+    fun recordingToPlay(id: String): Pair<String, String>? {
+        val rec = repo.recordingById(id) ?: return null
+        return repo.recordingUrl(rec) to rec.title
+    }
+
+    /** The channel for a show, set by you (null: back to the channels found in the guide). */
+    fun setShowChannel(e: CalendarEntry, channel: com.nuvio.tv.livetv.model.LiveChannel?) {
+        viewModelScope.launch {
+            repo.setShowChannel(e.contentId, channel?.key)
+            LiveTvNotice.show(if (channel != null) "${e.title} uses ${channel.name} from now on" else "${e.title} uses the channels found in your guide again")
+        }
+    }
+
+    /** [e] looked up in the guide again right now (a guide that finished loading since counts). */
+    suspend fun fresh(e: CalendarEntry): CalendarEntry = repo.rematch(e)
+
+    fun forgetSaved(pickKey: String) {
+        viewModelScope.launch { repo.forgetSaved(pickKey); LiveTvNotice.show("Forgotten: the Calendar finds the channel itself again") }
+    }
+
+    fun setOkAction(action: String) {
+        viewModelScope.launch { livePrefs.updateSettings { it.copy(calendarOkAction = action) } }
+    }
+
+    fun setHideWatched(hide: Boolean) {
+        viewModelScope.launch { livePrefs.updateSettings { it.copy(calendarHideWatched = hide) } }
+    }
+
     /** Tunes Live TV to the episode's channel. False when it isn't there. */
     fun watchLive(e: CalendarEntry): Boolean {
         val ch = repo.channelFor(e) ?: return false

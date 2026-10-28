@@ -342,6 +342,10 @@ data class LiveTvSettings(
     val calendarSports: Boolean = true,
     /** Calendar: opens in "LIST" or "MONTH" view. */
     val calendarView: String = "LIST",
+    /** OK on an episode that's in your Live TV guide: "LIVE" (Live TV options) or "PAGE" (the show page). */
+    val calendarOkAction: String = "LIVE",
+    /** Recently aired: only what you haven't watched. */
+    val calendarHideWatched: Boolean = false,
     /** Offer "Watch On Demand" in Nuvio's stream list for movies and episodes. */
     val onDemandInStreams: Boolean = true,
     /** Where the On Demand tab sits in the stream list: FIRST, AFTER_FIRST (the first addon) or LAST. */
@@ -698,7 +702,7 @@ object DeveloperTools {
  */
 object LiveTvLoadReport {
     /** Which Live TV kit this app was built from: changed with every kit, so a report shows the exact build. */
-    const val KIT_STAMP = "2026-10-28 20:05"
+    const val KIT_STAMP = "2026-10-28 22:20"
 
     /** The first line of every report: kit and app version, so it's clear which build wrote it. */
     val buildLine: String

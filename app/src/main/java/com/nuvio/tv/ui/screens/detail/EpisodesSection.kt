@@ -405,6 +405,10 @@ fun EpisodesRow(
 ) {
     val dedupedEpisodes = remember(episodes) { episodes.distinctBy { it.id } }
     var optionsEpisode by remember { mutableStateOf<Video?>(null) }
+    // Live TV fork: Record and the Live TV options for the episode whose menu is open.
+    val liveTvLines = com.nuvio.tv.livetv.calendar.rememberEpisodeLiveTv(
+        optionsEpisode?.id, optionsEpisode?.season, optionsEpisode?.episode
+    )
     val isOverlayOpen = optionsEpisode != null
     val cardMetrics = rememberEpisodeCardMetrics(posterCardCornerRadiusDp)
     val density = LocalDensity.current
@@ -590,6 +594,7 @@ fun EpisodesRow(
                 adjacentEpisode(dedupedEpisodes, selectedEpisode, step)?.let { optionsEpisode = it }
             },
             isPlayEnabled = canPlayEpisode(selectedEpisode),
+            extraActions = liveTvLines.map { (label, act) -> label to { optionsEpisode = null; act() } },
             onPlay = {
                 onEpisodeClick(selectedEpisode)
                 optionsEpisode = null

@@ -38,6 +38,34 @@ object CalendarHomeFeed {
         val p = context.applicationContext.getSharedPreferences("calendar_home", Context.MODE_PRIVATE)
         prefs = p
         synchronized(dismissed) { dismissed += p.getStringSet("dismissed", emptySet()).orEmpty() }
+        synchronized(snoozed) {
+            p.getStringSet("snoozed", emptySet()).orEmpty().forEach { v ->
+                val until = v.substringAfterLast('@').toLongOrNull() ?: return@forEach
+                if (until > System.currentTimeMillis()) snoozed[v.substringBeforeLast('@')] = until
+            }
+        }
+    }
+
+    // "Not today": a new-episode card snoozed until tomorrow morning.
+    private val snoozed = HashMap<String, Long>()
+
+    private fun isSnoozed(k: String): Boolean = synchronized(snoozed) {
+        val until = snoozed[k] ?: return false
+        if (until > System.currentTimeMillis()) true else { snoozed.remove(k); false }
+    }
+
+    /** True for the Calendar's new-episode cards (they can be snoozed). */
+    fun canSnooze(contentId: String, videoId: String): Boolean =
+        isInjected(contentId, videoId) && released.any { it.info.contentId == contentId && it.info.videoId == videoId }
+
+    /** Hides a new-episode card until 6 in the morning tomorrow. */
+    fun snooze(contentId: String, season: Int?, episode: Int?) {
+        val until = java.time.LocalDate.now().plusDays(1).atTime(6, 0).atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
+        synchronized(snoozed) {
+            snoozed[key(contentId, season, episode)] = until
+            prefs?.edit()?.putStringSet("snoozed", snoozed.map { "${it.key}@${it.value}" }.toHashSet())?.apply()
+        }
+        _version.value++
     }
 
     fun publish(releasedEntries: List<CalendarEntry>, upcomingEntries: List<CalendarEntry>, movieEntries: List<CalendarEntry> = emptyList()) {
@@ -90,7 +118,9 @@ object CalendarHomeFeed {
                 videoId = videoId,
                 season = season,
                 episode = episode,
-                episodeTitle = if (e.spoiler) null else e.episodeTitle,
+                // Where to watch it on your TV first ("On FX HD now", "On FX HD · 10:00 PM").
+                episodeTitle = listOfNotNull(liveNote(e, aired), if (e.spoiler) null else e.episodeTitle)
+                    .joinToString(" · ").ifBlank { null },
                 thumbnail = if (e.spoiler) null else e.episodeImage,
                 released = Instant.ofEpochMilli(at).toString(),
                 hasAired = aired,
@@ -103,6 +133,18 @@ object CalendarHomeFeed {
                 fromCalendar = true
             )
         )
+    }
+
+    private fun liveNote(e: CalendarEntry, aired: Boolean): String? {
+        val g = e.guide ?: return null
+        val now = System.currentTimeMillis()
+        return when {
+            now in g.startMs until g.stopMs -> "On ${g.channelName} now"
+            aired -> null
+            g.startMs > now -> "On ${g.channelName} " +
+                DateTimeFormatter.ofPattern("h:mm a").format(Instant.ofEpochMilli(g.startMs).atZone(ZoneId.systemDefault()))
+            else -> null
+        }
     }
 
     /** Continue Watching and Upcoming with the Calendar's cards put in. */
@@ -129,7 +171,7 @@ object CalendarHomeFeed {
             }
         }.toSet()
         val gone = synchronized(dismissed) { dismissed.toSet() }
-        val addMain = r.filter { it.info.contentId !in native && key(it.info.contentId, it.info.season, it.info.episode) !in gone }
+        val addMain = r.filter { it.info.contentId !in native && key(it.info.contentId, it.info.season, it.info.episode).let { k -> k !in gone && !isSnoozed(k) } }
         val addUp = u.filter { it.info.contentId !in native && it.info.contentId !in addMain.map { a -> a.info.contentId } }
         val addMovies = mv.filter { it.progress.contentId !in native && key(it.progress.contentId, null, null) !in gone }
         injected = (addMain + addUp).map { "${it.info.contentId}|${it.info.videoId}" }.toSet()
