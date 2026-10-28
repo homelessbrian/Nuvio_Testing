@@ -65,7 +65,7 @@ import java.time.format.DateTimeFormatter
 import java.time.temporal.ChronoUnit
 
 private enum class CalTab { UPCOMING, RECENT, AIRING, FOLLOWING, HIDDEN }
-private enum class CalKind { ALL, SHOWS, MOVIES }
+private enum class CalKind { ALL, SHOWS, MOVIES, SPORTS }
 
 /**
  * The Calendar page: your shows' and movies' release dates as a list by day or a month, what's
@@ -79,6 +79,8 @@ fun CalendarScreen(
     onFindSources: (CalendarEntry) -> Unit,
     /** Live TV is tuned: open it full screen. */
     onOpenLive: () -> Unit,
+    /** Opens a game on the Sports page. */
+    onOpenGame: (eventId: String) -> Unit = {},
     viewModel: CalendarViewModel = hiltViewModel()
 ) {
     val state by viewModel.state.collectAsStateWithLifecycle()
@@ -100,7 +102,11 @@ fun CalendarScreen(
 
     LaunchedEffect(tab) { if (tab == CalTab.AIRING) viewModel.loadAiring() }
 
-    fun open(e: CalendarEntry) = onOpenDetail(e.contentId, e.type, e.addonBaseUrl, e.season, e.episode)
+    fun open(e: CalendarEntry) {
+        if (e.kind == CalendarKind.GAME) { e.eventId?.let(onOpenGame); return }
+        if (e.kind == CalendarKind.MOVIE && !e.contentId.startsWith("tt")) return
+        onOpenDetail(e.contentId, e.type, e.addonBaseUrl, e.season, e.episode)
+    }
 
     val today = LocalDate.now()
     val filtered = state.entries.filter {
@@ -108,6 +114,7 @@ fun CalendarScreen(
             CalKind.ALL -> true
             CalKind.SHOWS -> it.kind == CalendarKind.EPISODE
             CalKind.MOVIES -> it.kind == CalendarKind.MOVIE
+            CalKind.SPORTS -> it.kind == CalendarKind.GAME
         }
     }
 
@@ -156,6 +163,9 @@ fun CalendarScreen(
                     Pill("All", selected = kind == CalKind.ALL, onClick = { kind = CalKind.ALL })
                     Pill("Shows", selected = kind == CalKind.SHOWS, onClick = { kind = CalKind.SHOWS })
                     Pill("Movies", selected = kind == CalKind.MOVIES, onClick = { kind = CalKind.MOVIES })
+                    if (kind == CalKind.SPORTS || state.entries.any { it.kind == CalendarKind.GAME }) {
+                        Pill("Sports", selected = kind == CalKind.SPORTS, onClick = { kind = CalKind.SPORTS })
+                    }
                 }
             }
             Spacer(Modifier.height(12.dp))
@@ -220,17 +230,23 @@ fun CalendarScreen(
                     CalTab.FOLLOWING -> {
                         if (follows.isEmpty()) EmptyNote("No bells rung yet. On a show's page, press the bell to follow it: its new episodes show up here and on Home.")
                         else LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 30.dp)) {
-                            items(follows, key = { it.id }) { f ->
+                            items(follows.distinctBy { it.id }, key = { it.id }) { f ->
                                 LiveFocusRow(
                                     modifier = Modifier.fillMaxWidth().then(if (f == follows.first()) Modifier.focusRequester(firstItem) else Modifier),
-                                    onClick = { onOpenDetail(f.id, f.type, f.addonBaseUrl, null, null) },
+                                    onClick = {
+                                        if (!f.isAiring) onOpenDetail(f.id, f.type, f.addonBaseUrl, null, null)
+                                        else f.imdbId?.let { onOpenDetail(it, "movie", null, null, null) }
+                                    },
                                     onLongClick = { followOptions = f }
                                 ) { focused ->
                                     Poster(f.poster, f.name, Modifier.size(width = 40.dp, height = 58.dp))
                                     Column(Modifier.weight(1f)) {
                                         LiveText(f.name, size = 17.sp, weight = FontWeight.SemiBold, color = focusedTextColor(focused))
                                         val next = state.entries.firstOrNull { it.contentId == (f.imdbId ?: f.id) && whenOf(it) > now }
-                                        LiveText(
+                                        if (f.isAiring) LiveText(
+                                            "Movie on ${f.channelName ?: "TV"} · ${dayWord(java.time.Instant.ofEpochMilli(f.startMs).atZone(java.time.ZoneId.systemDefault()).toLocalDate(), today)} ${formatClock(f.startMs, use24h)}",
+                                            size = 13.sp, color = focusedTextColor(focused).copy(alpha = 0.7f)
+                                        ) else LiveText(
                                             next?.let { "Next: ${dayWord(it.day, today)}" + (it.episodeCode?.let { c -> " · $c" } ?: "") }
                                                 ?: if (f.type == "movie") "Movie" else "No new episodes announced yet",
                                             size = 13.sp, color = focusedTextColor(focused).copy(alpha = 0.7f)
@@ -244,7 +260,7 @@ fun CalendarScreen(
                     CalTab.HIDDEN -> {
                         if (hidden.isEmpty()) EmptyNote("No hidden shows.")
                         else LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
-                            items(hidden, key = { it.id }) { h ->
+                            items(hidden.distinctBy { it.id }, key = { it.id }) { h ->
                                 LiveFocusRow(
                                     modifier = Modifier.fillMaxWidth().then(if (h == hidden.first()) Modifier.focusRequester(firstItem) else Modifier),
                                     onClick = { viewModel.unhide(h) }
@@ -270,7 +286,7 @@ fun CalendarScreen(
                 entry = e,
                 now = now,
                 use24h = use24h,
-                followed = follows.any { it.id == e.contentId || it.imdbId == e.contentId },
+                followed = follows.any { it.id == e.contentId || it.imdbId == e.contentId || it.id == e.key },
                 recording = viewModel.repo.isRecording(e),
                 onDismiss = { options = null },
                 onFindSources = { options = null; onFindSources(e) },
@@ -283,10 +299,13 @@ fun CalendarScreen(
         }
         followOptions?.let { f ->
             OptionsPanel(title = f.name, onDismiss = { followOptions = null }) { first ->
-                OptionRow("Open ${if (f.type == "movie") "movie" else "show"} page", first) {
-                    followOptions = null; onOpenDetail(f.id, f.type, f.addonBaseUrl, null, null)
+                if (!f.isAiring || f.imdbId != null) OptionRow("Open ${if (f.type == "series") "show" else "movie"} page", first) {
+                    followOptions = null
+                    if (f.isAiring) onOpenDetail(f.imdbId!!, "movie", null, null, null) else onOpenDetail(f.id, f.type, f.addonBaseUrl, null, null)
                 }
-                OptionRow("Turn off the bell", null) { followOptions = null; viewModel.toggleFollow(f) }
+                OptionRow(if (f.isAiring) "Take it off your Calendar" else "Turn off the bell", if (f.isAiring && f.imdbId == null) first else null) {
+                    followOptions = null; viewModel.toggleFollow(f)
+                }
             }
         }
     }
@@ -307,7 +326,7 @@ private fun DayList(
 ) {
     val today = LocalDate.now()
     val listState = rememberLazyListState()
-    val days = remember(entries) { entries.groupBy { it.day }.toList() }
+    val days = remember(entries) { entries.distinctBy { it.key }.groupBy { it.day }.toList() }
     LazyColumn(state = listState, verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(bottom = 40.dp)) {
         var first = true
         days.forEach { (day, list) ->
@@ -347,7 +366,8 @@ private fun EntryRow(
 ) {
     LiveFocusRow(modifier = modifier.fillMaxWidth(), onClick = onClick, onLongClick = onLongClick) { focused ->
         val text = focusedTextColor(focused)
-        Poster(e.poster, e.title, Modifier.size(width = if (compact) 34.dp else 44.dp, height = if (compact) 50.dp else 64.dp))
+        if (e.kind == CalendarKind.GAME) TeamLogo(e.poster, Modifier.size(width = if (compact) 34.dp else 44.dp, height = if (compact) 50.dp else 64.dp))
+        else Poster(e.poster, e.title, Modifier.size(width = if (compact) 34.dp else 44.dp, height = if (compact) 50.dp else 64.dp))
         if (!compact) {
             Column(Modifier.width(92.dp)) {
                 LiveText(timeText(e, use24h), size = 15.sp, weight = FontWeight.SemiBold, color = text)
@@ -360,6 +380,7 @@ private fun EntryRow(
             Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 LiveText(e.title, size = if (compact) 14.sp else 17.sp, weight = FontWeight.SemiBold, color = text,
                     modifier = Modifier.weight(1f, fill = false), marquee = focused)
+                if (e.live) LiveTag("LIVE", LIVE_RED, Color.White)
                 if (!compact) e.tags.take(2).forEach { TagChip(it) }
                 if (e.followed) {
                     androidx.tv.material3.Icon(Icons.Default.Notifications, contentDescription = "Bell on", tint = text.copy(alpha = 0.8f), modifier = Modifier.size(15.dp))
@@ -367,7 +388,9 @@ private fun EntryRow(
             }
             val sub = buildString {
                 if (compact) append(timeText(e, use24h)).append(" · ")
-                if (e.kind == CalendarKind.MOVIE) {
+                if (e.kind == CalendarKind.GAME) {
+                    append(listOfNotNull(e.league, e.score).joinToString(" · "))
+                } else if (e.kind == CalendarKind.MOVIE) {
                     append(e.note ?: if (CalendarTag.AT_HOME in e.tags) "Out to watch at home" else "")
                 } else {
                     e.episodeCode?.let { append(it) }
@@ -419,7 +442,7 @@ private fun MonthView(
     val today = LocalDate.now()
     var shown by remember { mutableStateOf(YearMonth.now()) }
     var selected by remember { mutableStateOf(today) }
-    val byDay = remember(entries) { entries.groupBy { it.day } }
+    val byDay = remember(entries) { entries.distinctBy { it.key }.groupBy { it.day } }
     val panelFocus = remember { FocusRequester() }
     Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
         Column(Modifier.weight(1f).fillMaxHeight()) {
@@ -516,7 +539,10 @@ private fun DayCell(
         )
         if (entries.isNotEmpty()) {
             Row(horizontalArrangement = Arrangement.spacedBy(3.dp), verticalAlignment = Alignment.Bottom) {
-                entries.take(3).forEach { e -> Poster(e.poster, e.title, Modifier.size(width = 15.dp, height = 22.dp), small = true) }
+                entries.take(3).forEach { e ->
+                    if (e.kind == CalendarKind.GAME) TeamLogo(e.poster, Modifier.size(width = 15.dp, height = 22.dp))
+                    else Poster(e.poster, e.title, Modifier.size(width = 15.dp, height = 22.dp), small = true)
+                }
                 if (entries.size > 3) LiveText("+${entries.size - 3}", size = 10.sp, weight = FontWeight.Bold, color = focusedTextColor(focused))
             }
         }
@@ -559,9 +585,17 @@ private fun EntryOptions(
                 req(), onRecord
             )
         }
-        OptionRow(if (entry.kind == CalendarKind.MOVIE) "Open movie page" else if (entry.episode != null) "Open show page at this episode" else "Open show page", req(), onOpen)
-        OptionRow(if (followed) "Turn off the bell" else "Ring the bell (new episodes on Home)", req(), onBell)
-        OptionRow("Hide this ${if (entry.kind == CalendarKind.MOVIE) "movie" else "show"} from the Calendar", req(), onHide)
+        val airing = entry.key.startsWith("air|")
+        if (entry.kind == CalendarKind.GAME) {
+            OptionRow("Open in Sports", req(), onOpen)
+        } else {
+            if (entry.contentId.startsWith("tt") || entry.kind == CalendarKind.EPISODE) {
+                OptionRow(if (entry.kind == CalendarKind.MOVIE) "Open movie page" else if (entry.episode != null) "Open show page at this episode" else "Open show page", req(), onOpen)
+            }
+            if (entry.kind == CalendarKind.EPISODE) OptionRow(if (followed) "Turn off the bell" else "Ring the bell (new episodes on Home)", req(), onBell)
+            if (airing) OptionRow("Take it off your Calendar", req(), onBell)
+            else OptionRow("Hide this ${if (entry.kind == CalendarKind.MOVIE) "movie" else "show"} from the Calendar", req(), onHide)
+        }
     }
 }
 
@@ -646,6 +680,7 @@ private fun TagChip(tag: CalendarTag) {
         CalendarTag.SEASON_FINALE, CalendarTag.SERIES_FINALE -> Color(0xFF8A4B12) to Color(0xFFFFE2C7)
         CalendarTag.AT_HOME -> Color(0xFF1C6B45) to Color(0xFFD6F5E4)
         CalendarTag.IN_THEATERS, CalendarTag.ON_DISC -> Color(0xFF3A3D48) to Color(0xFFE6E8EE)
+        CalendarTag.ON_TV -> Color(0xFF2B4C8C) to Color(0xFFDCE6FF)
     }
     LiveTag(tag.label.uppercase(), bg, fg)
 }
@@ -655,6 +690,13 @@ private fun Poster(url: String?, name: String, modifier: Modifier, small: Boolea
     Box(modifier.clip(RoundedCornerShape(if (small) 3.dp else 6.dp)).background(Color.White.copy(alpha = 0.10f)), contentAlignment = Alignment.Center) {
         if (!url.isNullOrBlank()) LivePosterImage(url, Modifier.fillMaxSize())
         else if (!small) LiveText(name.split(' ').filter { it.isNotBlank() }.take(2).joinToString("") { it.take(1) }.uppercase(), size = 14.sp, weight = FontWeight.Bold)
+    }
+}
+
+@Composable
+private fun TeamLogo(url: String?, modifier: Modifier) {
+    Box(modifier.clip(RoundedCornerShape(6.dp)).background(Color.White.copy(alpha = 0.08f)), contentAlignment = Alignment.Center) {
+        com.nuvio.tv.livetv.ui.ChannelLogo(url, 18.dp)
     }
 }
 
@@ -670,6 +712,7 @@ private fun whenOf(e: CalendarEntry): Long =
     e.airMs ?: e.day.atStartOfDay(java.time.ZoneId.systemDefault()).toInstant().toEpochMilli()
 
 private fun timeText(e: CalendarEntry, use24h: Boolean): String = when {
+    e.kind == CalendarKind.MOVIE && CalendarTag.ON_TV in e.tags && e.airMs != null -> formatClock(e.airMs, use24h)
     e.kind == CalendarKind.MOVIE -> if (CalendarTag.IN_THEATERS in e.tags) "Theaters" else if (CalendarTag.ON_DISC in e.tags) "Disc" else "At home"
     e.airMs != null && !e.streaming -> formatClock(e.airMs, use24h)
     e.streaming -> "Streaming"

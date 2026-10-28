@@ -125,6 +125,7 @@ class LiveTvPreferences @Inject constructor(
         val calendarCountry = stringPreferencesKey("calendar_country")
         val calendarSkipNewsTalk = booleanPreferencesKey("calendar_skip_news_talk")
         val calendarView = stringPreferencesKey("calendar_view")
+        val calendarSports = booleanPreferencesKey("calendar_sports")
         val calendarFollows = stringPreferencesKey("calendar_follows")
         val calendarHiddenShows = stringPreferencesKey("calendar_hidden_shows")
         val onDemandInStreams = booleanPreferencesKey("on_demand_in_streams")
@@ -378,6 +379,7 @@ class LiveTvPreferences @Inject constructor(
             calendarCountry = p[Keys.calendarCountry] ?: d.calendarCountry,
             calendarSkipNewsTalk = p[Keys.calendarSkipNewsTalk] ?: d.calendarSkipNewsTalk,
             calendarView = p[Keys.calendarView] ?: d.calendarView,
+            calendarSports = p[Keys.calendarSports] ?: d.calendarSports,
             onDemandInStreams = p[Keys.onDemandInStreams] ?: d.onDemandInStreams,
             onDemandStreamsPosition = p[Keys.onDemandStreamsPosition] ?: d.onDemandStreamsPosition,
             onDemandAutoPlay = p[Keys.onDemandAutoPlay] ?: d.onDemandAutoPlay,
@@ -630,6 +632,7 @@ class LiveTvPreferences @Inject constructor(
         p[Keys.calendarCountry] = s.calendarCountry
         p[Keys.calendarSkipNewsTalk] = s.calendarSkipNewsTalk
         p[Keys.calendarView] = s.calendarView
+        p[Keys.calendarSports] = s.calendarSports
         p[Keys.onDemandInStreams] = s.onDemandInStreams
         p[Keys.onDemandStreamsPosition] = s.onDemandStreamsPosition
         p[Keys.onDemandAutoPlay] = s.onDemandAutoPlay

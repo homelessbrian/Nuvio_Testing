@@ -343,6 +343,50 @@ internal class CalendarSources(context: Context) {
         return tmdb("/tv/$id/external_ids")?.optInt("tvdb_id", 0)?.takeIf { it > 0 }
     }
 
+    /** A show or movie found by its name (for the bell in Live TV). */
+    data class TitleHit(val kind: String, val tmdbId: Int, val imdb: String?, val name: String, val poster: String?)
+
+    /**
+     * The TV show or movie named exactly [query] on TMDB. [hint] ("series" / "movie") is tried
+     * first, or only when [strong]; otherwise the best known of the two. A movie must be within a
+     * year of [year] when the guide gives one.
+     */
+    suspend fun findTitle(query: String, hint: String?, strong: Boolean, year: Int?): TitleHit? {
+        val wanted = normName(query)
+        if (wanted.length < 2) return null
+        data class Found(val kind: String, val id: Int, val name: String, val poster: String?, val votes: Int)
+        val found = ArrayList<Found>()
+        val kinds = when {
+            strong && hint == "movie" -> listOf("movie")
+            strong && hint == "series" -> listOf("series")
+            else -> listOf("series", "movie")
+        }
+        for (kind in kinds) {
+            val path = if (kind == "series") "tv" else "movie"
+            val nameKey = if (kind == "series") "name" else "title"
+            val dateKey = if (kind == "series") "first_air_date" else "release_date"
+            val results = tmdb("/search/$path?query=" + java.net.URLEncoder.encode(query, "UTF-8"))?.optJSONArray("results") ?: continue
+            for (i in 0 until results.length()) {
+                val r = results.optJSONObject(i) ?: continue
+                val name = r.optString(nameKey)
+                if (normName(name) != wanted && normName(r.optString(if (kind == "series") "original_name" else "original_title")) != wanted) continue
+                if (kind == "movie" && year != null) {
+                    val y = r.optString(dateKey).take(4).toIntOrNull()
+                    if (y != null && kotlin.math.abs(y - year) > 1) continue
+                }
+                found += Found(kind, r.optInt("id"), name, r.optString("poster_path").takeIf { it.startsWith("/") }?.let { "https://image.tmdb.org/t/p/w342$it" },
+                    r.optInt("vote_count", 0))
+            }
+        }
+        if (found.isEmpty()) return null
+        val best = found.maxBy { f -> f.votes + (if (f.kind == hint) 200 else 0) }
+        val imdb = tmdb("/${if (best.kind == "series") "tv" else "movie"}/${best.id}/external_ids")
+            ?.optString("imdb_id")?.takeIf { it.startsWith("tt") }
+        return TitleHit(best.kind, best.id, imdb, best.name, best.poster)
+    }
+
+    private fun normName(s: String) = s.lowercase().replace("&", "and").filter { it.isLetterOrDigit() }
+
     /** A movie's release dates in [country]: theatrical, digital (at home) and disc. */
     data class MovieDates(val theater: LocalDate?, val digital: LocalDate?, val disc: LocalDate?, val title: String?, val poster: String?)
 

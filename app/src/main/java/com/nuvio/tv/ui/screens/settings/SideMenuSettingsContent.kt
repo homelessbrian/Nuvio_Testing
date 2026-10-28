@@ -133,6 +133,12 @@ fun SideMenuSettingsContent(initialFocusRequester: FocusRequester? = null) {
             else "Your provider's movies and series. Shows up once they're imported (Settings → Live TV → On Demand)",
             s.onDemandInSidebar
         ) { update { it.copy(onDemandInSidebar = !it.onDemandInSidebar) } }
+        SideMenuPages.RECORDINGS -> PageRow(
+            "Recordings",
+            if (s.recordingsInSidebar) "In the menu once anything is recorded or set to record. Always in Live TV too (● by the guide's ⚙)"
+            else "Off the menu only: recording still works, and Recordings is always in Live TV (● by the guide's ⚙)",
+            s.recordingsInSidebar
+        ) { update { it.copy(recordingsInSidebar = !it.recordingsInSidebar) } }
         else -> PageRow(id, "", true) {}
     }
 
@@ -201,7 +207,7 @@ fun SideMenuSettingsContent(initialFocusRequester: FocusRequester? = null) {
                 SettingsGroupCard {
                     SettingsActionRow(
                         title = "Put Back the Usual Order",
-                        subtitle = "Home, Discover, Search, Library, Calendar, Live TV, Sports, On Demand",
+                        subtitle = "Home, Discover, Search, Library, Calendar, Live TV, Sports, On Demand, Recordings",
                         onClick = {
                             update { it.copy(sideMenuOrder = "") }
                             LiveTvNotice.show("Menu order put back")
@@ -340,6 +346,12 @@ fun CalendarSettingsContent(initialFocusRequester: FocusRequester? = null) {
             }
             item(key = "page") {
                 SettingsGroupCard(title = "The Calendar") {
+                    SettingsToggleRow(
+                        "Games for Teams You Follow",
+                        "Your Sports teams' games, with the channel showing them (not whole leagues). Scores follow Hide Scores in Sports settings",
+                        s.calendarSports,
+                        { update { it.copy(calendarSports = !it.calendarSports) } }
+                    )
                     SettingsToggleRow(
                         "Hide Spoilers",
                         "Episodes past the next one you'd watch don't show their titles or pictures",

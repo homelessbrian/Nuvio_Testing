@@ -54,14 +54,16 @@ class CalendarRepository @Inject constructor(
     private val progress: WatchProgressRepository,
     private val liveRepo: LiveTvRepository,
     private val guideDb: EpgDatabase,
-    private val scheduler: LiveTvRecordingScheduler
+    private val scheduler: LiveTvRecordingScheduler,
+    private val sports: com.nuvio.tv.livetv.sports.SportsRepository
 ) {
     private val scope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
     private val sources = CalendarSources(context)
     private val mutex = Mutex()
 
     val follows: StateFlow<List<CalendarFollow>> = prefs.calendarFollows
-        .map { CalendarFollow.decode(it) }
+        // Shows only (bells rung on movies in an earlier version are left out).
+        .map { raw -> CalendarFollow.decode(raw).filter { it.type != "movie" } }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val hiddenShows: StateFlow<List<CalendarHidden>> = prefs.calendarHiddenShows
@@ -88,6 +90,13 @@ class CalendarRepository @Inject constructor(
         scope.launch {
             // What's kept on the TV first (quick), then a fresh look.
             delay(8_000)
+            // Movie airings from Live TV, two weeks after they aired: gone.
+            runCatching {
+                val cutoff = System.currentTimeMillis() - 14 * CalendarSources.DAY
+                if (follows.value.any { it.isAiring && it.stopMs < cutoff }) prefs.editCalendarFollows { raw ->
+                    CalendarFollow.encode(CalendarFollow.decode(raw).filter { !(it.isAiring && it.stopMs < cutoff) })
+                }
+            }
             build(fetch = false)
             delay(20_000)
             refresh(force = false)
@@ -108,6 +117,13 @@ class CalendarRepository @Inject constructor(
             settings.map { listOf(it.calendarHideSpoilers, it.calendarCountry, it.calendarUpcomingRow, it.calendarNewEpisodeCards,
                 SideMenuPages.CALENDAR in SideMenuPages.hidden(it.sideMenuHidden)) }
                 .distinctUntilChanged().drop(1).collect { build(fetch = false); refresh(force = false) }
+        }
+        // Sports updated (new games, scores, channels found) or Calendar's games switched on/off.
+        scope.launch {
+            kotlinx.coroutines.flow.combine(sports.known, sports.matches, sports.follows, sports.settings, settings.map { it.calendarSports }) { _, _, _, _, _ -> Unit }
+                .drop(1).debounce(5_000).collect {
+                    mutex.withLock { if (!isOff) _state.value = _state.value.copy(entries = withGames(baseEntries)) }
+                }
         }
         // New guide listings: look for your episodes in them again.
         scope.launch {
@@ -187,7 +203,7 @@ class CalendarRepository @Inject constructor(
                 if (old.poster == null && c.poster != null) out[k] = old.copy(poster = c.poster, reasons = old.reasons)
             }
         }
-        follows.value.forEach { f ->
+        follows.value.filter { !it.isAiring }.forEach { f ->
             add(Candidate(f.id, f.type, f.name, f.poster, f.background, f.imdbId ?: f.id.takeIf { it.startsWith("tt") }, tmdbOf(f.id),
                 f.addonBaseUrl, mutableSetOf(CalendarReason.BELL), null))
         }
@@ -240,6 +256,7 @@ class CalendarRepository @Inject constructor(
     private suspend fun buildLocked(fetch: Boolean, force: Boolean) {
         val s = settings.value
         if (isOff) {
+            baseEntries = emptyList()
             _state.value = CalendarState()
             CalendarHomeFeed.publish(emptyList(), emptyList())
             return
@@ -263,8 +280,12 @@ class CalendarRepository @Inject constructor(
         val entries = ArrayList<CalendarEntry>()
         var done = 0
         var looked = 0
+        // The same show can come in twice under different ids (your Library by its IMDb id, what
+        // you're watching by another): each show is only taken once.
+        val usedShows = HashSet<Int>()
         for (c in shows) {
             val tvmId = if (fetch) sources.tvmazeId(c.imdb, c.tmdb) else cachedTvmazeId(c)
+            if (tvmId != null && !usedShows.add(tvmId)) { done++; continue }
             var data = tvmId?.let { sources.cachedShow(it) }
             if (fetch && tvmId != null && (force || data == null || stale(data))) {
                 data = sources.fetchShow(tvmId) ?: data
@@ -282,9 +303,36 @@ class CalendarRepository @Inject constructor(
             entries += moviesOf(m, dates, seen[m.id] ?: m.imdb?.let { seen[it] }, from, to)
         }
         sources.saveMovies()
-        val sorted = entries.sortedWith(compareBy<CalendarEntry> { it.day }.thenBy { it.airMs ?: Long.MAX_VALUE }.thenBy { it.title })
+        // Movies from your Live TV guide whose bell was rung: that airing, on that channel.
+        val nowMs = System.currentTimeMillis()
+        follows.value.filter { it.isAiring && it.channelKey != null && it.stopMs > nowMs - 14 * CalendarSources.DAY }.forEach { f ->
+            val ch = liveRepo.channels.value.firstOrNull { it.key == f.channelKey }
+            val day = Instant.ofEpochMilli(f.startMs).atZone(ZoneId.systemDefault()).toLocalDate()
+            entries += CalendarEntry(
+                key = f.id,
+                kind = CalendarKind.MOVIE,
+                contentId = f.imdbId ?: f.id,
+                type = "movie",
+                title = f.name,
+                poster = f.poster,
+                background = f.background,
+                airMs = f.startMs,
+                day = day,
+                network = ch?.name ?: f.channelName,
+                tags = listOf(CalendarTag.ON_TV),
+                reasons = setOf(CalendarReason.BELL),
+                runtimeMin = ((f.stopMs - f.startMs) / 60_000L).toInt().takeIf { it > 0 },
+                guide = CalendarGuideHit(f.channelKey!!, ch?.name ?: f.channelName ?: "", ch?.logo, f.startMs, f.stopMs, f.name)
+            )
+        }
+        // Never the same entry twice (its reasons are put together).
+        val merged = entries.groupBy { it.key }.map { (_, same) ->
+            if (same.size == 1) same[0] else same[0].copy(reasons = same.flatMap { it.reasons }.toSet())
+        }
+        val sorted = merged.sortedWith(compareBy<CalendarEntry> { it.day }.thenBy { it.airMs ?: Long.MAX_VALUE }.thenBy { it.title })
+        baseEntries = withGuide(sorted, s)
         _state.value = CalendarState(
-            entries = withGuide(sorted, s),
+            entries = withGames(baseEntries),
             loading = false,
             progress = null,
             updatedAt = if (fetch) System.currentTimeMillis() else _state.value.updatedAt.takeIf { it > 0 } ?: System.currentTimeMillis(),
@@ -292,6 +340,73 @@ class CalendarRepository @Inject constructor(
         )
         if (fetch) LiveTvLoadReport.add("Calendar: ${shows.size} shows and ${movies.size} movies, $looked looked up again, ${sorted.size} dates")
         publishHome()
+    }
+
+    /** Shows, movies and Live TV airings (the games are put in on top, as Sports updates). */
+    @Volatile private var baseEntries: List<CalendarEntry> = emptyList()
+
+    /** [base] with the games of the teams you follow in Sports, in date order. */
+    private fun withGames(base: List<CalendarEntry>): List<CalendarEntry> {
+        val games = runCatching { gameEntries() }.getOrDefault(emptyList())
+        if (games.isEmpty()) return base
+        return (base + games).sortedWith(compareBy<CalendarEntry> { it.day }.thenBy { it.airMs ?: Long.MAX_VALUE }.thenBy { it.title })
+    }
+
+    /**
+     * Games for the teams you follow (not whole leagues: that would bury your shows), from a
+     * month back to four months ahead, with the channel Sports found for each. Scores of
+     * finished games follow Sports' Hide Scores.
+     */
+    private fun gameEntries(): List<CalendarEntry> {
+        val s = settings.value
+        val ss = sports.settings.value
+        if (!s.calendarSports || !ss.showInSidebar) return emptyList()
+        val f = sports.follows.value
+        if (f.teams.isEmpty()) return emptyList()
+        val today = LocalDate.now()
+        val from = today.minusDays(30)
+        val to = today.plusDays(120)
+        val zone = ZoneId.systemDefault()
+        val matches = sports.matches.value
+        return sports.known.value.mapNotNull { ev ->
+            val mine = ev.sides.firstOrNull { f.followsTeam(ev.leagueId, it.team.id) } ?: return@mapNotNull null
+            val day = Instant.ofEpochMilli(ev.startMs).atZone(zone).toLocalDate()
+            if (day.isBefore(from) || day.isAfter(to)) return@mapNotNull null
+            val league = com.nuvio.tv.livetv.sports.SportsCatalog.league(ev.leagueId)
+            val sport = league?.sport
+            val sides = if (sport != null) ev.ordered(sport) else ev.sides
+            val title = if (sides.size == 2) {
+                sides[0].team.name + (if (sport?.homeFirst == true) " v " else " at ") + sides[1].team.name
+            } else ev.title
+            val score = when (ev.state) {
+                com.nuvio.tv.livetv.sports.GameState.POST ->
+                    if (ss.hideScores || !ev.hasScore) "Final" else "Final · " + sides.joinToString("–") { it.score.orEmpty() }
+                com.nuvio.tv.livetv.sports.GameState.LIVE ->
+                    if (ss.hideScores || !ev.hasScore) "Live" else "Live · " + sides.joinToString("–") { it.score.orEmpty() } + (ev.status?.let { " · $it" } ?: "")
+                else -> null
+            }
+            val end = com.nuvio.tv.livetv.sports.endEstimate(ev)
+            val channel = matches[ev.id]?.firstOrNull()?.channel
+            CalendarEntry(
+                key = "game|${ev.id}",
+                kind = CalendarKind.GAME,
+                contentId = "game|${ev.id}",
+                type = "game",
+                title = title,
+                poster = mine.team.logo,
+                background = null,
+                airMs = ev.startMs.takeIf { ev.hasTime },
+                day = day,
+                network = ev.broadcasts.firstOrNull() ?: league?.short,
+                reasons = setOf(CalendarReason.TEAM),
+                runtimeMin = ((end - ev.startMs) / 60_000L).toInt().takeIf { it > 0 },
+                guide = channel?.let { CalendarGuideHit(it.key, it.name, it.logo, ev.startMs, end, title) },
+                eventId = ev.id,
+                league = league?.name,
+                score = score,
+                live = ev.state == com.nuvio.tv.livetv.sports.GameState.LIVE
+            )
+        }
     }
 
     private val tvmIdMemo = HashMap<String, Int?>()
@@ -473,6 +588,7 @@ class CalendarRepository @Inject constructor(
                         runtimeMin = e.runtime
                     )
                 }
+                .distinctBy { it.key }
                 .sortedWith(compareBy<CalendarEntry> { it.streaming }.thenBy { it.airMs ?: Long.MAX_VALUE }.thenBy { it.title })
             _airing.value = AiringToday(day, withGuide(entries, s), false, null)
         }
@@ -485,7 +601,10 @@ class CalendarRepository @Inject constructor(
             mutex.withLock {
                 val s = settings.value
                 val cur = _state.value
-                if (cur.entries.isNotEmpty()) _state.value = cur.copy(entries = withGuide(cur.entries.map { it.copy(guide = null) }, s))
+                if (baseEntries.isNotEmpty()) {
+                    baseEntries = withGuide(baseEntries.map { if (it.kind == CalendarKind.EPISODE) it.copy(guide = null) else it }, s)
+                    _state.value = cur.copy(entries = withGames(baseEntries))
+                }
             }
             val a = _airing.value
             if (a.entries.isNotEmpty()) _airing.value = a.copy(entries = withGuide(a.entries.map { it.copy(guide = null) }, settings.value))
@@ -565,6 +684,73 @@ class CalendarRepository @Inject constructor(
 
     /** The channel for [entry], to tune Live TV to. */
     fun channelFor(entry: CalendarEntry) = entry.guide?.let { g -> liveRepo.channels.value.firstOrNull { it.key == g.channelKey } }
+
+    // ------------------------------------------------------------------ the bell in Live TV
+
+    /** What a show in the guide is: a TV show to follow, or a movie whose airing goes on the Calendar. */
+    data class LiveTitle(val kind: String, val followId: String?, val name: String, val imdb: String?, val poster: String?)
+
+    private val liveMemo = java.util.concurrent.ConcurrentHashMap<String, Pair<LiveTitle?, Long>>()
+
+    private fun liveKey(p: EpgProgram, ch: com.nuvio.tv.livetv.model.LiveChannel?): String =
+        com.nuvio.tv.livetv.data.LiveTvPosterResolver.searchTitleFor(p, ch).lowercase() + "|" + (p.year ?: "")
+
+    /** Already worked out (no waiting): null when not known yet. */
+    fun knownLiveTitle(p: EpgProgram, ch: com.nuvio.tv.livetv.model.LiveChannel?): Pair<LiveTitle?, Boolean> {
+        val m = liveMemo[liveKey(p, ch)] ?: return null to false
+        return m.first to true
+    }
+
+    /**
+     * Works out what the guide's show is, by its name on TMDB (the guide's own hints, like an
+     * episode number or "Movie", help). A long show the guide calls a movie counts as a movie even
+     * when TMDB doesn't know it (its airing can still go on the Calendar).
+     */
+    suspend fun liveTitle(p: EpgProgram, ch: com.nuvio.tv.livetv.model.LiveChannel?): LiveTitle? {
+        val key = liveKey(p, ch)
+        liveMemo[key]?.let { (v, at) -> if (v != null || System.currentTimeMillis() - at < 6 * CalendarSources.HOUR) return v }
+        val hint = com.nuvio.tv.livetv.data.LiveTvPosterResolver.typeHint(p, ch)
+        val hintKind = when (hint?.kind) {
+            com.nuvio.tv.livetv.data.LiveTvPosterResolver.Kind.MOVIE -> "movie"
+            com.nuvio.tv.livetv.data.LiveTvPosterResolver.Kind.SERIES -> "series"
+            else -> null
+        }
+        val query = com.nuvio.tv.livetv.data.LiveTvPosterResolver.searchTitleFor(p, ch)
+        val hit = runCatching { sources.findTitle(query, hintKind, hint?.strong == true, p.year) }.getOrNull()
+        val clean = com.nuvio.tv.livetv.ui.titleMarks(p.title).title
+        val title = when {
+            hit != null -> LiveTitle(hit.kind, if (hit.kind == "series") (hit.imdb ?: "tmdb:${hit.tmdbId}") else null, hit.name, hit.imdb, hit.poster)
+            hintKind == "movie" -> LiveTitle("movie", null, clean, null, null)
+            else -> null
+        }
+        liveMemo[key] = title to System.currentTimeMillis()
+        return title
+    }
+
+    /** Whether the bell is on for this show (the show followed) or this movie's airing. */
+    fun isLiveBellOn(t: LiveTitle, p: EpgProgram, ch: com.nuvio.tv.livetv.model.LiveChannel?): Boolean = when (t.kind) {
+        "series" -> t.followId != null && (isFollowed(t.followId) || (t.imdb != null && isFollowed(t.imdb)))
+        else -> ch != null && follows.value.any { it.id == CalendarFollow.airingId(ch.key, p.startMs) }
+    }
+
+    /** Rings or un-rings the bell from Live TV. Returns a message to show. */
+    suspend fun toggleLiveBell(t: LiveTitle, p: EpgProgram, ch: com.nuvio.tv.livetv.model.LiveChannel?): String {
+        if (t.kind == "series") {
+            val id = t.followId ?: return "Couldn't find \"${t.name}\" to follow"
+            val existing = follows.value.firstOrNull { it.id == id || (t.imdb != null && (it.id == t.imdb || it.imdbId == t.imdb)) }
+            val on = toggleFollow(existing ?: CalendarFollow(id = id, type = "series", name = t.name, poster = t.poster, imdbId = t.imdb))
+            return if (on) "Bell on: new episodes of ${t.name} will show on Home and in your Calendar" else "Bell turned off for ${t.name}"
+        }
+        if (ch == null) return "Couldn't tell which channel this is on"
+        if (p.stopMs <= System.currentTimeMillis()) return "This movie has already aired"
+        val id = CalendarFollow.airingId(ch.key, p.startMs)
+        val existing = follows.value.firstOrNull { it.id == id }
+        val on = toggleFollow(existing ?: CalendarFollow(
+            id = id, type = CalendarFollow.TYPE_AIRING, name = t.name, poster = t.poster, imdbId = t.imdb,
+            channelKey = ch.key, channelName = ch.name, startMs = p.startMs, stopMs = p.stopMs
+        ))
+        return if (on) "${t.name} is on your Calendar (${ch.name})" else "${t.name} taken off your Calendar"
+    }
 
     // ------------------------------------------------------------------ show pages
 

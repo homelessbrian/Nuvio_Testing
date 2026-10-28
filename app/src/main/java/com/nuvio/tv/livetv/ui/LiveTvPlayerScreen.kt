@@ -299,6 +299,9 @@ fun LiveTvPlayerScreen(
     // so it's ready when the info bar opens).
     val nowProgram = rememberShowDetails(current?.key, current?.let { ch -> programs[ch.key]?.firstOrNull { now >= it.startMs && now < it.stopMs } })
     val watchingTitle = playback.catchupTitle ?: nowProgram?.title
+    // The Calendar's bell for what's on (play bar and the full-screen menu).
+    val liveBell = com.nuvio.tv.livetv.calendar.rememberLiveBell(nowProgram.takeIf { playback.catchupTitle == null }, current)
+    val bellInBar = liveBell != null && BarPart.BELL !in BarPart.parse(settings.barHidden)
     val poster by androidx.compose.runtime.produceState<String?>(initialValue = null, watchingTitle, current?.key) {
         value = null
         // In archive playback the guide entry isn't the live one, so no movie/series hint.
@@ -410,7 +413,7 @@ fun LiveTvPlayerScreen(
                 if (cf != null) {
                     val mode = if (archive) PanelMode.CATCHUP else if (shifting) PanelMode.SHIFT else PanelMode.LIVE
                     val paused = playback.userPaused
-                    val list = panelControls(mode, paused, canSkip = archive || viewModel.playback.shiftCanSeek())
+                    val list = panelControls(mode, paused, canSkip = archive || viewModel.playback.shiftCanSeek(), bell = bellInBar)
                     if (e.type == KeyEventType.KeyUp) return@onPreviewKeyEvent isOk || e.key == Key.Back
                     showBanner()
                     val buttons = list.filter { it != PanelControl.TIMELINE }
@@ -470,6 +473,7 @@ fun LiveTvPlayerScreen(
                                 PanelControl.AUDIO -> openGear("audio")
                                 PanelControl.SIZE -> openGear("size")
                                 PanelControl.SLEEP -> openGear("sleep")
+                                PanelControl.BELL -> liveBell?.toggle?.invoke()
                                 PanelControl.MORE -> openGear()
                                 PanelControl.TIMELINE, null -> Unit
                             }
@@ -865,7 +869,7 @@ fun LiveTvPlayerScreen(
                     showPosters = settings.showPosters,
                     timeline = timeline,
                     paused = paused,
-                    controls = panelControls(mode, paused, canSkip = archive || viewModel.playback.shiftCanSeek()),
+                    controls = panelControls(mode, paused, canSkip = archive || viewModel.playback.shiftCanSeek(), bell = bellInBar),
                     focused = controlFocus,
                     captionsOn = captionsOn,
                     audioLabel = remember(playback.channelKey, bannerVisible) { viewModel.playback.audioLabel() },
@@ -898,7 +902,8 @@ fun LiveTvPlayerScreen(
                         }
                     } else null,
                     recentFocus = recentFocus,
-                    hidden = BarPart.parse(settings.barHidden)
+                    hidden = BarPart.parse(settings.barHidden),
+                    bellOn = liveBell?.on == true
                 )
             }
         }
@@ -1043,6 +1048,7 @@ fun LiveTvPlayerScreen(
                     dialog = PlayerDialog.NONE
                     viewModel.previousChannel()?.let { viewModel.preview(it) }
                 },
+                bell = liveBell?.let { b -> Triple(if (b.isMovie) "Calendar" else "Bell", if (b.isMovie) (if (b.on) "On it" else "Add") else b.value, b.toggle) },
                 onSearch = viewModel.currentProgram(ch.key)
                     ?.let { com.nuvio.tv.livetv.data.LiveTvPosterResolver.searchTitleFor(it, ch) }
                     ?.let { title ->

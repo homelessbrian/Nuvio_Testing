@@ -8,6 +8,7 @@ import androidx.compose.animation.fadeOut
 import androidx.compose.animation.slideInHorizontally
 import androidx.compose.animation.slideOutHorizontally
 import androidx.compose.foundation.background
+import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.border
 import androidx.compose.foundation.gestures.scrollBy
 import androidx.compose.foundation.combinedClickable
@@ -45,6 +46,8 @@ import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.History
 import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.NotificationsNone
 import androidx.compose.material.icons.filled.VisibilityOff
 import androidx.compose.material.icons.filled.Visibility
 import androidx.compose.material.icons.filled.Refresh
@@ -3253,6 +3256,8 @@ private fun ChannelContextMenu(
     val ch = target.channel
     val program = target.block?.program
     val canCatchup = program != null && program.stopMs <= now && CatchupUrlBuilder.isAvailable(ch.catchup, program.startMs, now)
+    // The Calendar's bell: follow this show, or put this movie's airing on the Calendar.
+    val bell = com.nuvio.tv.livetv.calendar.rememberLiveBell(program ?: streamProgram, ch)
     LiveDialog(onDismiss = onDismiss, width = 460.dp) {
         LiveText("${ch.number}  ${ch.name}", size = 20.sp, weight = FontWeight.Bold)
         LiveText(ch.group, color = NuvioTheme.colors.TextSecondary, size = 13.sp)
@@ -3268,6 +3273,7 @@ private fun ChannelContextMenu(
             if (program != null || streamProgram != null) {
                 item { MenuHeader("This show") }
                 if (program != null) item { MenuItem("Program info", onClick = onProgramInfo) }
+                if (bell != null) item { MenuItem(bell.label, onClick = { bell.toggle(); onDismiss() }) }
                 if (streamProgram != null) {
                     item { MenuItem("Find & stream \"${streamProgram.title}\" in Nuvio", onClick = { onFindInNuvio(streamProgram) }) }
                 }
@@ -3967,6 +3973,7 @@ private fun ProgramInfoDialog(
     val first = remember { FocusRequester() }
     val block = target.block
     val p = rememberShowDetails(target.channel.key, block?.program)
+    val infoBell = com.nuvio.tv.livetv.calendar.rememberLiveBell(p, target.channel)
     LiveDialog(onDismiss = onDismiss, width = 640.dp) {
         LiveText(p?.title ?: target.channel.name, size = 24.sp, weight = FontWeight.Bold, maxLines = 2)
         Spacer(Modifier.height(6.dp))
@@ -3981,7 +3988,11 @@ private fun ProgramInfoDialog(
         Spacer(Modifier.height(12.dp))
         ScrollingDescription(p?.description ?: "No description available.", color = NuvioTheme.colors.TextSecondary, size = 16.sp, maxLines = 10)
         Spacer(Modifier.height(18.dp))
-        Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        // Scrolls sideways if the buttons don't all fit.
+        Row(
+            horizontalArrangement = Arrangement.spacedBy(10.dp),
+            modifier = Modifier.horizontalScroll(androidx.compose.foundation.rememberScrollState())
+        ) {
             val live = block != null && now >= block.startMs && now < block.stopMs
             val archive = p != null && p.stopMs <= now && CatchupUrlBuilder.isAvailable(target.channel.catchup, p.startMs, now)
             val upcoming = p != null && block != null && block.startMs > now
@@ -4012,6 +4023,16 @@ private fun ProgramInfoDialog(
             }
             if (p != null && recordLabel != null) {
                 LiveFocusRow(onClick = { onRecord(p) }) { f -> LiveText(recordLabel, color = focusedTextColor(f)) }
+            }
+            // The Calendar's bell (follow this show / put this movie on the Calendar).
+            infoBell?.let { b ->
+                LiveFocusRow(onClick = b.toggle) { f ->
+                    androidx.tv.material3.Icon(
+                        if (b.on) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
+                        contentDescription = null, tint = focusedTextColor(f), modifier = Modifier.size(16.dp)
+                    )
+                    LiveText(if (b.on) (if (b.isMovie) "On your Calendar" else "Bell on") else "Bell", color = focusedTextColor(f))
+                }
             }
             LiveFocusRow(onClick = onDismiss) { f -> LiveText("Close", color = focusedTextColor(f)) }
         }

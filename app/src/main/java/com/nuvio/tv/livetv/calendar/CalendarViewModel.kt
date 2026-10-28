@@ -58,15 +58,27 @@ class CalendarViewModel @Inject constructor(
         viewModelScope.launch { livePrefs.updateSettings { it.copy(calendarView = view) } }
     }
 
-    fun toggleFollow(e: CalendarEntry) = toggleFollow(
-        CalendarFollow(id = e.contentId, type = e.type, name = e.title, poster = e.poster, background = e.background,
-            imdbId = e.contentId.takeIf { it.startsWith("tt") }, addonBaseUrl = e.addonBaseUrl)
-    )
+    fun toggleFollow(e: CalendarEntry) {
+        // A movie airing from Live TV: its own bell.
+        val airing = repo.follows.value.firstOrNull { it.id == e.key }
+        if (airing != null) { toggleFollow(airing); return }
+        toggleFollow(
+            CalendarFollow(id = e.contentId, type = e.type, name = e.title, poster = e.poster, background = e.background,
+                imdbId = e.contentId.takeIf { it.startsWith("tt") }, addonBaseUrl = e.addonBaseUrl)
+        )
+    }
 
     fun toggleFollow(f: CalendarFollow) {
         viewModelScope.launch {
             val on = repo.toggleFollow(f)
-            LiveTvNotice.show(if (on) "Bell on: new episodes of ${f.name} will show on Home and in your Calendar" else "Bell turned off for ${f.name}")
+            LiveTvNotice.show(
+                when {
+                    f.isAiring && on -> "${f.name} is on your Calendar"
+                    f.isAiring -> "${f.name} taken off your Calendar"
+                    on -> "Bell on: new episodes of ${f.name} will show on Home and in your Calendar"
+                    else -> "Bell turned off for ${f.name}"
+                }
+            )
         }
     }
 

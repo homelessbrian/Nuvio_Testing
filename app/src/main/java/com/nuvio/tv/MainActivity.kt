@@ -1132,10 +1132,19 @@ open class MainActivity : ComponentActivity() {
                     val onDemandHasContent = remember { onDemandRepository.also { it.start() }.hasContent }
                         .collectAsState().value
                     val onDemandInSidebar = onDemandHasContent && liveTvSettingsNow.onDemandInSidebar
-                    // Live TV fork: Recordings now opens from Live TV (the ● button by the guide's ⚙).
-                    val recordingNow = liveTvRecorder.recordings.collectAsState().value.any {
+                    // Live TV fork: Recordings, in the menu once anything is recorded or set to record
+                    // (switched off in Settings → Menu & Features it only leaves the menu: recording
+                    // still works, and it's always in Live TV by the guide's ⚙).
+                    val allRecordings = liveTvRecorder.recordings.collectAsState().value
+                    val recordingNow = allRecordings.any {
                         it.status == com.nuvio.tv.livetv.record.RecordingStatus.RECORDING
                     }
+                    val recordingsInSidebar = liveTvSettingsNow.recordingsInSidebar && liveTvInSidebar && (allRecordings.isNotEmpty() ||
+                        liveTvRecordingScheduler.schedules.collectAsState().value.isNotEmpty() ||
+                        liveTvRecordingScheduler.series.collectAsState().value.isNotEmpty())
+                    // Opened from the guide's ● button, Back goes back to the guide; from the menu it's a menu page.
+                    val recordingsFromGuide = currentRoute == Screen.Recordings.route &&
+                        navController.previousBackStackEntry?.destination?.route == Screen.LiveTv.route
                     // Live TV fork: the Sports page (on unless switched off in Settings → Menu & Features).
                     val sportsInSidebar = sportsRepository.settings.collectAsState().value.showInSidebar
                     // Live TV fork: the Calendar shows in the menu once a show's bell is rung (or
@@ -1174,9 +1183,10 @@ open class MainActivity : ComponentActivity() {
                     // so the menus' wiring is unchanged; nothing opens a sub-list any more.)
                     var liveTvGroupOpen by remember { mutableStateOf(false) }
                     var sidebarOpenNow by remember { mutableStateOf(false) }
-                    val rootRoutes = remember(discoverLocation, liveTvInSidebar, onDemandInSidebar) {
+                    val rootRoutes = remember(discoverLocation, liveTvInSidebar, onDemandInSidebar, recordingsFromGuide) {
                         buildSet {
                             add(Screen.Home.route)
+                            if (!recordingsFromGuide) add(Screen.Recordings.route)
                             if (liveTvInSidebar) add(Screen.LiveTv.route)
                             // Live TV fork: On Demand is always a menu page (Back opens the menu
                             // first, like every other page), even while its catalog is being
@@ -1210,6 +1220,7 @@ open class MainActivity : ComponentActivity() {
                         liveTvInSidebar,
                         onDemandInSidebar,
                         recordingNow,
+                        recordingsInSidebar,
                         sportsInSidebar,
                         calendarInSidebar,
                         homeHidden,
@@ -1227,7 +1238,8 @@ open class MainActivity : ComponentActivity() {
                             pages.LIBRARY -> if (id !in hiddenPages) DrawerItem(route = Screen.Library.route, label = strNavLibrary, iconRes = R.raw.sidebar_library) else null
                             pages.CALENDAR -> if (calendarInSidebar && id !in hiddenPages) DrawerItem(route = Screen.Calendar.route, label = "Calendar", icon = Icons.Default.DateRange) else null
                             // Live TV's dot: something is recording (Recordings opens from the guide).
-                            pages.LIVE_TV -> if (liveTvInSidebar) DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow) else null
+                            pages.LIVE_TV -> if (liveTvInSidebar) DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow && !recordingsInSidebar) else null
+                            pages.RECORDINGS -> if (recordingsInSidebar) DrawerItem(route = Screen.Recordings.route, label = "Recordings", icon = Icons.Default.RadioButtonChecked, badge = recordingNow) else null
                             pages.SPORTS -> if (sportsInSidebar) DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents) else null
                             pages.ON_DEMAND -> if (onDemandInSidebar) DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary) else null
                             else -> null
@@ -1252,7 +1264,7 @@ open class MainActivity : ComponentActivity() {
                         }
                     }
                     // Live TV fork: Recordings belongs to Live TV in the menu.
-                    val menuRoute = if (currentRoute == Screen.Recordings.route) Screen.LiveTv.route else currentRoute
+                    val menuRoute = if (currentRoute == Screen.Recordings.route && (recordingsFromGuide || !recordingsInSidebar)) Screen.LiveTv.route else currentRoute
                     val selectedDrawerRoute = drawerItems.firstOrNull { item ->
                         menuRoute == item.route || menuRoute?.startsWith("${item.route}/") == true
                     }?.route

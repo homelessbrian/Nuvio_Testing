@@ -55,35 +55,30 @@ private fun Meta.isMovieMeta() = apiType.equals("movie", ignoreCase = true)
 private fun Meta.imdbOrNull() = imdbId?.takeIf { it.startsWith("tt") } ?: id.takeIf { it.startsWith("tt") }
 
 @Composable
-fun rememberCalendarBell(meta: Meta): CalendarBell? {
-    if (!meta.isSeriesMeta() && !meta.isMovieMeta()) return null
+fun rememberCalendarBell(meta: Meta): CalendarBell? =
+    if (!meta.isSeriesMeta()) null
+    else rememberShowBell(meta.id, meta.imdbOrNull(), meta.name, meta.poster, meta.background)
+
+/**
+ * The bell for a TV show (its page, a search result's hold-OK menu): on = followed, its new
+ * episodes on the Calendar and on Home. Null when the Calendar is switched off.
+ */
+@Composable
+fun rememberShowBell(id: String, imdbId: String?, name: String, poster: String?, background: String?): CalendarBell? {
     val context = LocalContext.current
     val repo = remember { repoOf(context) } ?: return null
     val follows by repo.follows.collectAsState()
     val settings by repo.settings.collectAsState()
     // The Calendar switched off (Settings → Menu & Features): no bell.
     if (SideMenuPages.CALENDAR in SideMenuPages.hidden(settings.sideMenuHidden)) return null
-    val imdb = meta.imdbOrNull()
-    val existing = follows.firstOrNull { it.id == meta.id || (imdb != null && (it.imdbId == imdb || it.id == imdb)) }
+    val imdb = imdbId?.takeIf { it.startsWith("tt") } ?: id.takeIf { it.startsWith("tt") }
+    val existing = follows.firstOrNull { it.id == id || (imdb != null && (it.imdbId == imdb || it.id == imdb)) }
     val scope = rememberCoroutineScope()
     return CalendarBell(on = existing != null, toggle = {
-        val follow = existing ?: CalendarFollow(
-            id = imdb ?: meta.id,
-            type = if (meta.isMovieMeta()) "movie" else "series",
-            name = meta.name,
-            poster = meta.poster,
-            background = meta.background,
-            imdbId = imdb
-        )
+        val follow = existing ?: CalendarFollow(id = imdb ?: id, type = "series", name = name, poster = poster, background = background, imdbId = imdb)
         scope.launch {
             val on = repo.toggleFollow(follow)
-            LiveTvNotice.show(
-                when {
-                    !on -> "Bell turned off for ${meta.name}"
-                    meta.isMovieMeta() -> "Bell on: ${meta.name} is on your Calendar"
-                    else -> "Bell on: new episodes of ${meta.name} will show on Home and in your Calendar"
-                }
-            )
+            LiveTvNotice.show(if (on) "Bell on: new episodes of $name will show on Home and in your Calendar" else "Bell turned off for $name")
         }
     })
 }
@@ -129,23 +124,32 @@ fun CalendarNextLine(meta: Meta, onFocused: () -> Unit = {}) {
         }
     }
     val text = line ?: return
-    Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 10.dp)) {
-        androidx.tv.material3.Icon(Icons.Default.DateRange, contentDescription = null, tint = NuvioTheme.colors.TextSecondary, modifier = Modifier.size(16.dp))
-        Spacer(Modifier.width(8.dp))
-        androidx.tv.material3.Text(text, color = NuvioTheme.colors.TextSecondary, fontSize = 14.sp, maxLines = 1)
+    // On a dark backing of its own: it sits over the show's picture or trailer, which can be anything.
+    Row(
+        verticalAlignment = Alignment.CenterVertically,
+        modifier = Modifier
+            .padding(bottom = 10.dp)
+            .clip(RoundedCornerShape(50))
+            .background(Color.Black.copy(alpha = 0.62f))
+            .padding(start = 6.dp, end = 14.dp, top = 5.dp, bottom = 5.dp)
+    ) {
+        // Record first: Down from the page's buttons lands on it, right under Play.
         val e = entry
         val g = e?.guide
         if (e != null && g != null && g.stopMs > System.currentTimeMillis()) {
-            Spacer(Modifier.width(12.dp))
             GuideChip(
-                text = if (recording) "● Recording on ${g.channelName}" else "● Record on ${g.channelName}",
+                text = if (recording) "Recording on ${g.channelName}" else "Record on ${g.channelName}",
                 onFocused = onFocused,
                 onClick = {
                     LiveTvNotice.show(repo.record(e))
                     recording = repo.isRecording(e)
                 }
             )
-        }
+            Spacer(Modifier.width(10.dp))
+        } else Spacer(Modifier.width(6.dp))
+        androidx.tv.material3.Icon(Icons.Default.DateRange, contentDescription = null, tint = Color.White, modifier = Modifier.size(16.dp))
+        Spacer(Modifier.width(8.dp))
+        androidx.tv.material3.Text(text, color = Color.White, fontSize = 14.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.Medium, maxLines = 1)
     }
 }
 
@@ -154,16 +158,23 @@ fun CalendarNextLine(meta: Meta, onFocused: () -> Unit = {}) {
 private fun GuideChip(text: String, onFocused: () -> Unit, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
-    Box(
+    Row(
         Modifier
             .clip(shape)
-            .background(if (focused) NuvioTheme.colors.Secondary else Color.White.copy(alpha = 0.10f))
-            .border(1.dp, Color.White.copy(alpha = if (focused) 0f else 0.18f), shape)
+            // Solid, so it reads on any picture: white with dark text when highlighted.
+            .background(if (focused) Color.White else Color(0xFF2A2A30))
+            .border(1.dp, if (focused) Color.Transparent else Color.White.copy(alpha = 0.35f), shape)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocused() }
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-            .padding(horizontal = 12.dp, vertical = 5.dp)
+            .padding(horizontal = 12.dp, vertical = 5.dp),
+        verticalAlignment = Alignment.CenterVertically
     ) {
-        androidx.tv.material3.Text(text, fontSize = 13.sp, color = if (focused) NuvioTheme.colors.OnSecondary else NuvioTheme.colors.TextPrimary)
+        Box(Modifier.size(9.dp).clip(RoundedCornerShape(50)).background(Color(0xFFE53935)))
+        Spacer(Modifier.width(7.dp))
+        androidx.tv.material3.Text(
+            text, fontSize = 13.sp, fontWeight = androidx.compose.ui.text.font.FontWeight.SemiBold,
+            color = if (focused) Color(0xFF111111) else Color.White, maxLines = 1
+        )
     }
 }
 

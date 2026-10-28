@@ -1456,7 +1456,11 @@ private fun PlaybackNavHost(
                         )
                     }
                 },
-                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) }
+                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) },
+                onOpenGame = { id ->
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(id)
+                    navController.navigate(Screen.Sports.route) { launchSingleTop = true }
+                }
             )
         }
 

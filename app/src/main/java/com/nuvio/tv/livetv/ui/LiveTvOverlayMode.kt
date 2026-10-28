@@ -416,6 +416,7 @@ private fun OverlayModeContent(
 
     futurePrompt?.let { (ch, p) ->
         val first = remember { FocusRequester() }
+        val bell = com.nuvio.tv.livetv.calendar.rememberLiveBell(p, ch)
         LiveDialog(onDismiss = { futurePrompt = null; activity++ }, width = 460.dp) {
             LiveText(p.title, size = osp(20f), weight = FontWeight.Bold, maxLines = 2)
             LiveText(
@@ -432,6 +433,11 @@ private fun OverlayModeContent(
                     if (user.reminders.any { it.channelKey == ch.key && it.startMs == p.startMs }) "Cancel reminder" else "Remind me"
                 ) {
                     viewModel.toggleReminder(ch, p)
+                    futurePrompt = null
+                    activity++
+                }
+                if (bell != null) MenuItem(bell.label) {
+                    bell.toggle()
                     futurePrompt = null
                     activity++
                 }

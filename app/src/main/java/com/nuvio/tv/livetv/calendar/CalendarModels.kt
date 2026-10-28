@@ -17,12 +17,20 @@ data class CalendarFollow(
     val background: String? = null,
     val imdbId: String? = null,
     val addonBaseUrl: String? = null,
-    val addedAt: Long = System.currentTimeMillis()
+    val addedAt: Long = System.currentTimeMillis(),
+    /** [TYPE_AIRING]: a movie in your Live TV guide, on this channel at this time. */
+    val channelKey: String? = null,
+    val channelName: String? = null,
+    val startMs: Long = 0L,
+    val stopMs: Long = 0L
 ) {
+    val isAiring: Boolean get() = type == TYPE_AIRING
+
     fun toJson(): JSONObject = JSONObject()
         .put("id", id).put("type", type).put("name", name)
         .put("poster", poster ?: "").put("background", background ?: "")
         .put("imdb", imdbId ?: "").put("addon", addonBaseUrl ?: "").put("at", addedAt)
+        .put("ch", channelKey ?: "").put("chName", channelName ?: "").put("start", startMs).put("stop", stopMs)
 
     companion object {
         fun fromJson(o: JSONObject) = CalendarFollow(
@@ -33,8 +41,17 @@ data class CalendarFollow(
             background = o.optString("background").ifBlank { null },
             imdbId = o.optString("imdb").ifBlank { null },
             addonBaseUrl = o.optString("addon").ifBlank { null },
-            addedAt = o.optLong("at", 0L)
+            addedAt = o.optLong("at", 0L),
+            channelKey = o.optString("ch").ifBlank { null },
+            channelName = o.optString("chName").ifBlank { null },
+            startMs = o.optLong("start", 0L),
+            stopMs = o.optLong("stop", 0L)
         )
+
+        /** A movie airing in your Live TV guide (its bell puts that airing on the Calendar). */
+        const val TYPE_AIRING = "airing"
+
+        fun airingId(channelKey: String, startMs: Long) = "air|$channelKey|$startMs"
 
         fun decode(raw: String?): List<CalendarFollow> = runCatching {
             if (raw.isNullOrBlank()) return emptyList()
@@ -63,7 +80,9 @@ data class CalendarHidden(val id: String, val name: String) {
     }
 }
 
-enum class CalendarKind { EPISODE, MOVIE }
+enum class CalendarKind { EPISODE, MOVIE,
+    /** A game for a team you follow in Sports. */
+    GAME }
 
 /** Tags beside an entry. */
 enum class CalendarTag(val label: String) {
@@ -74,7 +93,8 @@ enum class CalendarTag(val label: String) {
     SERIES_FINALE("Series finale"),
     IN_THEATERS("In theaters"),
     AT_HOME("At home"),
-    ON_DISC("On disc")
+    ON_DISC("On disc"),
+    ON_TV("On TV")
 }
 
 /** A channel in your Live TV guide showing this episode. */
@@ -89,7 +109,7 @@ data class CalendarGuideHit(
 )
 
 /** Why an entry is on your Calendar. */
-enum class CalendarReason { BELL, LIBRARY, WATCHING, AIRING_TODAY }
+enum class CalendarReason { BELL, LIBRARY, WATCHING, AIRING_TODAY, TEAM }
 
 @Immutable
 data class CalendarEntry(
@@ -127,7 +147,12 @@ data class CalendarEntry(
     /** You haven't reached it yet: its title and picture are hidden. */
     val spoiler: Boolean = false,
     val runtimeMin: Int? = null,
-    val guide: CalendarGuideHit? = null
+    val guide: CalendarGuideHit? = null,
+    /** Games: the Sports page's id for it, the league, and the score or state ("Final · 3–2", "Live · 2nd"). */
+    val eventId: String? = null,
+    val league: String? = null,
+    val score: String? = null,
+    val live: Boolean = false
 ) {
     val episodeCode: String?
         get() = if (season == null || episode == null) null else buildString {
@@ -173,15 +198,16 @@ object SideMenuPages {
     const val LIBRARY = "library"
     const val CALENDAR = "calendar"
     const val LIVE_TV = "livetv"
+    const val RECORDINGS = "recordings"
     const val SPORTS = "sports"
     const val ON_DEMAND = "ondemand"
     const val DISCOVER = "discover"
 
-    val DEFAULT_ORDER = listOf(HOME, DISCOVER, SEARCH, LIBRARY, CALENDAR, LIVE_TV, SPORTS, ON_DEMAND)
+    val DEFAULT_ORDER = listOf(HOME, DISCOVER, SEARCH, LIBRARY, CALENDAR, LIVE_TV, SPORTS, ON_DEMAND, RECORDINGS)
 
     val NAMES = mapOf(
         HOME to "Home", SEARCH to "Search", LIBRARY to "Library", CALENDAR to "Calendar", LIVE_TV to "Live TV",
-        SPORTS to "Sports", ON_DEMAND to "On Demand", DISCOVER to "Discover"
+        SPORTS to "Sports", ON_DEMAND to "On Demand", DISCOVER to "Discover", RECORDINGS to "Recordings"
     )
 
     /** The order as saved, with any page it doesn't mention in its usual place. */
@@ -202,5 +228,5 @@ object SideMenuPages {
     fun hidden(saved: String): Set<String> = saved.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
 
     /** Live TV's own pages (a thin line goes above the first of them). */
-    val LIVE_FAMILY = setOf(LIVE_TV, SPORTS, ON_DEMAND)
+    val LIVE_FAMILY = setOf(LIVE_TV, SPORTS, ON_DEMAND, RECORDINGS)
 }

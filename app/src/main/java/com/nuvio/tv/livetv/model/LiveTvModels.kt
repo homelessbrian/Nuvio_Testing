@@ -338,6 +338,8 @@ data class LiveTvSettings(
     val calendarCountry: String = "US",
     /** Calendar: Airing Today leaves out news, talk and sports shows. */
     val calendarSkipNewsTalk: Boolean = true,
+    /** Calendar: games for the teams you follow in Sports. */
+    val calendarSports: Boolean = true,
     /** Calendar: opens in "LIST" or "MONTH" view. */
     val calendarView: String = "LIST",
     /** Offer "Watch On Demand" in Nuvio's stream list for movies and episodes. */
@@ -696,7 +698,7 @@ object DeveloperTools {
  */
 object LiveTvLoadReport {
     /** Which Live TV kit this app was built from: changed with every kit, so a report shows the exact build. */
-    const val KIT_STAMP = "2026-10-28 14:20"
+    const val KIT_STAMP = "2026-10-28 16:35"
 
     /** The first line of every report: kit and app version, so it's clear which build wrote it. */
     val buildLine: String
