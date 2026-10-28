@@ -58,6 +58,15 @@ class CalendarViewModel @Inject constructor(
         viewModelScope.launch { livePrefs.updateSettings { it.copy(calendarView = view) } }
     }
 
+    /** Airing Today's "News & talk" filter: leaves news and talk shows out (or puts them back). */
+    fun setSkipNewsTalk(skip: Boolean) {
+        viewModelScope.launch {
+            livePrefs.updateSettings { it.copy(calendarSkipNewsTalk = skip) }
+            delay(300) // the saved setting reaches the Calendar first
+            repo.loadAiring(force = true)
+        }
+    }
+
     fun toggleFollow(e: CalendarEntry) {
         // A movie airing from Live TV: its own bell.
         val airing = repo.follows.value.firstOrNull { it.id == e.key }
@@ -95,6 +104,26 @@ class CalendarViewModel @Inject constructor(
 
     fun record(e: CalendarEntry) {
         LiveTvNotice.show(repo.record(e))
+    }
+
+    /** The channel remembered for each network. */
+    val channelPicks = repo.channelPicks
+
+    fun record(e: CalendarEntry, hit: CalendarGuideHit) {
+        LiveTvNotice.show(repo.record(e, hit))
+    }
+
+    /** Tunes Live TV to [hit]'s channel. False when it isn't there any more. */
+    fun watchLive(hit: CalendarGuideHit): Boolean {
+        val ch = repo.channelOf(hit) ?: return false
+        playback.play(ch)
+        viewModelScope.launch { runCatching { livePrefs.recordWatched(ch.key) } }
+        return true
+    }
+
+    /** "Always use the channel I pick for FX": remembered (or forgotten with null). */
+    fun setChannelPick(network: String?, hit: CalendarGuideHit?) {
+        viewModelScope.launch { repo.setChannelPick(network, hit) }
     }
 
     /** Tunes Live TV to the episode's channel. False when it isn't there. */

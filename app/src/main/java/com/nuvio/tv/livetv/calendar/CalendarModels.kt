@@ -105,7 +105,13 @@ data class CalendarGuideHit(
     val channelLogo: String?,
     val startMs: Long,
     val stopMs: Long,
-    val title: String
+    val title: String,
+    /** The playlist it's from. */
+    val playlist: String? = null,
+    val catchup: Boolean = false,
+    /** Airs well after the episode's first airing (a West Coast feed). */
+    val later: Boolean = false,
+    val favorite: Boolean = false
 )
 
 /** Why an entry is on your Calendar. */
@@ -148,6 +154,10 @@ data class CalendarEntry(
     val spoiler: Boolean = false,
     val runtimeMin: Int? = null,
     val guide: CalendarGuideHit? = null,
+    /** Every channel in your guide showing it, best first ([guide] is the one used by default). */
+    val guideOptions: List<CalendarGuideHit> = emptyList(),
+    /** What it's about (the episode's summary, the movie's overview). */
+    val description: String? = null,
     /** Games: the Sports page's id for it, the league, and the score or state ("Final · 3–2", "Live · 2nd"). */
     val eventId: String? = null,
     val league: String? = null,

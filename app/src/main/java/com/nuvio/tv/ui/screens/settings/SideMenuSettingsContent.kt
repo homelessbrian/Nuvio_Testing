@@ -114,11 +114,10 @@ fun SideMenuSettingsContent(initialFocusRequester: FocusRequester? = null) {
                 when (mode) {
                     "OFF" -> "Off: no bells on show pages, no new-episode cards on Home"
                     "ALWAYS" -> "Release dates of your shows and movies, bells on show pages and new-episode cards on Home"
-                    else -> if (follows.isNotEmpty()) "In the menu: you've rung the bell on ${follows.size} title${if (follows.size == 1) "" else "s"}"
-                    else "Shows up in the menu once you ring the bell on a show's page"
+                    else -> "Shows up in the menu by itself once your shows (watch history, Library or a bell) have episodes coming"
                 },
                 mode != "OFF",
-                value = when (mode) { "OFF" -> "Off"; "ALWAYS" -> "Always in the menu"; else -> "After a bell" }
+                value = when (mode) { "OFF" -> "Off"; "ALWAYS" -> "Always in the menu"; else -> "Automatic" }
             ) { dialog = "calendar" }
         }
         SideMenuPages.LIVE_TV -> PageRow("Live TV", "The guide, Recordings, the Live TV row on Home and channels in Search", s.showInSidebar) {
@@ -247,7 +246,7 @@ fun SideMenuSettingsContent(initialFocusRequester: FocusRequester? = null) {
         "calendar" -> SettingsSingleChoiceDialog(
             title = "Calendar",
             options = listOf(
-                SettingsPickerOption("BELL", "After a bell", "In the menu once you ring the bell on a show's page"),
+                SettingsPickerOption("BELL", "Automatic", "In the menu once your shows have episodes coming"),
                 SettingsPickerOption("ALWAYS", "Always in the menu", "Including Airing Today, before you follow anything"),
                 SettingsPickerOption("OFF", "Off", "No Calendar, no bells, no new-episode cards on Home")
             ),

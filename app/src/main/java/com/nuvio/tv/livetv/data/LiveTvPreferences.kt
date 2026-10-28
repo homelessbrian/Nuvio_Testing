@@ -128,6 +128,7 @@ class LiveTvPreferences @Inject constructor(
         val calendarSports = booleanPreferencesKey("calendar_sports")
         val calendarFollows = stringPreferencesKey("calendar_follows")
         val calendarHiddenShows = stringPreferencesKey("calendar_hidden_shows")
+        val calendarChannelPicks = stringPreferencesKey("calendar_channel_picks")
         val onDemandInStreams = booleanPreferencesKey("on_demand_in_streams")
         val onDemandStreamsPosition = stringPreferencesKey("on_demand_streams_position")
         val onDemandAutoPlay = booleanPreferencesKey("on_demand_auto_play")
@@ -554,6 +555,13 @@ class LiveTvPreferences @Inject constructor(
 
     suspend fun editCalendarHiddenShows(transform: (String) -> String) {
         store.edit { it[Keys.calendarHiddenShows] = transform(it[Keys.calendarHiddenShows] ?: "") }
+    }
+
+    /** The channel picked for each network ("Always use the channel I pick for FX"): a JSON object. */
+    val calendarChannelPicks: Flow<String> = store.data.map { it[Keys.calendarChannelPicks] ?: "" }.distinctUntilChanged()
+
+    suspend fun editCalendarChannelPicks(transform: (String) -> String) {
+        store.edit { it[Keys.calendarChannelPicks] = transform(it[Keys.calendarChannelPicks] ?: "") }
     }
 
     // ---------- settings ----------

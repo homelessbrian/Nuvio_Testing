@@ -1459,7 +1459,13 @@ private fun PlaybackNavHost(
                 onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) },
                 onOpenGame = { id ->
                     com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(id)
-                    navController.navigate(Screen.Sports.route) { launchSingleTop = true }
+                    // Like picking Sports in the menu: the Calendar keeps its own place, and picking
+                    // Calendar in the menu afterwards opens the Calendar (not Sports again).
+                    navController.navigate(Screen.Sports.route) {
+                        popUpTo(navController.graph.startDestinationId) { saveState = true }
+                        launchSingleTop = true
+                        restoreState = true
+                    }
                 }
             )
         }

@@ -23,6 +23,11 @@ object CalendarHomeFeed {
 
     @Volatile private var released: List<ContinueWatchingItem.NextUp> = emptyList()
     @Volatile private var upcoming: List<ContinueWatchingItem.NextUp> = emptyList()
+    @Volatile private var movies: List<ContinueWatchingItem.InProgress> = emptyList()
+    @Volatile private var injectedMovies: Set<String> = emptySet()
+
+    /** Marks the Calendar's movie cards ("Out now" instead of "Resume"). */
+    const val SOURCE = "calendar_release"
     @Volatile private var injected: Set<String> = emptySet()
 
     private var prefs: android.content.SharedPreferences? = null
@@ -35,11 +40,34 @@ object CalendarHomeFeed {
         synchronized(dismissed) { dismissed += p.getStringSet("dismissed", emptySet()).orEmpty() }
     }
 
-    fun publish(releasedEntries: List<CalendarEntry>, upcomingEntries: List<CalendarEntry>) {
+    fun publish(releasedEntries: List<CalendarEntry>, upcomingEntries: List<CalendarEntry>, movieEntries: List<CalendarEntry> = emptyList()) {
         released = releasedEntries.mapNotNull { toNextUp(it, aired = true) }
         upcoming = upcomingEntries.mapNotNull { toNextUp(it, aired = false) }
+        movies = movieEntries.filter { it.contentId.startsWith("tt") }.map { e ->
+            val at = e.day.atStartOfDay(ZoneId.systemDefault()).toInstant().toEpochMilli()
+            ContinueWatchingItem.InProgress(
+                progress = com.nuvio.tv.domain.model.WatchProgress(
+                    contentId = e.contentId,
+                    contentType = "movie",
+                    name = e.title,
+                    poster = e.poster,
+                    backdrop = e.background,
+                    logo = null,
+                    videoId = e.contentId,
+                    season = null,
+                    episode = null,
+                    episodeTitle = "Now out to watch at home",
+                    position = 0L,
+                    duration = 0L,
+                    lastWatched = at,
+                    source = SOURCE
+                )
+            )
+        }
         _version.value++
     }
+
+    fun isInjectedMovie(contentId: String): Boolean = contentId in injectedMovies
 
     private fun key(contentId: String, season: Int?, episode: Int?) = "$contentId|$season|$episode"
 
@@ -82,12 +110,16 @@ object CalendarHomeFeed {
         main: List<ContinueWatchingItem>,
         upcomingRow: List<ContinueWatchingItem>
     ): Pair<List<ContinueWatchingItem>, List<ContinueWatchingItem>> {
-        val baseMain = main.filterNot { it is ContinueWatchingItem.NextUp && it.info.fromCalendar }
-        val baseUp = upcomingRow.filterNot { it is ContinueWatchingItem.NextUp && it.info.fromCalendar }
+        fun mine(it: ContinueWatchingItem) = (it is ContinueWatchingItem.NextUp && it.info.fromCalendar) ||
+            (it is ContinueWatchingItem.InProgress && it.progress.source == SOURCE)
+        val baseMain = main.filterNot(::mine)
+        val baseUp = upcomingRow.filterNot(::mine)
         val r = released
         val u = upcoming
-        if (r.isEmpty() && u.isEmpty()) {
+        val mv = movies
+        if (r.isEmpty() && u.isEmpty() && mv.isEmpty()) {
             injected = emptySet()
+            injectedMovies = emptySet()
             return baseMain to baseUp
         }
         val native = (baseMain + baseUp).map {
@@ -99,11 +131,17 @@ object CalendarHomeFeed {
         val gone = synchronized(dismissed) { dismissed.toSet() }
         val addMain = r.filter { it.info.contentId !in native && key(it.info.contentId, it.info.season, it.info.episode) !in gone }
         val addUp = u.filter { it.info.contentId !in native && it.info.contentId !in addMain.map { a -> a.info.contentId } }
+        val addMovies = mv.filter { it.progress.contentId !in native && key(it.progress.contentId, null, null) !in gone }
         injected = (addMain + addUp).map { "${it.info.contentId}|${it.info.videoId}" }.toSet()
+        injectedMovies = addMovies.map { it.progress.contentId }.toSet()
         // New episodes go in by when they came out, among the rest of Continue Watching.
         val outMain = baseMain.toMutableList()
         for (item in addMain.sortedByDescending { it.info.sortTimestamp }) {
             val i = outMain.indexOfFirst { stamp(it) < item.info.sortTimestamp }
+            if (i < 0) outMain += item else outMain.add(i, item)
+        }
+        for (item in addMovies.sortedByDescending { it.progress.lastWatched }) {
+            val i = outMain.indexOfFirst { stamp(it) < item.progress.lastWatched }
             if (i < 0) outMain += item else outMain.add(i, item)
         }
         val outUp = (baseUp + addUp).sortedBy { (it as? ContinueWatchingItem.NextUp)?.info?.releaseTimestamp ?: Long.MAX_VALUE }
@@ -120,6 +158,15 @@ object CalendarHomeFeed {
 
     /** Removed from Continue Watching: true when it was the Calendar's card (it stays away). */
     fun dismiss(contentId: String, season: Int?, episode: Int?): Boolean {
+        if (contentId in injectedMovies) {
+            synchronized(dismissed) {
+                dismissed += key(contentId, null, null)
+                prefs?.edit()?.putStringSet("dismissed", HashSet(dismissed))?.apply()
+            }
+            movies = movies.filter { it.progress.contentId != contentId }
+            _version.value++
+            return true
+        }
         val mine = released.any { it.info.contentId == contentId && (season == null || it.info.season == season) } ||
             upcoming.any { it.info.contentId == contentId }
         if (!mine) return false

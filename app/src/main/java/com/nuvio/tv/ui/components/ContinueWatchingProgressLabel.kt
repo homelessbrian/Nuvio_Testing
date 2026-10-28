@@ -10,7 +10,9 @@ internal fun formatContinueWatchingProgressLabel(
     percentWatchedLabel: String,
     hoursMinLeftLabel: String,
     minLeftLabel: String
-): String {
+: String {
+    // Live TV fork: a Calendar card for a movie you rang the bell on, now out to watch at home.
+    if (progress.source == com.nuvio.tv.livetv.calendar.CalendarHomeFeed.SOURCE) return "Out now"
     val effectiveDuration = progress.duration
     val effectivePosition = if (progress.position > 0L) {
         progress.position

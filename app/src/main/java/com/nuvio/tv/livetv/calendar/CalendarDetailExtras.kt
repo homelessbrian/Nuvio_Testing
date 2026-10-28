@@ -55,9 +55,53 @@ private fun Meta.isMovieMeta() = apiType.equals("movie", ignoreCase = true)
 private fun Meta.imdbOrNull() = imdbId?.takeIf { it.startsWith("tt") } ?: id.takeIf { it.startsWith("tt") }
 
 @Composable
-fun rememberCalendarBell(meta: Meta): CalendarBell? =
-    if (!meta.isSeriesMeta()) null
-    else rememberShowBell(meta.id, meta.imdbOrNull(), meta.name, meta.poster, meta.background)
+fun rememberCalendarBell(meta: Meta): CalendarBell? = when {
+    meta.isSeriesMeta() -> rememberShowBell(meta.id, meta.imdbOrNull(), meta.name, meta.poster, meta.background)
+    meta.isMovieMeta() -> rememberMovieBell(meta)
+    else -> null
+}
+
+/**
+ * The bell on a movie's page: only while it isn't out to watch at home yet (in theaters, or not
+ * released). When it comes out at home, a card in Continue Watching says so.
+ */
+@Composable
+private fun rememberMovieBell(meta: Meta): CalendarBell? {
+    val context = LocalContext.current
+    val repo = remember { repoOf(context) } ?: return null
+    val follows by repo.follows.collectAsState()
+    val settings by repo.settings.collectAsState()
+    if (SideMenuPages.CALENDAR in SideMenuPages.hidden(settings.sideMenuHidden)) return null
+    val imdb = meta.imdbOrNull()
+    val existing = follows.firstOrNull { !it.isAiring && (it.id == meta.id || (imdb != null && (it.imdbId == imdb || it.id == imdb))) }
+    var notOut by remember(meta.id) { mutableStateOf<Boolean?>(null) }
+    LaunchedEffect(meta.id) {
+        val today = LocalDate.now()
+        val year = CalendarRepository.yearOf(meta.releaseInfo) ?: CalendarRepository.yearOf(meta.released)
+        val d = repo.movieDates(meta.id, imdb)
+        notOut = when {
+            d == null -> year != null && year >= today.year
+            d.digital != null -> d.digital.isAfter(today)
+            // In theaters (or coming), with no date yet to watch at home.
+            d.theater != null -> !d.theater.isBefore(today.minusDays(240))
+            else -> year != null && year >= today.year
+        }
+    }
+    // Already out at home: nothing to wait for (unless its bell was rung before: it can be turned off).
+    if (existing == null && notOut != true) return null
+    val scope = rememberCoroutineScope()
+    return CalendarBell(on = existing != null, toggle = {
+        val follow = existing ?: CalendarFollow(id = imdb ?: meta.id, type = "movie", name = meta.name, poster = meta.poster,
+            background = meta.background, imdbId = imdb)
+        scope.launch {
+            val on = repo.toggleFollow(follow)
+            LiveTvNotice.show(
+                if (on) "Bell on: you'll get a card on Home when ${meta.name} is out to watch at home"
+                else "Bell turned off for ${meta.name}"
+            )
+        }
+    })
+}
 
 /**
  * The bell for a TV show (its page, a search result's hold-OK menu): on = followed, its new

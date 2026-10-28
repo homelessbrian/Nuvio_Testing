@@ -62,8 +62,7 @@ class CalendarRepository @Inject constructor(
     private val mutex = Mutex()
 
     val follows: StateFlow<List<CalendarFollow>> = prefs.calendarFollows
-        // Shows only (bells rung on movies in an earlier version are left out).
-        .map { raw -> CalendarFollow.decode(raw).filter { it.type != "movie" } }
+        .map { raw -> CalendarFollow.decode(raw) }
         .stateIn(scope, SharingStarted.Eagerly, emptyList())
 
     val hiddenShows: StateFlow<List<CalendarHidden>> = prefs.calendarHiddenShows
@@ -75,6 +74,14 @@ class CalendarRepository @Inject constructor(
 
     private val _state = MutableStateFlow(CalendarState())
     val state: StateFlow<CalendarState> = _state.asStateFlow()
+
+    /**
+     * Your shows (watch history, Library, bells) have episodes on the Calendar: the Calendar
+     * shows up in the side menu by itself.
+     */
+    val hasShows: StateFlow<Boolean> = _state.map { st -> st.entries.any { it.kind == CalendarKind.EPISODE } }
+        .distinctUntilChanged()
+        .stateIn(scope, SharingStarted.Eagerly, false)
 
     private val _airing = MutableStateFlow<AiringToday>(AiringToday())
     val airing: StateFlow<AiringToday> = _airing.asStateFlow()
@@ -127,7 +134,8 @@ class CalendarRepository @Inject constructor(
         }
         // New guide listings: look for your episodes in them again.
         scope.launch {
-            liveRepo.programs.drop(1).debounce(15_000).collect { matchGuide() }
+            kotlinx.coroutines.flow.combine(liveRepo.programs, liveRepo.channels) { _, c -> c.size }
+                .drop(1).debounce(15_000).collect { matchGuide() }
         }
     }
 
@@ -188,6 +196,8 @@ class CalendarRepository @Inject constructor(
         val lastWatched: Long = 0L
     )
 
+    private fun dropped(id: String): Boolean = runCatching { progress.isDroppedShow(id) }.getOrDefault(false)
+
     /** Episodes you've seen of each show: the furthest one, and every one marked watched. */
     private data class Seen(val furthest: Pair<Int, Int>?, val watched: Set<Pair<Int, Int>>)
 
@@ -213,14 +223,24 @@ class CalendarRepository @Inject constructor(
             add(Candidate(e.id, type, e.name, e.poster, e.background, e.imdbId ?: e.id.takeIf { it.startsWith("tt") },
                 e.tmdbId ?: tmdbOf(e.id), e.addonBaseUrl, mutableSetOf(CalendarReason.LIBRARY), yearOf(e.releaseInfo)))
         }
-        val recent = System.currentTimeMillis() - 60 * CalendarSources.DAY
+        // Every show in your watch history, however long ago (synced from Trakt or Simkl too):
+        // the ones between seasons are the ones you most want to hear about. Shows you've
+        // dropped are left out; ended shows simply have nothing coming.
         val prog: List<WatchProgress> = withTimeoutOrNull(20_000) { progress.allProgress.first() }.orEmpty()
-        prog.filter { isSeries(it.contentType) && it.lastWatched >= recent }
+        prog.filter { isSeries(it.contentType) && !dropped(it.contentId) }
             .groupBy { it.contentId }
             .forEach { (id, items) ->
                 val p = items.maxBy { it.lastWatched }
                 add(Candidate(id, "series", p.name, p.poster, p.backdrop, id.takeIf { it.startsWith("tt") }, tmdbOf(id), p.addonBaseUrl,
                     mutableSetOf(CalendarReason.WATCHING), null, p.lastWatched))
+            }
+        val history: List<WatchedItem> = withTimeoutOrNull(20_000) { progress.watchedItems.first() }.orEmpty()
+        history.filter { it.season != null && !dropped(it.contentId) }
+            .groupBy { it.contentId }
+            .forEach { (id, items) ->
+                val w = items.maxBy { it.watchedAt }
+                add(Candidate(id, "series", w.title, w.poster, null, id.takeIf { it.startsWith("tt") }, tmdbOf(id), null,
+                    mutableSetOf(CalendarReason.WATCHING), null, w.watchedAt))
             }
         val hidden = hiddenShows.value.map { it.id }.toSet()
         return out.values.filter { it.id !in hidden && (it.imdb == null || it.imdb !in hidden) }
@@ -484,13 +504,14 @@ class CalendarRepository @Inject constructor(
                 type = "series",
                 title = c.name.ifBlank { d.show.name },
                 poster = c.poster ?: d.show.image,
-                background = c.background,
+                background = c.background ?: d.show.backdrop,
                 addonBaseUrl = c.addonBaseUrl,
                 season = e.season,
                 episode = e.number,
                 lastEpisode = last.number.takeIf { g.size > 1 },
                 episodeTitle = if (g.size > 1) null else e.name,
                 episodeImage = e.image,
+                description = e.summary.takeIf { g.size == 1 },
                 airMs = e.airMs,
                 day = e.airDate!!,
                 network = d.show.network,
@@ -517,7 +538,8 @@ class CalendarRepository @Inject constructor(
         fun fmt(d: LocalDate) = d.format(java.time.format.DateTimeFormatter.ofPattern("MMM d"))
         fun entry(day: LocalDate, tag: CalendarTag, note: String?) = CalendarEntry(
             key = "mv|$contentId|$tag", kind = CalendarKind.MOVIE, contentId = contentId, type = "movie",
-            title = m.name.ifBlank { dates.title ?: "" }, poster = m.poster ?: dates.poster, background = m.background,
+            title = m.name.ifBlank { dates.title ?: "" }, poster = m.poster ?: dates.poster, background = m.background ?: dates.backdrop,
+            description = dates.overview,
             addonBaseUrl = m.addonBaseUrl, day = day, tags = listOf(tag), note = note, reasons = m.reasons.toSet(),
             watched = watched
         )
@@ -564,7 +586,7 @@ class CalendarRepository @Inject constructor(
                     val lastNumber = eps.maxOf { it.second.number }
                     val id = show.imdb ?: return@mapNotNull null
                     CalendarEntry(
-                        key = "air|$id|${e.season}|${e.number}",
+                        key = "today|$id|${e.season}|${e.number}",
                         kind = CalendarKind.EPISODE,
                         contentId = id,
                         type = "series",
@@ -576,6 +598,7 @@ class CalendarRepository @Inject constructor(
                         lastEpisode = lastNumber.takeIf { eps.size > 1 && it > e.number },
                         episodeTitle = if (eps.size > 1) null else e.name,
                         episodeImage = e.image,
+                        description = e.summary.takeIf { eps.size == 1 },
                         airMs = e.airMs,
                         day = e.airDate ?: day,
                         network = show.network,
@@ -602,18 +625,45 @@ class CalendarRepository @Inject constructor(
                 val s = settings.value
                 val cur = _state.value
                 if (baseEntries.isNotEmpty()) {
-                    baseEntries = withGuide(baseEntries.map { if (it.kind == CalendarKind.EPISODE) it.copy(guide = null) else it }, s)
+                    baseEntries = withGuide(baseEntries.map { if (it.kind == CalendarKind.EPISODE) it.copy(guide = null, guideOptions = emptyList()) else it }, s)
                     _state.value = cur.copy(entries = withGames(baseEntries))
                 }
             }
             val a = _airing.value
-            if (a.entries.isNotEmpty()) _airing.value = a.copy(entries = withGuide(a.entries.map { it.copy(guide = null) }, settings.value))
+            if (a.entries.isNotEmpty()) _airing.value = a.copy(entries = withGuide(a.entries.map { it.copy(guide = null, guideOptions = emptyList()) }, settings.value))
         }
     }
 
+    /** The channel picked for a network ("Always use the channel I pick for FX"): network -> channel key. */
+    val channelPicks: StateFlow<Map<String, String>> = prefs.calendarChannelPicks
+        .map { raw ->
+            runCatching {
+                val o = org.json.JSONObject(raw.ifBlank { "{}" })
+                o.keys().asSequence().associateWith { o.optString(it) }
+            }.getOrDefault(emptyMap())
+        }
+        .stateIn(scope, SharingStarted.Eagerly, emptyMap())
+
+    fun pickKey(network: String?): String? = network?.let { LiveTvRepository.normalize(it) }?.takeIf { it.isNotEmpty() }
+
+    /** The channel remembered for [network], if any. */
+    fun pickedChannel(network: String?): String? = pickKey(network)?.let { channelPicks.value[it] }
+
+    /** Remembers [hit]'s channel for [network] (or forgets the pick with null). */
+    suspend fun setChannelPick(network: String?, hit: CalendarGuideHit?) {
+        val k = pickKey(network) ?: return
+        prefs.editCalendarChannelPicks { raw ->
+            val o = runCatching { org.json.JSONObject(raw.ifBlank { "{}" }) }.getOrDefault(org.json.JSONObject())
+            if (hit == null) o.remove(k) else o.put(k, hit.channelKey)
+            o.toString()
+        }
+        matchGuide()
+    }
+
     /**
-     * Episodes on a channel in your Live TV guide, from now to a week ahead: the channel named
-     * for the show's network first, then your favorites.
+     * Episodes on channels in your Live TV guide, from now to a week ahead. Every channel showing
+     * it is kept (best first: the one you picked for the network, then the channel named for the
+     * network, your favorites, HD), so you can choose.
      */
     private suspend fun withGuide(entries: List<CalendarEntry>, s: LiveTvSettings): List<CalendarEntry> {
         val channels = liveRepo.channels.value
@@ -625,51 +675,78 @@ class CalendarRepository @Inject constructor(
         val shift = s.epgOffsetMinutes * 60_000L
         val byKey = channels.associateBy { it.key }
         val favorites = runCatching { prefs.userState.first().favorites.toSet() }.getOrDefault(emptySet())
-        val words = wanted.map { searchWord(it.title) }.filter { it.length >= 3 }.distinct()
-        val hits = runCatching {
-            guideDb.findByWords(
-                fromMs = wanted.minOf { it.airMs!! } - 2 * CalendarSources.HOUR - shift,
-                toMs = wanted.maxOf { it.airMs!! } + 2 * CalendarSources.HOUR - shift,
-                minStopMs = now - shift,
-                words = words,
-                inDescription = false,
-                limit = 8_000
-            )
-        }.getOrDefault(emptyList())
-        if (hits.isEmpty()) return entries
-        val byTitle = HashMap<String, MutableList<Pair<String, EpgProgram>>>()
-        hits.forEach { (key, p) ->
-            if (key !in byKey) return@forEach
-            val shifted = if (shift == 0L) p else p.copy(startMs = p.startMs + shift, stopMs = p.stopMs + shift)
-            byTitle.getOrPut(guideName(p.title)) { ArrayList() } += key to shifted
-        }
-        val wantedKeys = wanted.map { it.key }.toHashSet()
-        return entries.map { e ->
-            if (e.key !in wantedKeys) return@map e
+        val picks = channelPicks.value
+        val hd = Regex("(?i)\\b(fhd|hd|1080|4k|uhd)\\b")
+        val found = HashMap<String, List<CalendarGuideHit>>()
+        // One small look per episode, at its own air time. (One big look for every show at once
+        // ran into the limit on results: common words, and shows on many channels, used it up
+        // and most episodes found nothing.)
+        for (e in wanted) {
+            val word = searchWord(e.title).takeIf { it.length >= 3 } ?: continue
+            val air = e.airMs!!
+            val hits = runCatching {
+                guideDb.findByWords(
+                    fromMs = air - 2 * CalendarSources.HOUR - shift,
+                    toMs = air + 4 * CalendarSources.HOUR - shift,
+                    minStopMs = now - shift,
+                    words = listOf(word),
+                    inDescription = false,
+                    limit = 3_000
+                )
+            }.getOrDefault(emptyList())
             val name = guideName(e.title)
-            val options = byTitle[name].orEmpty().filter { (_, p) -> kotlin.math.abs(p.startMs - e.airMs!!) <= 75 * 60_000L }
-            if (options.isEmpty()) return@map e
             val net = e.network?.let { LiveTvRepository.normalize(it) }.orEmpty()
-            val best = options.maxBy { (key, p) ->
-                val ch = byKey[key]!!
-                var score = 0
+            val picked = picks[pickKey(e.network) ?: ""]
+            val options = hits.mapNotNull { (key, p0) ->
+                val ch = byKey[key] ?: return@mapNotNull null
+                if (guideName(p0.title) != name) return@mapNotNull null
+                val p = if (shift == 0L) p0 else p0.copy(startMs = p0.startMs + shift, stopMs = p0.stopMs + shift)
+                val off = p.startMs - air
+                // Around the first airing; a later feed (West Coast) up to about 3 hours after.
+                if (off < -75 * 60_000L || off > 200 * 60_000L) return@mapNotNull null
+                val later = off > 75 * 60_000L
                 val chName = LiveTvRepository.normalize(ch.name)
-                if (net.isNotEmpty() && (chName == net || chName.startsWith(net))) score += 100
+                var score = 0
+                if (key == picked) score += 1_000
+                if (net.isNotEmpty() && (chName == net || chName.startsWith(net) || chName.contains(net))) score += 100
                 if (key in favorites) score += 40
-                if (Regex("(?i)\\b(fhd|hd|1080|4k|uhd)\\b").containsMatchIn(ch.name)) score += 5
-                score -= (kotlin.math.abs(p.startMs - e.airMs!!) / 60_000L).toInt()
-                score
-            }
-            val ch = byKey[best.first]!!
-            e.copy(guide = CalendarGuideHit(ch.key, ch.name, ch.logo, best.second.startMs, best.second.stopMs, best.second.title))
+                if (hd.containsMatchIn(ch.name)) score += 5
+                if (later) score -= 300
+                score -= (kotlin.math.abs(off) / 60_000L).toInt().coerceAtMost(75)
+                score to CalendarGuideHit(
+                    ch.key, ch.name, ch.logo, p.startMs, p.stopMs, p.title,
+                    playlist = ch.sourceName, catchup = ch.catchup != null, later = later, favorite = key in favorites
+                )
+            }.distinctBy { it.second.channelKey }.sortedByDescending { it.first }.map { it.second }
+            if (options.isNotEmpty()) found[e.key] = options
+        }
+        if (found.isEmpty()) return entries
+        return entries.map { e ->
+            val options = found[e.key] ?: return@map e
+            e.copy(guide = options.first(), guideOptions = options)
         }
     }
 
     /** True when [entry] on that channel is set to record. */
-    fun isRecording(entry: CalendarEntry): Boolean {
-        val g = entry.guide ?: return false
-        return scheduler.schedules.value.any { it.channel.key == g.channelKey && it.startMs == g.startMs }
+    fun isRecording(entry: CalendarEntry): Boolean =
+        (entry.guideOptions.ifEmpty { listOfNotNull(entry.guide) }).any { isRecording(it) }
+
+    /** True when [hit] is set to record. */
+    fun isRecording(hit: CalendarGuideHit): Boolean =
+        scheduler.schedules.value.any { it.channel.key == hit.channelKey && it.startMs == hit.startMs }
+
+    /** Sets the episode to record on [hit]'s channel (or cancels it). Returns a message to show. */
+    fun record(entry: CalendarEntry, hit: CalendarGuideHit): String {
+        val ch = liveRepo.channels.value.firstOrNull { it.key == hit.channelKey } ?: return "That channel is no longer in your playlist"
+        if (isRecording(hit)) {
+            scheduler.cancel(hit.channelKey, hit.startMs)
+            return "Recording cancelled"
+        }
+        return scheduler.add(ch, EpgProgram(startMs = hit.startMs, stopMs = hit.stopMs, title = hit.title.ifBlank { entry.title }))
     }
+
+    /** The channel of [hit], to tune Live TV to. */
+    fun channelOf(hit: CalendarGuideHit) = liveRepo.channels.value.firstOrNull { it.key == hit.channelKey }
 
     /** Sets the episode to record from your guide. Returns a message to show. */
     fun record(entry: CalendarEntry): String {
@@ -815,11 +892,16 @@ class CalendarRepository @Inject constructor(
         val upcoming = if (!s.calendarUpcomingRow) emptyList() else entries
             .filter { whenOf(it) > now && !it.day.isAfter(today.plusDays(7)) }
             .groupBy { it.contentId }.map { (_, l) -> l.minBy { whenOf(it) } }
-        CalendarHomeFeed.publish(released, upcoming)
+        // Movies whose bell is rung, out to watch at home in the last two weeks (and not watched).
+        val movies = if (!s.calendarNewEpisodeCards) emptyList() else _state.value.entries
+            .filter { it.kind == CalendarKind.MOVIE && it.followed && CalendarTag.AT_HOME in it.tags && !it.watched &&
+                !it.day.isAfter(today) && !it.day.isBefore(today.minusDays(14)) }
+            .distinctBy { it.contentId }
+        CalendarHomeFeed.publish(released, upcoming, movies)
     }
 
     companion object {
-        private const val MAX_SHOWS = 150
+        private const val MAX_SHOWS = 400
         private const val MAX_MOVIES = 200
 
         fun isSeries(type: String) = type.equals("series", true) || type.equals("tv", true) || type.equals("show", true) ||

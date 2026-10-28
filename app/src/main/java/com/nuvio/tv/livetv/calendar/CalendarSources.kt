@@ -46,7 +46,9 @@ internal class CalendarSources(context: Context) {
         val streaming: Boolean,
         val image: String?,
         val imdb: String?,
-        val airTime: String?
+        val airTime: String?,
+        /** A wide picture of the show (TVmaze's background image). */
+        val backdrop: String? = null
     )
 
     data class Season(val id: Int, val number: Int, val episodeOrder: Int?, val premiere: LocalDate?, val end: LocalDate?)
@@ -61,7 +63,9 @@ internal class CalendarSources(context: Context) {
         val runtime: Int?,
         val image: String?,
         /** The season's episode count, when known (for "Season finale"). */
-        val seasonEpisodes: Int?
+        val seasonEpisodes: Int?,
+        /** What the episode is about (plain text). */
+        val summary: String? = null
     )
 
     data class ShowData(val show: Show, val episodes: List<Episode>, val fetchedAt: Long)
@@ -165,7 +169,7 @@ internal class CalendarSources(context: Context) {
 
     /** Looks the show up again (the current and coming seasons only). */
     suspend fun fetchShow(id: Int): ShowData? {
-        val showRaw = tvm("/shows/$id") ?: return null
+        val showRaw = tvm("/shows/$id?embed[]=images") ?: return null
         val show = runCatching { parseShow(JSONObject(showRaw)) }.getOrNull() ?: return null
         val today = LocalDate.now()
         val seasons = tvm("/shows/$id/seasons")?.let { raw ->
@@ -258,7 +262,12 @@ internal class CalendarSources(context: Context) {
             image = o.optJSONObject("image")?.let { it.optString("original").ifBlank { it.optString("medium") } }?.ifBlank { null }
                 ?.replace("http://", "https://"),
             imdb = o.optJSONObject("externals")?.optString("imdb")?.ifBlank { null },
-            airTime = o.optJSONObject("schedule")?.optString("time")?.ifBlank { null }
+            airTime = o.optJSONObject("schedule")?.optString("time")?.ifBlank { null },
+            backdrop = o.optJSONObject("_embedded")?.optJSONArray("images")?.let { arr ->
+                val bgs = (0 until arr.length()).mapNotNull { arr.optJSONObject(it) }.filter { it.optString("type") == "background" }
+                val best = bgs.firstOrNull { it.optBoolean("main") } ?: bgs.firstOrNull()
+                best?.optJSONObject("resolutions")?.let { r -> (r.optJSONObject("original") ?: r.optJSONObject("medium"))?.optString("url") }
+            }?.ifBlank { null }?.replace("http://", "https://")
         )
     }
 
@@ -279,20 +288,25 @@ internal class CalendarSources(context: Context) {
             runtime = o.optInt("runtime", 0).takeIf { it > 0 },
             image = o.optJSONObject("image")?.let { it.optString("original").ifBlank { it.optString("medium") } }?.ifBlank { null }
                 ?.replace("http://", "https://"),
-            seasonEpisodes = seasonEpisodes
+            seasonEpisodes = seasonEpisodes,
+            summary = o.optString("summary").ifBlank { null }?.let { plain(it) }
         )
     }
+
+    /** TVmaze's summaries are HTML ("<p>…</p>"): just the words. */
+    private fun plain(html: String): String? = html.replace(Regex("<[^>]+>"), "").replace("&amp;", "&").replace("&quot;", "\"")
+        .replace("&#39;", "'").replace("&nbsp;", " ").trim().ifBlank { null }
 
     private fun showDataJson(d: ShowData): JSONObject = JSONObject()
         .put("at", d.fetchedAt)
         .put("show", JSONObject()
             .put("id", d.show.id).put("name", d.show.name).put("type", d.show.type).put("status", d.show.status)
             .put("network", d.show.network ?: "").put("streaming", d.show.streaming).put("image", d.show.image ?: "")
-            .put("imdb", d.show.imdb ?: "").put("time", d.show.airTime ?: ""))
+            .put("imdb", d.show.imdb ?: "").put("time", d.show.airTime ?: "").put("bg", d.show.backdrop ?: ""))
         .put("episodes", JSONArray(d.episodes.map { e ->
             JSONObject().put("s", e.season).put("e", e.number).put("name", e.name ?: "")
                 .put("ms", e.airMs ?: 0L).put("day", e.airDate?.toString() ?: "")
-                .put("rt", e.runtime ?: 0).put("img", e.image ?: "").put("of", e.seasonEpisodes ?: 0)
+                .put("rt", e.runtime ?: 0).put("img", e.image ?: "").put("of", e.seasonEpisodes ?: 0).put("sum", e.summary ?: "")
         }))
 
     private fun parseShowData(o: JSONObject): ShowData {
@@ -301,7 +315,8 @@ internal class CalendarSources(context: Context) {
             id = s.optInt("id"), name = s.optString("name"), type = s.optString("type"), status = s.optString("status"),
             network = s.optString("network").ifBlank { null }, streaming = s.optBoolean("streaming"),
             image = s.optString("image").ifBlank { null }, imdb = s.optString("imdb").ifBlank { null },
-            airTime = s.optString("time").ifBlank { null }
+            airTime = s.optString("time").ifBlank { null },
+            backdrop = s.optString("bg").ifBlank { null }
         )
         val arr = o.optJSONArray("episodes") ?: JSONArray()
         val eps = (0 until arr.length()).mapNotNull { i ->
@@ -313,7 +328,8 @@ internal class CalendarSources(context: Context) {
                 // Worked out again here, so a move to another time zone puts it on the right day.
                 airDate = ms?.let { Instant.ofEpochMilli(it).atZone(ZoneId.systemDefault()).toLocalDate() } ?: date(e.optString("day")),
                 runtime = e.optInt("rt", 0).takeIf { it > 0 }, image = e.optString("img").ifBlank { null },
-                seasonEpisodes = e.optInt("of", 0).takeIf { it > 0 }
+                seasonEpisodes = e.optInt("of", 0).takeIf { it > 0 },
+                summary = e.optString("sum").ifBlank { null }
             )
         }
         return ShowData(show, eps, o.optLong("at"))
@@ -388,7 +404,10 @@ internal class CalendarSources(context: Context) {
     private fun normName(s: String) = s.lowercase().replace("&", "and").filter { it.isLetterOrDigit() }
 
     /** A movie's release dates in [country]: theatrical, digital (at home) and disc. */
-    data class MovieDates(val theater: LocalDate?, val digital: LocalDate?, val disc: LocalDate?, val title: String?, val poster: String?)
+    data class MovieDates(
+        val theater: LocalDate?, val digital: LocalDate?, val disc: LocalDate?, val title: String?, val poster: String?,
+        val backdrop: String? = null, val overview: String? = null
+    )
 
     private val movieFile = File(dir, "movies.json")
     private val movies: JSONObject by lazy { runCatching { JSONObject(movieFile.readText()) }.getOrDefault(JSONObject()) }
@@ -400,7 +419,8 @@ internal class CalendarSources(context: Context) {
         synchronized(movies) {
             movies.optJSONObject(key)?.let { o ->
                 val age = System.currentTimeMillis() - o.optLong("at")
-                val dates = MovieDates(date(o.optString("t")), date(o.optString("d")), date(o.optString("b")), o.optString("title").ifBlank { null }, o.optString("poster").ifBlank { null })
+                val dates = MovieDates(date(o.optString("t")), date(o.optString("d")), date(o.optString("b")), o.optString("title").ifBlank { null },
+                    o.optString("poster").ifBlank { null }, o.optString("bg").ifBlank { null }, o.optString("about").ifBlank { null })
                 // Out at home long ago: nothing will change. Otherwise checked once a day.
                 val settled = dates.digital?.isBefore(LocalDate.now().minusDays(60)) == true
                 if (cachedOnly || age < (if (settled) 30 * DAY else DAY)) return dates.takeIf { o.optBoolean("ok", true) }
@@ -435,13 +455,16 @@ internal class CalendarSources(context: Context) {
             MovieDates(
                 theater, digital, disc,
                 detail?.optString("title")?.ifBlank { null },
-                detail?.optString("poster_path")?.takeIf { it.startsWith("/") }?.let { "https://image.tmdb.org/t/p/w342$it" }
+                detail?.optString("poster_path")?.takeIf { it.startsWith("/") }?.let { "https://image.tmdb.org/t/p/w342$it" },
+                detail?.optString("backdrop_path")?.takeIf { it.startsWith("/") }?.let { "https://image.tmdb.org/t/p/w1280$it" },
+                detail?.optString("overview")?.ifBlank { null }
             )
         }
         synchronized(movies) {
             movies.put(key, JSONObject().put("at", System.currentTimeMillis()).put("ok", result != null)
                 .put("t", result?.theater?.toString() ?: "").put("d", result?.digital?.toString() ?: "")
-                .put("b", result?.disc?.toString() ?: "").put("title", result?.title ?: "").put("poster", result?.poster ?: ""))
+                .put("b", result?.disc?.toString() ?: "").put("title", result?.title ?: "").put("poster", result?.poster ?: "")
+                .put("bg", result?.backdrop ?: "").put("about", result?.overview ?: ""))
         }
         return result
     }

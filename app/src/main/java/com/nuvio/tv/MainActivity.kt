@@ -1152,7 +1152,9 @@ open class MainActivity : ComponentActivity() {
                     val calendarFollowCount = calendarRepository.follows.collectAsState().value.size
                     val calendarOff = com.nuvio.tv.livetv.calendar.SideMenuPages.CALENDAR in
                         com.nuvio.tv.livetv.calendar.SideMenuPages.hidden(liveTvSettingsNow.sideMenuHidden)
-                    val calendarInSidebar = !calendarOff && (calendarFollowCount > 0 || liveTvSettingsNow.calendarInMenu)
+                    // ...or once your shows (watch history, Library) have episodes on it.
+                    val calendarHasShows = calendarRepository.hasShows.collectAsState().value
+                    val calendarInSidebar = !calendarOff && (calendarFollowCount > 0 || calendarHasShows || liveTvSettingsNow.calendarInMenu)
                     // Live TV fork: Home can be taken off the menu once the app opens on another page.
                     // Anything that would go back to Home then goes to that page instead.
                     val startRouteNow = com.nuvio.tv.livetv.startup.StartPage.routeFor(liveTvSettingsNow, sportsInSidebar)
