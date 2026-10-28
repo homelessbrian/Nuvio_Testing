@@ -99,19 +99,26 @@ class LiveTvChannelStore @Inject constructor(
         if (key != null && key.first === channels && key.second == raw) return cleanedCache
         // Each name is only worked out once: the results are kept by name (in memory and on
         // disk), so starting the app or a playlist update only cleans names it hasn't seen.
-        val memo = nameMemo(raw)
+        // Prefixes the playlist puts on with only a space ("USA ESPN"): worked out per playlist.
+        val spaced = channels.groupBy { it.key.substringBefore('|') }.mapValues { (_, list) ->
+            com.nuvio.tv.livetv.model.ChannelNameEditor.spacePrefixes(list.map { it.name }, terms)
+        }
+        val memoKey = raw + "|spaced:" + spaced.values.flatten().toSortedSet().joinToString(",")
+        val memo = nameMemo(memoKey)
         var added = false
         val out = HashMap<String, String>(channels.size)
         channels.forEach { c ->
-            val n = memo[c.name] ?: com.nuvio.tv.livetv.model.ChannelNameEditor.clean(c.name, terms).also {
-                memo[c.name] = it
+            val sp = spaced[c.key.substringBefore('|')].orEmpty()
+            val memoName = if (sp.isEmpty()) c.name else sp.sorted().joinToString(",") + "\u0001" + c.name
+            val n = memo[memoName] ?: com.nuvio.tv.livetv.model.ChannelNameEditor.clean(c.name, terms, sp).also {
+                memo[memoName] = it
                 added = true
             }
             if (n != c.name) out[c.key] = n
         }
         cleanedCache = out
         cleanedFor = channels to raw
-        if (added) saveMemo(raw, channels)
+        if (added) saveMemo(memoKey, channels)
         return out
     }
 
@@ -123,7 +130,7 @@ class LiveTvChannelStore @Inject constructor(
     private var saveJob: kotlinx.coroutines.Job? = null
 
     // The cleaning rules are part of the header, so saved results from older rules are dropped.
-    private fun memoHeader(raw: String) = "v2|" + raw.replace('\n', ' ')
+    private fun memoHeader(raw: String) = "v3|" + raw.replace('\n', ' ')
 
     private fun nameMemo(raw: String): MutableMap<String, String> = synchronized(memoLock) {
         if (memoFor == raw) return memo
@@ -158,7 +165,7 @@ class LiveTvChannelStore @Inject constructor(
                 tmp.bufferedWriter().use { w ->
                     w.write(memoHeader(raw)); w.newLine()
                     for ((name, cleaned) in current) {
-                        if (name !in names || '\n' in name || '\t' in name || '\n' in cleaned) continue
+                        if (name.substringAfter('\u0001') !in names || '\n' in name || '\t' in name || '\n' in cleaned) continue
                         w.write(name); w.write("\t"); w.write(cleaned); w.newLine()
                     }
                 }

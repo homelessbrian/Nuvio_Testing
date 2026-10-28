@@ -53,6 +53,7 @@ import androidx.compose.material.icons.filled.ManageSearch
 import androidx.compose.material.icons.filled.FilterAlt
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.PhoneAndroid
+import androidx.compose.material.icons.filled.Tune
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.material3.Icon
 import androidx.compose.runtime.Composable
@@ -174,6 +175,8 @@ private fun nextMidnight(ms: Long): Long = java.util.Calendar.getInstance().appl
 fun LiveTvGuideScreen(
     onOpenFullscreen: () -> Unit,
     onOpenSettings: () -> Unit,
+    /** Opens Recordings (the ● button beside the ⚙). */
+    onOpenRecordings: () -> Unit = {},
     onFindInNuvio: () -> Unit = {},
     onOpenNuvioSearch: () -> Unit = onFindInNuvio,
     /** Full screen was opened from the Sports page: Back goes back there. */
@@ -325,6 +328,11 @@ fun LiveTvGuideScreen(
     var savedOrder by remember { mutableStateOf<List<LiveChannel>?>(null) }
     // Reorder groups: the group being moved, and the group order while you move it.
     var groupReorderId by remember { mutableStateOf<String?>(null) }
+    // Reorder groups is open (a group in hand or not), the groups ticked to move together
+    // (hold OK), and where the highlight goes after a move.
+    var groupReorderMode by remember { mutableStateOf(false) }
+    var groupTicked by remember { mutableStateOf<Set<String>>(emptySet()) }
+    var groupReorderFocus by remember { mutableStateOf<String?>(null) }
     var groupWorking by remember { mutableStateOf<List<ChannelGroup>>(emptyList()) }
     // Manage visibility for groups: every group (hidden ones too) and which ones are hidden.
     var groupVisibilityList by remember { mutableStateOf<List<ChannelGroup>?>(null) }
@@ -979,6 +987,7 @@ fun LiveTvGuideScreen(
                 gearFocus = guideGearFocus,
                 onGear = { guideGearOpen = true },
                 onGearDown = { runCatching { gridFocus.requestFocus() } },
+                onRecordings = onOpenRecordings,
                 playlistName = if (settings.showPlaylistInInfo) headerChannel?.sourceId?.let { playlistNames[it] } else null,
                 settings = settings,
                 now = now,
@@ -1009,7 +1018,9 @@ fun LiveTvGuideScreen(
                     tileHeight = guideRowHeight(settings) - 4.dp,
                     groups = when {
                         groupVisibilityList != null -> groupVisibilityList!!
-                        groupReorderId != null -> ui.groups.filter { it.special } + groupWorking
+                        groupReorderMode -> ui.groups.filter { it.special } + groupWorking.map { g ->
+                            if (g.id in groupTicked) g.copy(title = "✓  " + g.title) else g
+                        }
                         else -> ui.groups
                     },
                     hiddenPending = if (groupVisibilityList != null) groupHiddenPending else null,
@@ -1030,6 +1041,39 @@ fun LiveTvGuideScreen(
                     collapsed = collapsedPlaylists,
                     onToggleCollapse = { viewModel.togglePlaylistCollapsed(it) },
                     reorderingId = groupReorderId,
+                    reorderMode = groupReorderMode,
+                    reorderFocusId = groupReorderFocus,
+                    onReorderOk = { id ->
+                        // OK: pick the group up to move it, or put it down.
+                        if (groupReorderId != null) { groupReorderFocus = groupReorderId; groupReorderId = null }
+                        else { groupTicked = emptySet(); groupReorderId = id }
+                    },
+                    onReorderTick = { id ->
+                        // Hold OK: tick it (or untick), to move several at once.
+                        groupReorderId?.let { groupReorderFocus = it }
+                        groupReorderId = null
+                        groupTicked = if (id in groupTicked) groupTicked - id else groupTicked + id
+                        groupReorderFocus = id
+                    },
+                    onReorderEnds = { toTop, focusedId ->
+                        // Left: straight to the top. Right: straight to the bottom. The ticked
+                        // groups (in their order), else the one in hand, else the highlighted one.
+                        val ids = groupTicked.ifEmpty { setOfNotNull(groupReorderId ?: focusedId) }
+                        val moving = groupWorking.filter { it.id in ids }
+                        if (moving.isNotEmpty()) {
+                            val rest = groupWorking.filter { it.id !in ids }
+                            groupWorking = if (toTop) moving + rest else rest + moving
+                            val lead = moving.first().id
+                            if (groupReorderId == null) groupReorderFocus = lead
+                            groupTicked = emptySet()
+                            scope.launch {
+                                val index = ui.groups.count { it.special && it.id != ChannelGroup.SEARCH } + groupWorking.indexOfFirst { it.id == lead }
+                                runCatching { groupsListState.scrollToItem((index - 3).coerceAtLeast(0)) }
+                                androidx.compose.runtime.withFrameNanos { }
+                                runCatching { groupsFocus.requestFocus() }
+                            }
+                        }
+                    },
                     onReorderMove = { delta ->
                         val from = groupWorking.indexOfFirst { it.id == groupReorderId }
                         val to = from + delta
@@ -1044,6 +1088,9 @@ fun LiveTvGuideScreen(
                     onReorderDone = {
                         viewModel.saveGroupOrder(groupWorking.map { it.id })
                         groupReorderId = null
+                        groupReorderMode = false
+                        groupTicked = emptySet()
+                        groupReorderFocus = null
                     },
                     selectedId = ui.selectedGroupId,
                     showCounts = settings.showGroupCounts,
@@ -1625,7 +1672,7 @@ fun LiveTvGuideScreen(
                 LiveText("Back: save and return", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
             }
         }
-        if (groupReorderId != null) {
+        if (groupReorderMode) {
             Column(
                 modifier = Modifier
                     .align(Alignment.BottomEnd)
@@ -1635,8 +1682,26 @@ fun LiveTvGuideScreen(
             ) {
                 LiveText("Reorder groups", size = 15.sp, weight = FontWeight.Bold)
                 Spacer(Modifier.height(4.dp))
-                LiveText("Up / Down: move the group", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
-                LiveText("OK or Back: save", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+                val hint: @Composable (String) -> Unit = { LiveText(it, color = NuvioTheme.colors.TextSecondary, size = 13.sp) }
+                when {
+                    groupTicked.isNotEmpty() -> {
+                        hint("${groupTicked.size} selected")
+                        hint("Left / Right: move them to the top / bottom")
+                        hint("Hold OK: select or unselect another")
+                    }
+                    groupReorderId != null -> {
+                        hint("Up / Down: move the group")
+                        hint("Left / Right: straight to the top / bottom")
+                        hint("OK: put it down")
+                    }
+                    else -> {
+                        hint("Up / Down: choose a group")
+                        hint("OK: pick it up to move")
+                        hint("Left / Right: send it to the top / bottom")
+                        hint("Hold OK: select several to move together")
+                    }
+                }
+                hint("Back: save")
             }
         }
         if (reorderActive) {
@@ -2009,6 +2074,9 @@ fun LiveTvGuideScreen(
                         groupMenu = null
                         groupWorking = ui.groups.filter { !it.special }
                         groupReorderId = g.id
+                        groupReorderMode = true
+                        groupTicked = emptySet()
+                        groupReorderFocus = g.id
                         scope.launch { delay(80); runCatching { groupsFocus.requestFocus() } }
                     })
                     add("Move up" to { viewModel.moveGroup(g.id, -1) })
@@ -2115,7 +2183,9 @@ private fun GuideHeader(
     /** The ⚙ that opens the Guide display panel (Up from the first channel reaches it). */
     gearFocus: FocusRequester = FocusRequester(),
     onGear: () -> Unit = {},
-    onGearDown: () -> Unit = {}
+    onGearDown: () -> Unit = {},
+    /** Opens Recordings (the ● beside the ⚙). */
+    onRecordings: () -> Unit = {}
 ) {
     if (!settings.showProgramDetails && !showPreview) {
         Row(
@@ -2126,6 +2196,8 @@ private fun GuideHeader(
             LiveText("Live TV", size = 16.sp, weight = FontWeight.Bold, modifier = Modifier.weight(1f))
             status?.let { LiveText(it, color = NuvioTheme.colors.TextSecondary, size = 13.sp) }
             Spacer(Modifier.width(16.dp))
+            GuideRecordingsButton(onOpen = onRecordings, onDown = onGearDown)
+            Spacer(Modifier.width(6.dp))
             GuideGearButton(Modifier.focusRequester(gearFocus), onOpen = onGear, onDown = onGearDown)
             Spacer(Modifier.width(10.dp))
             Row(
@@ -2271,8 +2343,12 @@ private fun GuideHeader(
                 LiveText(status, color = NuvioTheme.colors.TextSecondary)
             }
         }
-        // The ⚙ for the guide's display settings, in the corner of the panel.
-        GuideGearButton(Modifier.focusRequester(gearFocus), onOpen = onGear, onDown = onGearDown)
+        // Recordings (●) and the ⚙ for the guide's display settings, in the corner of the panel.
+        Row {
+            GuideRecordingsButton(onOpen = onRecordings, onDown = onGearDown)
+            Spacer(Modifier.width(6.dp))
+            GuideGearButton(Modifier.focusRequester(gearFocus), onOpen = onGear, onDown = onGearDown)
+        }
         // Preview only (info panel off): keep it at the right, as usual.
         if (showPreview) {
             Box(
@@ -2382,8 +2458,9 @@ private fun GuideRow(
         // The channel cell is never highlighted; the program under the cursor is.
         // …except while it's being moved with Reorder channels.
         val channelFocused = moving || nameFocused
-        // The channel that's playing: a soft red glow around its channel cell (not the shows).
-        val playingGlow = isPlaying && !reorderMode && !moving && !nameFocused
+        // The channel that's playing: a red outline around its channel cell (not the shows).
+        // (A glow drawn behind the see-through cell showed as darker boxes inside it.)
+        val playingMark = isPlaying && settings.markPlayingChannel && !reorderMode && !moving && !nameFocused
         // The channel picked up to move: its own color (gold), apart from the highlight.
         val cell = if (moving) LiveCellColors(NuvioTheme.colors.Rating, NuvioTheme.colors.Rating, Color.Black)
             else liveCellColors(focused = nameFocused, idle = guideSurface())
@@ -2392,10 +2469,9 @@ private fun GuideRow(
                 .width(channelColWidth)
                 .fillMaxHeight()
                 .padding(end = 6.dp)
-                .then(if (playingGlow) Modifier.shadow(10.dp, cellShape, ambientColor = NuvioTheme.colors.Error, spotColor = NuvioTheme.colors.Error) else Modifier)
                 .glassTile(
-                    if (playingGlow) androidx.compose.ui.graphics.lerp(cell.background, NuvioTheme.colors.Error, 0.16f) else cell.background,
-                    if (playingGlow) NuvioTheme.colors.Error.copy(alpha = 0.75f) else if (cell.border == Color.Transparent) GuideGlassEdge else cell.border,
+                    cell.background,
+                    if (playingMark) NuvioTheme.colors.Error else if (cell.border == Color.Transparent) GuideGlassEdge else cell.border,
                     cellShape
                 )
                 .padding(horizontal = 8.dp),
@@ -2796,6 +2872,14 @@ private fun GroupColumn(
     collapsed: Set<String> = emptySet(),
     onToggleCollapse: (String) -> Unit = {},
     reorderingId: String? = null,
+    /** Reorder groups is open (with or without a group in hand). */
+    reorderMode: Boolean = reorderingId != null,
+    /** With no group in hand: the group to keep highlighted (after a move to the top or bottom). */
+    reorderFocusId: String? = null,
+    onReorderOk: (String) -> Unit = {},
+    onReorderTick: (String) -> Unit = {},
+    /** Left (true) / Right (false): to the top / bottom; the highlighted group's id. */
+    onReorderEnds: (Boolean, String?) -> Unit = { _, _ -> },
     onReorderMove: (Int) -> Unit = {},
     onReorderDone: () -> Unit = {},
     /** Non-null while managing group visibility: the groups set to hidden. */
@@ -2811,6 +2895,8 @@ private fun GroupColumn(
 ) {
     var focusedGroupId by remember { mutableStateOf<String?>(null) }
     var focusedSince by remember { mutableStateOf(0L) }
+    // OK held down in Reorder groups (a tick, not a pick): its release is swallowed.
+    var okHeld by remember { mutableStateOf(false) }
     Column(
         modifier = Modifier
             .fillMaxHeight()
@@ -2830,21 +2916,35 @@ private fun GroupColumn(
                         else -> false // Up / Down move through the groups as usual
                     }
                 }
-                if (reorderingId != null) {
-                    // Reorder groups: Up/Down moves the group, OK or Back saves.
+                if (reorderMode) {
+                    // Reorder groups. A group in hand: Up/Down move it. Otherwise Up/Down choose.
+                    // Left / Right: to the top / bottom. OK: pick up / put down. Hold OK: tick
+                    // several to move together. Back: save.
                     val isOk = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+                    if (isOk) {
+                        if (e.type == KeyEventType.KeyDown) {
+                            if (e.nativeKeyEvent.repeatCount == 1) { okHeld = true; focusedGroupId?.let(onReorderTick) }
+                        } else if (e.type == KeyEventType.KeyUp) {
+                            if (!okHeld) (reorderingId ?: focusedGroupId)?.let(onReorderOk)
+                            okHeld = false
+                        }
+                        return@onPreviewKeyEvent true
+                    }
                     if (e.type == KeyEventType.KeyDown) when (e.key) {
-                        Key.DirectionUp -> onReorderMove(-1)
-                        Key.DirectionDown -> onReorderMove(1)
-                        Key.Back -> onReorderDone()
+                        Key.DirectionUp -> if (reorderingId != null) { onReorderMove(-1); return@onPreviewKeyEvent true } else return@onPreviewKeyEvent false
+                        Key.DirectionDown -> if (reorderingId != null) { onReorderMove(1); return@onPreviewKeyEvent true } else return@onPreviewKeyEvent false
+                        Key.DirectionLeft -> { onReorderEnds(true, focusedGroupId); return@onPreviewKeyEvent true }
+                        Key.DirectionRight -> { onReorderEnds(false, focusedGroupId); return@onPreviewKeyEvent true }
+                        Key.Back -> { onReorderDone(); return@onPreviewKeyEvent true }
                         else -> Unit
-                    } else if (isOk && e.type == KeyEventType.KeyUp) onReorderDone()
-                    return@onPreviewKeyEvent true
+                    }
+                    return@onPreviewKeyEvent e.key == Key.Back || e.key == Key.DirectionLeft || e.key == Key.DirectionRight ||
+                        (reorderingId != null && (e.key == Key.DirectionUp || e.key == Key.DirectionDown))
                 }
                 if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionRight) {
                     onRight(); true
                 } else if (e.type == KeyEventType.KeyDown && e.key == Key.DirectionUp && e.nativeKeyEvent.repeatCount >= 2 &&
-                    reorderingId == null && hiddenPending == null &&
+                    !reorderMode && hiddenPending == null &&
                     focusedGroupId == groups.firstOrNull { it.id != ChannelGroup.SEARCH }?.id &&
                     e.nativeKeyEvent.eventTime - focusedSince > 500
                 ) {
@@ -2863,7 +2963,7 @@ private fun GroupColumn(
         // which folds away when selected. (Not while reordering: that's one plain list.)
         val listed = groups.filter { it.id != ChannelGroup.SEARCH }
         val sources = listed.mapNotNull { it.sourceId }.distinct()
-        val sectioned = showPlaylistHeadings && reorderingId == null && hiddenPending == null && sources.size > 1
+        val sectioned = showPlaylistHeadings && !reorderMode && hiddenPending == null && sources.size > 1
         LazyColumn(
             state = listState,
             modifier = Modifier.fillMaxSize(),
@@ -2878,6 +2978,7 @@ private fun GroupColumn(
                     val moving = g.id == reorderingId
                     val requester = when {
                         reorderingId != null -> moving
+                        reorderMode -> g.id == (reorderFocusId ?: selectedId)
                         hiddenPending != null ->
                             g.id == (if (groups.any { it.id == selectedId }) selectedId else groups.firstOrNull()?.id)
                         else -> selected
@@ -2893,7 +2994,7 @@ private fun GroupColumn(
                         onFocused = {
                             if (focusedGroupId != g.id) focusedSince = android.os.SystemClock.uptimeMillis()
                             focusedGroupId = g.id
-                            if (reorderingId == null && hiddenPending == null) onFocusGroup(g)
+                            if (!reorderMode && hiddenPending == null) onFocusGroup(g)
                         },
                         onClick = { onSelect(g) },
                         onLongClick = if (g.special) null else ({ onGroupMenu(g) })
@@ -3752,12 +3853,7 @@ internal fun epgClosestRow(entries: List<com.nuvio.tv.livetv.model.EpgChannelEnt
     return best.takeIf { it >= 0 }
 }
 
-private fun epgSearchSeed(name: String): String =
-    name.replace(Regex("""^[A-Za-z]{2,3}\s*[:|]\s*"""), "")
-        .replace(Regex("""\b(FHD|UHD|HD|SD|4K|HEVC|H265|RAW|BACKUP)\b""", RegexOption.IGNORE_CASE), "")
-        .replace(Regex("""[\[(].*?[\])]"""), "")
-        .replace(Regex("""\s+"""), " ")
-        .trim()
+private fun epgSearchSeed(name: String): String = com.nuvio.tv.livetv.data.ChannelNameCleaner.clean(name)
 
 /** Every word of the query must appear in one of the channel's names or its id. */
 private fun filterEpgChannels(
@@ -4084,10 +4180,12 @@ private fun LogoSidePanel(
     var query by remember(channel.key) { mutableStateOf("") }
     var searchOpen by remember { mutableStateOf(false) }
     var phoneOpen by remember { mutableStateOf(false) }
+    var sourcesOpen by remember { mutableStateOf(false) }
+    val logoSourcesOff = viewModel.settings.collectAsStateWithLifecycle().value.logoSourcesOff
     var choices by remember { mutableStateOf<List<com.nuvio.tv.livetv.data.LogoChoice>?>(null) }
     var libraryLoading by remember { mutableStateOf(false) }
     val picked = viewModel.hasPickedLogo(channel)
-    LaunchedEffect(channel.key, query) {
+    LaunchedEffect(channel.key, query, logoSourcesOff) {
         // Your playlists and guides straight away; the libraries' lists may need fetching first.
         choices = null
         choices = viewModel.logoChoices(context, channel, query, withLibrary = false)
@@ -4109,6 +4207,10 @@ private fun LogoSidePanel(
     val rowFocus = remember { HashMap<Int, FocusRequester>() }
     fun rowRequester(i: Int): FocusRequester = if (i == 0) firstFocus else rowFocus.getOrPut(i) { FocusRequester() }
     var focusIndex by remember { mutableIntStateOf(0) }
+    // Came into the list and haven't moved yet: when more logos arrive (the libraries come a
+    // moment after your playlists'), the top one stays highlighted. Without this the highlight
+    // was left on whichever row it had been on, often the one in use far down the list.
+    var holdTop by remember { mutableStateOf(false) }
     /** Where each logo is in the list (headings take places too). */
     val lazyIndexOf = remember(choices) {
         val out = ArrayList<Int>()
@@ -4127,6 +4229,7 @@ private fun LogoSidePanel(
         val target = focusIndex + delta
         if (target < 0) { runCatching { buttonsFocus.requestFocus() }; return }
         if (target >= n) return
+        holdTop = false
         focusIndex = target
         panelScope.launch {
             val li = lazyIndexOf.getOrNull(target) ?: return@launch
@@ -4152,6 +4255,7 @@ private fun LogoSidePanel(
      */
     fun focusList() {
         if (choices.isNullOrEmpty()) return
+        holdTop = true
         focusIndex = 0
         panelScope.launch {
             runCatching { listState.scrollToItem(0) }
@@ -4170,6 +4274,9 @@ private fun LogoSidePanel(
     }
     // Another channel picked in the guide: its logos from the top.
     LaunchedEffect(channel.key) { focusIndex = 0; runCatching { listState.scrollToItem(0) } }
+    LaunchedEffect(choices) {
+        if (holdTop && listHasFocus && !choices.isNullOrEmpty()) focusList()
+    }
     // Right from the guide's channels: into the panel (once its logos are there).
     LaunchedEffect(focusTick) {
         if (focusTick == 0) return@LaunchedEffect
@@ -4229,7 +4336,8 @@ private fun LogoSidePanel(
         val buttons = listOf<Triple<androidx.compose.ui.graphics.vector.ImageVector, String, () -> Unit>>(
             Triple(Icons.Default.Search, "Search") { searchOpen = true },
             Triple(Icons.Default.PhoneAndroid, "From phone") { phoneOpen = true },
-            Triple(Icons.Default.Refresh, "Its own") { viewModel.setChannelLogo(channel, null) }
+            Triple(Icons.Default.Refresh, "Its own") { viewModel.setChannelLogo(channel, null) },
+            Triple(Icons.Default.Tune, "Sources") { sourcesOpen = true }
         )
         Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             buttons.forEachIndexed { i, (icon, label, action) ->
@@ -4277,7 +4385,7 @@ private fun LogoSidePanel(
                     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
                     when (e.key) {
                         // Left: back to the guide's channels, to pick the next one (the panel follows).
-                        Key.DirectionLeft -> { onLeft(); true }
+                        Key.DirectionLeft -> { holdTop = false; onLeft(); true }
                         Key.DirectionRight -> true
                         Key.DirectionUp -> { moveInList(-1); true }
                         Key.DirectionDown -> { moveInList(1); true }
@@ -4302,7 +4410,7 @@ private fun LogoSidePanel(
                             color = NuvioTheme.colors.TextSecondary, size = 12.sp, weight = FontWeight.Bold)
                     }
                 }
-                item(key = "l" + index + choice.url) {
+                item(key = "l" + choice.url) {
                     LogoChoiceRow(
                         choice = choice,
                         inUse = choice.url == channel.logo,
@@ -4328,6 +4436,18 @@ private fun LogoSidePanel(
             onConfirm = { q -> query = q.trim(); searchOpen = false }
         )
     }
+    if (sourcesOpen) {
+        LogoSourcesDialog(
+            off = logoSourcesOff.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet(),
+            onToggle = { key ->
+                viewModel.updateSettings { s ->
+                    val now = s.logoSourcesOff.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+                    s.copy(logoSourcesOff = (if (key in now) now - key else now + key).sorted().joinToString(","))
+                }
+            },
+            onDismiss = { sourcesOpen = false }
+        )
+    }
     if (phoneOpen) {
         LogoFromPhoneDialog(
             channelName = channel.name,
@@ -4338,6 +4458,37 @@ private fun LogoSidePanel(
 }
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+/** Where Change Logo looks: each source on or off (saved, and synced like other settings). */
+@Composable
+private fun LogoSourcesDialog(off: Set<String>, onToggle: (String) -> Unit, onDismiss: () -> Unit) {
+    val sources = listOf(
+        "tv-logos" to "tv-logos library",
+        "iptv-org" to "iptv-org library",
+        "tmdb" to "Show & movie logos (TMDB)",
+        "playlists" to "Your playlists",
+        "guides" to "Your guides"
+    )
+    val first = remember { FocusRequester() }
+    LiveDialog(onDismiss = onDismiss, width = 520.dp) {
+        LiveText("Logo Sources", size = 20.sp, weight = FontWeight.Bold)
+        LiveText("Where Change Logo looks. Turn off the ones you don't want in the list.", color = NuvioTheme.colors.TextSecondary, size = 13.sp, maxLines = 2)
+        Spacer(Modifier.height(10.dp))
+        sources.forEachIndexed { i, (key, label) ->
+            val on = key !in off
+            LiveFocusRow(
+                modifier = Modifier.fillMaxWidth().then(if (i == 0) Modifier.focusRequester(first) else Modifier),
+                onClick = { onToggle(key) }
+            ) { f ->
+                LiveText(label, color = focusedTextColor(f), size = 16.sp, modifier = Modifier.weight(1f))
+                LiveText(if (on) "On" else "Off", color = if (on) NuvioTheme.colors.Secondary else focusedSecondaryTextColor(f), size = 15.sp, weight = FontWeight.Bold)
+            }
+        }
+        Spacer(Modifier.height(6.dp))
+        MenuItem("Done", onClick = onDismiss)
+    }
+    LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
+}
+
 @Composable
 private fun LogoChoiceRow(choice: com.nuvio.tv.livetv.data.LogoChoice, inUse: Boolean, modifier: Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }

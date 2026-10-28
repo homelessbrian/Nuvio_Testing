@@ -82,7 +82,10 @@ object StartPage {
     private const val PREFS = "livetv_start_page"
     private const val KEY = "route"
 
-    private val ROUTES = setOf(Screen.LiveTv.route, Screen.OnDemand.route, Screen.Sports.route)
+    private val ROUTES = setOf(
+        Screen.LiveTv.route, Screen.OnDemand.route, Screen.Sports.route,
+        Screen.Calendar.route, Screen.Library.route, Screen.Search.route
+    )
 
     /** The page to open on, or null for Home. */
     fun cachedRoute(context: Context): String? = runCatching {
@@ -90,11 +93,18 @@ object StartPage {
     }.getOrNull()?.takeIf { it in ROUTES }
 
     /** The page for a setting ([LiveTvSettings.openOn]); null for Home. Live TV only while it's in the menu. */
-    fun routeFor(s: com.nuvio.tv.livetv.model.LiveTvSettings): String? = when (s.openOn) {
-        "LIVE_TV" -> Screen.LiveTv.route.takeIf { s.showInSidebar }
-        "ON_DEMAND" -> Screen.OnDemand.route
-        "SPORTS" -> Screen.Sports.route
-        else -> null
+    fun routeFor(s: com.nuvio.tv.livetv.model.LiveTvSettings, sportsOn: Boolean = true): String? {
+        val off = com.nuvio.tv.livetv.calendar.SideMenuPages.hidden(s.sideMenuHidden)
+        // Only pages that are switched on (Settings → Menu & Features); otherwise Home.
+        return when (s.openOn) {
+            "LIVE_TV" -> Screen.LiveTv.route.takeIf { s.showInSidebar }
+            "ON_DEMAND" -> Screen.OnDemand.route.takeIf { s.onDemandInSidebar }
+            "SPORTS" -> Screen.Sports.route.takeIf { sportsOn }
+            "CALENDAR" -> Screen.Calendar.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.CALENDAR !in off }
+            "LIBRARY" -> Screen.Library.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.LIBRARY !in off }
+            "SEARCH" -> Screen.Search.route.takeIf { com.nuvio.tv.livetv.calendar.SideMenuPages.SEARCH !in off }
+            else -> null
+        }
     }
 
     fun save(context: Context, route: String?) {

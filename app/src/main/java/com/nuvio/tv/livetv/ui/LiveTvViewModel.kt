@@ -1158,14 +1158,19 @@ class LiveTvViewModel @Inject constructor(
         query: String,
         withLibrary: Boolean
     ): List<com.nuvio.tv.livetv.data.LogoChoice> = kotlinx.coroutines.withContext(Dispatchers.Default) {
-        val norm: (String) -> String = { com.nuvio.tv.livetv.data.LiveTvRepository.normalize(it) }
+        // Names without tags ("US: ESPN ᴿᴬᵂ" is ESPN), so they match the libraries' names.
+        val clean: (String) -> String = { com.nuvio.tv.livetv.data.ChannelNameCleaner.clean(it) }
+        val norm: (String) -> String = { com.nuvio.tv.livetv.data.LiveTvRepository.normalize(clean(it)) }
+        val off = settings.value.logoSourcesOff.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+        val original = repository.channels.value.firstOrNull { it.key == channel.key }?.name
         val targets = listOfNotNull(
             norm(channel.name),
+            com.nuvio.tv.livetv.data.LiveTvRepository.normalize(channel.name),
             channel.tvgName?.let { norm(it) },
             channel.tvgId?.let { com.nuvio.tv.livetv.data.LiveTvRepository.idName(it) },
-            repository.channels.value.firstOrNull { it.key == channel.key }?.name?.let { norm(it) }
+            original?.let { norm(it) }
         ).filter { it.length >= 2 }.distinct()
-        val words = query.lowercase().split(Regex("\\s+")).map { w -> w.filter { it.isLetterOrDigit() } }.filter { it.isNotEmpty() }
+        val words = clean(query).lowercase().split(Regex("\\s+")).map { w -> w.filter { it.isLetterOrDigit() } }.filter { it.isNotEmpty() }
         fun score(key: String): Int {
             if (key.isEmpty()) return 0
             if (words.isNotEmpty()) return if (words.all { key.contains(it) }) 50 + (if (key in targets) 50 else 0) - (key.length / 8) else 0
@@ -1190,7 +1195,7 @@ class LiveTvViewModel @Inject constructor(
             out += com.nuvio.tv.livetv.data.LogoChoice(u, name, from, group, sc)
         }
         // Your other playlists (and other copies of this channel in the same one).
-        repository.channels.value.asSequence()
+        if ("playlists" !in off) repository.channels.value.asSequence()
             .filter { it.key != channel.key && !it.logo.isNullOrBlank() }
             .map { it to maxOf(score(norm(it.name)), it.tvgName?.let { n -> score(norm(n)) } ?: 0) }
             .filter { it.second > 0 }
@@ -1198,7 +1203,7 @@ class LiveTvViewModel @Inject constructor(
             .take(40)
             .forEach { (c, sc) -> add(c.logo, c.name, c.sourceName, com.nuvio.tv.livetv.data.LogoChoice.PLAYLISTS, sc) }
         // Your guides.
-        repository.epgSources.value.forEach { src ->
+        if ("guides" !in off) repository.epgSources.value.forEach { src ->
             src.channels.asSequence()
                 .filter { !it.icon.isNullOrBlank() }
                 .map { e -> e to maxOf(score(com.nuvio.tv.livetv.data.LiveTvRepository.idName(e.id)), e.names.maxOfOrNull { score(norm(it)) } ?: 0) }
@@ -1209,24 +1214,23 @@ class LiveTvViewModel @Inject constructor(
         }
         // A 24/7 channel (or a search): the show's or film's own title logos from TMDB, first.
         val is247 = com.nuvio.tv.livetv.data.LiveTvPosterResolver.is247(channel)
-        if (withLibrary && (is247 || words.isNotEmpty())) {
-            val name = query.ifBlank {
-                LiveTvSearchBridge.cleanTitle(channel.name).replace(Regex("^\\s*[A-Za-z]{2,3}\\s*[:|\\-]\\s*"), "").trim()
-            }
+        if (withLibrary && "tmdb" !in off && (is247 || words.isNotEmpty())) {
+            val name = clean(query).ifBlank { LiveTvSearchBridge.cleanTitle(clean(channel.name)).trim() }
             runCatching { com.nuvio.tv.livetv.data.TmdbLogos.find(name) }.getOrDefault(emptyList())
                 .forEach { add(it.url, it.name, it.from, it.group, it.score) }
         }
         // The libraries.
-        if (withLibrary) {
-            com.nuvio.tv.livetv.data.LogoLibrary.entries(context).asSequence()
+        if (withLibrary && !("tv-logos" in off && "iptv-org" in off)) {
+            com.nuvio.tv.livetv.data.LogoLibrary.entries(context, skip = off).asSequence()
                 .map { it to score(it.key) }
                 .filter { it.second > 0 }
                 .sortedWith(compareByDescending<Pair<com.nuvio.tv.livetv.data.LogoLibrary.Entry, Int>> { it.second }.thenBy { if (it.first.from == "tv-logos") 0 else 1 })
                 .take(80)
                 .forEach { (e, sc) -> add(e.url, e.label, e.from, com.nuvio.tv.livetv.data.LogoChoice.LIBRARY, sc) }
         }
-        // TMDB's title logos lead for 24/7 channels; for others they come last (after a search).
-        val order = if (is247) listOf(com.nuvio.tv.livetv.data.LogoChoice.TMDB, 0, 1, 2) else listOf(0, 1, 2, com.nuvio.tv.livetv.data.LogoChoice.TMDB)
+        // The logo libraries first (clean, consistent logos), TMDB's title logos leading for 24/7
+        // channels; the logos your own playlists and guides already use always at the bottom.
+        val order = if (is247) listOf(com.nuvio.tv.livetv.data.LogoChoice.TMDB, 2, 0, 1) else listOf(2, com.nuvio.tv.livetv.data.LogoChoice.TMDB, 0, 1)
         out.sortedWith(compareBy<com.nuvio.tv.livetv.data.LogoChoice>({ order.indexOf(it.group) }, { -it.score }))
     }
 

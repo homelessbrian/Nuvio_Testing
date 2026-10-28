@@ -60,6 +60,7 @@ import androidx.compose.material.icons.filled.ChevronLeft
 import androidx.compose.material.icons.filled.ChevronRight
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Home
+import androidx.compose.material.icons.filled.DateRange
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.CompositionLocalProvider
@@ -317,6 +318,9 @@ open class MainActivity : ComponentActivity() {
     lateinit var sportsRepository: com.nuvio.tv.livetv.sports.SportsRepository
 
     @Inject
+    lateinit var calendarRepository: com.nuvio.tv.livetv.calendar.CalendarRepository
+
+    @Inject
     lateinit var layoutPreferenceDataStore: LayoutPreferenceDataStore
 
     @Inject
@@ -417,13 +421,19 @@ open class MainActivity : ComponentActivity() {
         // Live TV fork: "Open the App On" kept where the first screen can read it instantly.
         lifecycleScope.launch {
             runCatching {
-                liveTvPreferences.settings.collect { st ->
-                    com.nuvio.tv.livetv.startup.StartPage.save(this@MainActivity, com.nuvio.tv.livetv.startup.StartPage.routeFor(st))
-                }
+                kotlinx.coroutines.flow.combine(liveTvPreferences.settings, sportsRepository.settings) { st, sp -> st to sp.showInSidebar }
+                    .collect { (st, sportsOn) ->
+                        com.nuvio.tv.livetv.startup.StartPage.save(this@MainActivity, com.nuvio.tv.livetv.startup.StartPage.routeFor(st, sportsOn))
+                    }
             }
         }
         // Live TV fork: scheduled recordings (sets their alarms; series look for new airings).
         runCatching { liveTvRecordingScheduler.start() }
+        // Live TV fork: the Calendar (your shows' new episodes, for Home and the Calendar page).
+        runCatching {
+            com.nuvio.tv.livetv.calendar.CalendarHomeFeed.init(this)
+            calendarRepository.start()
+        }
         isFirstResumeAfterCreate = true
         window?.setBackgroundDrawable(ColorDrawable(android.graphics.Color.TRANSPARENT))
 
@@ -1122,17 +1132,44 @@ open class MainActivity : ComponentActivity() {
                     val onDemandHasContent = remember { onDemandRepository.also { it.start() }.hasContent }
                         .collectAsState().value
                     val onDemandInSidebar = onDemandHasContent && liveTvSettingsNow.onDemandInSidebar
-                    // Live TV fork: Recordings has its own menu entry once there's anything recorded
-                    // (and it's not switched off in Live TV settings).
-                    val allRecordings = liveTvRecorder.recordings.collectAsState().value
-                    val recordingsInSidebar = liveTvSettingsNow.recordingsInSidebar && (allRecordings.isNotEmpty() ||
-                        liveTvRecordingScheduler.schedules.collectAsState().value.isNotEmpty() ||
-                        liveTvRecordingScheduler.series.collectAsState().value.isNotEmpty())
-                    val recordingNow = allRecordings.any {
+                    // Live TV fork: Recordings now opens from Live TV (the ● button by the guide's ⚙).
+                    val recordingNow = liveTvRecorder.recordings.collectAsState().value.any {
                         it.status == com.nuvio.tv.livetv.record.RecordingStatus.RECORDING
                     }
-                    // Live TV fork: the Sports page (on unless switched off in Sports settings).
+                    // Live TV fork: the Sports page (on unless switched off in Settings → Menu & Features).
                     val sportsInSidebar = sportsRepository.settings.collectAsState().value.showInSidebar
+                    // Live TV fork: the Calendar shows in the menu once a show's bell is rung (or
+                    // when switched on in Settings → Menu & Features).
+                    val calendarFollowCount = calendarRepository.follows.collectAsState().value.size
+                    val calendarOff = com.nuvio.tv.livetv.calendar.SideMenuPages.CALENDAR in
+                        com.nuvio.tv.livetv.calendar.SideMenuPages.hidden(liveTvSettingsNow.sideMenuHidden)
+                    val calendarInSidebar = !calendarOff && (calendarFollowCount > 0 || liveTvSettingsNow.calendarInMenu)
+                    // Live TV fork: Home can be taken off the menu once the app opens on another page.
+                    // Anything that would go back to Home then goes to that page instead.
+                    val startRouteNow = com.nuvio.tv.livetv.startup.StartPage.routeFor(liveTvSettingsNow, sportsInSidebar)
+                    val homeHidden = startRouteNow != null && com.nuvio.tv.livetv.calendar.SideMenuPages.HOME in
+                        com.nuvio.tv.livetv.calendar.SideMenuPages.hidden(liveTvSettingsNow.sideMenuHidden)
+                    androidx.compose.runtime.DisposableEffect(navController, homeHidden, startRouteNow) {
+                        val main = android.os.Handler(android.os.Looper.getMainLooper())
+                        val listener = androidx.navigation.NavController.OnDestinationChangedListener { controller, destination, _ ->
+                            val target = startRouteNow
+                            if (homeHidden && target != null && destination.route == Screen.Home.route) {
+                                main.post {
+                                    runCatching {
+                                        controller.navigate(target) {
+                                            popUpTo(Screen.Home.route) { inclusive = true }
+                                            launchSingleTop = true
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                        navController.addOnDestinationChangedListener(listener)
+                        onDispose { navController.removeOnDestinationChangedListener(listener) }
+                    }
+                    // Live TV fork: the menu's order and the pages taken off it (Settings → Menu & Features).
+                    val sideMenuOrder = liveTvSettingsNow.sideMenuOrder
+                    val sideMenuHidden = liveTvSettingsNow.sideMenuHidden
                     // (The Live TV sub-list is gone: every page is in the one menu again. These stay
                     // so the menus' wiring is unchanged; nothing opens a sub-list any more.)
                     var liveTvGroupOpen by remember { mutableStateOf(false) }
@@ -1145,8 +1182,8 @@ open class MainActivity : ComponentActivity() {
                             // first, like every other page), even while its catalog is being
                             // checked or updated; only its menu entry depends on having content.
                             add(Screen.OnDemand.route)
-                            add(Screen.Recordings.route)
                             add(Screen.Sports.route)
+                            add(Screen.Calendar.route)
                             add(Screen.Search.route)
                             add(Screen.Library.route)
                             add(Screen.Settings.route)
@@ -1161,8 +1198,8 @@ open class MainActivity : ComponentActivity() {
                     val strNavSearch = stringResource(R.string.nav_search)
                     val strNavLibrary = stringResource(R.string.nav_library)
                     val strNavSettings = stringResource(R.string.nav_settings)
-                    // Live TV fork: every page in one menu, in three parts: Nuvio's pages, then the
-                    // Live TV pages after a thin line, then Settings at the bottom.
+                    // Live TV fork: Home first and Settings at the bottom; the pages between in the
+                    // order set in Settings → Menu & Features, with a thin line above Live TV's own pages.
                     val drawerItems = remember(
                         strNavHome,
                         strNavDiscover,
@@ -1172,63 +1209,38 @@ open class MainActivity : ComponentActivity() {
                         discoverLocation,
                         liveTvInSidebar,
                         onDemandInSidebar,
-                        recordingsInSidebar,
                         recordingNow,
-                        sportsInSidebar
+                        sportsInSidebar,
+                        calendarInSidebar,
+                        homeHidden,
+                        sideMenuOrder,
+                        sideMenuHidden
                     ) {
+                        val pages = com.nuvio.tv.livetv.calendar.SideMenuPages
+                        val hiddenPages = pages.hidden(sideMenuHidden)
+                        fun page(id: String): DrawerItem? = when (id) {
+                            pages.HOME -> if (!homeHidden) DrawerItem(route = Screen.Home.route, label = strNavHome, icon = Icons.Default.Home) else null
+                            pages.DISCOVER -> if (discoverLocation == DiscoverLocation.IN_SIDEBAR) {
+                                DrawerItem(route = Screen.Discover.route, label = strNavDiscover, icon = Icons.Default.Explore)
+                            } else null
+                            pages.SEARCH -> if (id !in hiddenPages) DrawerItem(route = Screen.Search.route, label = strNavSearch, iconRes = R.raw.sidebar_search) else null
+                            pages.LIBRARY -> if (id !in hiddenPages) DrawerItem(route = Screen.Library.route, label = strNavLibrary, iconRes = R.raw.sidebar_library) else null
+                            pages.CALENDAR -> if (calendarInSidebar && id !in hiddenPages) DrawerItem(route = Screen.Calendar.route, label = "Calendar", icon = Icons.Default.DateRange) else null
+                            // Live TV's dot: something is recording (Recordings opens from the guide).
+                            pages.LIVE_TV -> if (liveTvInSidebar) DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv, badge = recordingNow) else null
+                            pages.SPORTS -> if (sportsInSidebar) DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents) else null
+                            pages.ON_DEMAND -> if (onDemandInSidebar) DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary) else null
+                            else -> null
+                        }
                         buildList {
-                            add(
-                                DrawerItem(
-                                    route = Screen.Home.route,
-                                    label = strNavHome,
-                                    icon = Icons.Default.Home
-                                )
-                            )
-                            if (discoverLocation == DiscoverLocation.IN_SIDEBAR) {
-                                add(
-                                    DrawerItem(
-                                        route = Screen.Discover.route,
-                                        label = strNavDiscover,
-                                        icon = Icons.Default.Explore
-                                    )
-                                )
+                            var lineDone = false
+                            pages.order(sideMenuOrder).forEach { id ->
+                                val item = page(id) ?: return@forEach
+                                // The thin line goes above the first of Live TV's pages (not when it's first).
+                                val line = !lineDone && id in pages.LIVE_FAMILY && isNotEmpty()
+                                if (id in pages.LIVE_FAMILY) lineDone = true
+                                add(if (line) item.copy(sectionStart = true) else item)
                             }
-                            add(
-                                DrawerItem(
-                                    route = Screen.Search.route,
-                                    label = strNavSearch,
-                                    iconRes = R.raw.sidebar_search
-                                )
-                            )
-                            add(
-                                DrawerItem(
-                                    route = Screen.Library.route,
-                                    label = strNavLibrary,
-                                    iconRes = R.raw.sidebar_library
-                                )
-                            )
-                            val liveTvPages = buildList {
-                                if (liveTvInSidebar) {
-                                    add(DrawerItem(route = Screen.LiveTv.route, label = "Live TV", icon = Icons.Default.LiveTv))
-                                }
-                                if (sportsInSidebar) {
-                                    add(DrawerItem(route = Screen.Sports.route, label = "Sports", icon = Icons.Default.EmojiEvents))
-                                }
-                                if (onDemandInSidebar) {
-                                    add(DrawerItem(route = Screen.OnDemand.route, label = "On Demand", icon = Icons.Default.VideoLibrary))
-                                }
-                                if (recordingsInSidebar) {
-                                    add(
-                                        DrawerItem(
-                                            route = Screen.Recordings.route,
-                                            label = "Recordings",
-                                            icon = Icons.Default.RadioButtonChecked,
-                                            badge = recordingNow
-                                        )
-                                    )
-                                }
-                            }
-                            liveTvPages.forEachIndexed { i, page -> add(if (i == 0) page.copy(sectionStart = true) else page) }
                             add(
                                 DrawerItem(
                                     route = Screen.Settings.route,
@@ -1239,8 +1251,10 @@ open class MainActivity : ComponentActivity() {
                             )
                         }
                     }
+                    // Live TV fork: Recordings belongs to Live TV in the menu.
+                    val menuRoute = if (currentRoute == Screen.Recordings.route) Screen.LiveTv.route else currentRoute
                     val selectedDrawerRoute = drawerItems.firstOrNull { item ->
-                        currentRoute == item.route || currentRoute?.startsWith("${item.route}/") == true
+                        menuRoute == item.route || menuRoute?.startsWith("${item.route}/") == true
                     }?.route
                     val selectedDrawerItem = drawerItems.firstOrNull { it.route == selectedDrawerRoute } ?: drawerItems.first()
 

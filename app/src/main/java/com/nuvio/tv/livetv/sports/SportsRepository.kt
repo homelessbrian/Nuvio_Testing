@@ -980,10 +980,8 @@ class SportsRepository @Inject constructor(
         if (league.guideOnly) return false
         if (league.id.startsWith("tsdb/")) return league.kind != LeagueKind.EVENT
         if (league.espnPath == null) return false
-        // HockeyTech, Minor League Baseball and international cricket: scores only.
-        if (!OtherFeeds.espnExtras(league.espnPath)) return false
-        // ESPN's cricket tables come without their columns.
-        if (league.sport == Sport.CRICKET) return false
+        // International cricket: tours, not a league with a table.
+        if (league.espnPath == "cricket/panel") return false
         if (league.kind == LeagueKind.EVENT) return league.sport == Sport.RACING && league.id in RACING_TABLES
         return league.sport !in setOf(Sport.GOLF, Sport.TENNIS, Sport.FIGHTING, Sport.WRESTLING, Sport.DARTS, Sport.SNOOKER)
     }
@@ -1176,12 +1174,18 @@ class SportsRepository @Inject constructor(
      */
     private suspend fun summaryFor(ev: SportsEvent): GameSummary? = withContext(Dispatchers.IO) {
         val league = SportsCatalog.league(ev.leagueId) ?: return@withContext null
-        val id = ev.espnId ?: return@withContext null
-        if (league.kind != LeagueKind.TEAMS || league.espnPath == null) return@withContext null
+        if (league.kind != LeagueKind.TEAMS) return@withContext null
+        // TheSportsDB's games: the details the nuvio-data job keeps (finished and live games).
+        val tsdbId = if (league.espnPath == null && ev.id.startsWith("tsdb:") && ev.home != null) ev.id.substringAfterLast(':') else null
+        val id = ev.espnId ?: tsdbId ?: return@withContext null
+        if (league.espnPath == null && tsdbId == null) return@withContext null
         val sig = "${ev.away?.score}-${ev.home?.score}-${ev.state}"
         val cached = synchronized(summaryCache) { summaryCache[ev.id] }
         if (cached != null && cached.sig == sig && System.currentTimeMillis() - cached.at < (if (ev.state == GameState.LIVE) 25_000 else 30 * MINUTE)) return@withContext cached
-        val root = runCatching { feeds.summaryJson(league, id) }.getOrNull() ?: return@withContext cached
+        if (tsdbId != null && ev.state == GameState.PRE) return@withContext null
+        val root = runCatching {
+            if (tsdbId != null) SportsFeeds.tsdbSummary(feeds.tsdbGameRaw(tsdbId), ev) else feeds.summaryJson(league, id)
+        }.getOrNull() ?: return@withContext cached
         val plays = if (ev.state == GameState.PRE) emptyList() else runCatching { SportsFeeds.parseSummary(root) }.getOrDefault(emptyList())
         val extras = runCatching { SportsExtras.parse(root, ev, league.sport) }.getOrDefault(GameExtras())
         GameSummary(System.currentTimeMillis(), sig, plays, extras).also { synchronized(summaryCache) { summaryCache[ev.id] = it } }

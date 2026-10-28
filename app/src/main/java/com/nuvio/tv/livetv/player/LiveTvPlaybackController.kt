@@ -534,7 +534,7 @@ class LiveTvPlaybackController @Inject constructor(
         lastFrameUs = Long.MIN_VALUE
     }
 
-    /** Live TV buffer size ("small", "normal", "large", "xlarge"); changing it rebuilds the player. */
+    /** Live TV buffer size ("none", "small", "normal", "large", "xlarge"); changing it rebuilds the player. */
     var bufferSize: String = "normal"
         set(value) {
             if (field == value) return
@@ -1016,7 +1016,15 @@ class LiveTvPlaybackController @Inject constructor(
         captionWatch?.cancel()
         return if (captionsOn()) { selectTrack(C.TRACK_TYPE_TEXT, null); false }
         else {
-            val pick = subtitleTracks().firstOrNull() ?: return false
+            val all = tracksOf(C.TRACK_TYPE_TEXT)
+            val pick = subtitleTracks().firstOrNull()
+            // For the report: what the stream offers and what has been seen carrying text.
+            com.nuvio.tv.livetv.model.LiveTvLoadReport.add(
+                "Captions: " + (pick?.let { "turned on \"${it.label}\"" } ?: "nothing to turn on") +
+                    "; caption tracks in the stream: " + (all.joinToString(", ") { it.kind ?: (it.label) }.ifBlank { "none" }) +
+                    "; seen with text: " + (LiveCaptions.found.value.joinToString(", ").ifBlank { if (LiveCaptions.watching()) "none yet" else "not checked" })
+            )
+            pick ?: return false
             selectTrack(C.TRACK_TYPE_TEXT, pick)
             if (pick.kind != null) watchCaptions()
             true
@@ -1202,8 +1210,17 @@ class LiveTvPlaybackController @Inject constructor(
     fun subtitleTracks(): List<LiveTrackOption> {
         val all = tracksOf(C.TRACK_TYPE_TEXT)
         val primary = primaryCaption(all)
-        val showPrimary = primary != null && (!LiveCaptions.noneFound() || primary.selected)
-        return all.filter { it.kind == null || (showPrimary && it == primary) }
+        // Closed captions stay on offer even when none have been seen yet (some streams carry
+        // them in ways the check misses): just labelled so.
+        val shown = primary?.let { if (LiveCaptions.noneFound() && !it.selected) it.copy(label = it.label + " (none seen yet)") else it }
+        val subs = all.filter { it.kind == null }
+        return when {
+            shown == null -> subs
+            // Captions seen carrying text (or switched on): first, for the CC button.
+            LiveCaptions.found.value.isNotEmpty() || shown.selected -> listOf(shown) + subs
+            // None seen yet: after the stream's own subtitles, still there to pick.
+            else -> subs + shown
+        }
     }
 
     fun selectTrack(type: Int, option: LiveTrackOption?) {
@@ -1273,6 +1290,9 @@ class LiveTvPlaybackController @Inject constructor(
         // Buffer size setting: how much is downloaded ahead. Bigger rides out a shaky connection or
         // a slow provider; smaller starts channels a little faster.
         val (minMs, maxMs, startMs, rebufferMs) = when (bufferSize) {
+            // None: as little as the player can play with (a second or two ahead): closest to
+            // live and the quickest channel changes, but any hiccup in the stream shows as a pause.
+            "none" -> listOf(1_500, 4_000, 250, 500)
             "small" -> listOf(10_000, 30_000, 1_000, 2_000)
             "large" -> listOf(40_000, 90_000, 3_000, 6_000)
             "xlarge" -> listOf(60_000, 150_000, 5_000, 10_000)
@@ -1861,6 +1881,7 @@ class LiveTvPlaybackController @Inject constructor(
             // almost no room for a slow segment, so some providers kept buffering; now it
             // follows the stream's own recommendation, with more room for bigger buffers.
             val offset = when (bufferSize) {
+                "none" -> 3_000L
                 "small" -> 10_000L
                 "large" -> 30_000L
                 "xlarge" -> 45_000L

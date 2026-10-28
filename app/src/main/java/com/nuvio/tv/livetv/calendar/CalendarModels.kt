@@ -1,0 +1,206 @@
+package com.nuvio.tv.livetv.calendar
+
+import androidx.compose.runtime.Immutable
+import org.json.JSONArray
+import org.json.JSONObject
+import java.time.LocalDate
+
+/** A show (or movie) whose bell is rung: it's on the Calendar and gets a card on Home when it's out. */
+@Immutable
+data class CalendarFollow(
+    /** Nuvio's id for it (usually the IMDb id, "tt…"). */
+    val id: String,
+    /** "series" or "movie". */
+    val type: String,
+    val name: String,
+    val poster: String? = null,
+    val background: String? = null,
+    val imdbId: String? = null,
+    val addonBaseUrl: String? = null,
+    val addedAt: Long = System.currentTimeMillis()
+) {
+    fun toJson(): JSONObject = JSONObject()
+        .put("id", id).put("type", type).put("name", name)
+        .put("poster", poster ?: "").put("background", background ?: "")
+        .put("imdb", imdbId ?: "").put("addon", addonBaseUrl ?: "").put("at", addedAt)
+
+    companion object {
+        fun fromJson(o: JSONObject) = CalendarFollow(
+            id = o.optString("id"),
+            type = o.optString("type", "series"),
+            name = o.optString("name"),
+            poster = o.optString("poster").ifBlank { null },
+            background = o.optString("background").ifBlank { null },
+            imdbId = o.optString("imdb").ifBlank { null },
+            addonBaseUrl = o.optString("addon").ifBlank { null },
+            addedAt = o.optLong("at", 0L)
+        )
+
+        fun decode(raw: String?): List<CalendarFollow> = runCatching {
+            if (raw.isNullOrBlank()) return emptyList()
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { arr.optJSONObject(it)?.let(::fromJson) }.filter { it.id.isNotBlank() }
+        }.getOrDefault(emptyList())
+
+        fun encode(list: List<CalendarFollow>): String = JSONArray(list.map { it.toJson() }).toString()
+    }
+}
+
+/** A show taken off the Calendar (Hold OK → Hide). */
+@Immutable
+data class CalendarHidden(val id: String, val name: String) {
+    companion object {
+        fun decode(raw: String?): List<CalendarHidden> = runCatching {
+            if (raw.isNullOrBlank()) return emptyList()
+            val arr = JSONArray(raw)
+            (0 until arr.length()).mapNotNull { i ->
+                arr.optJSONObject(i)?.let { CalendarHidden(it.optString("id"), it.optString("name")) }
+            }.filter { it.id.isNotBlank() }
+        }.getOrDefault(emptyList())
+
+        fun encode(list: List<CalendarHidden>): String =
+            JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name) }).toString()
+    }
+}
+
+enum class CalendarKind { EPISODE, MOVIE }
+
+/** Tags beside an entry. */
+enum class CalendarTag(val label: String) {
+    NEW("New"),
+    SERIES_PREMIERE("Series premiere"),
+    SEASON_PREMIERE("Season premiere"),
+    SEASON_FINALE("Season finale"),
+    SERIES_FINALE("Series finale"),
+    IN_THEATERS("In theaters"),
+    AT_HOME("At home"),
+    ON_DISC("On disc")
+}
+
+/** A channel in your Live TV guide showing this episode. */
+@Immutable
+data class CalendarGuideHit(
+    val channelKey: String,
+    val channelName: String,
+    val channelLogo: String?,
+    val startMs: Long,
+    val stopMs: Long,
+    val title: String
+)
+
+/** Why an entry is on your Calendar. */
+enum class CalendarReason { BELL, LIBRARY, WATCHING, AIRING_TODAY }
+
+@Immutable
+data class CalendarEntry(
+    /** Unique per entry. */
+    val key: String,
+    val kind: CalendarKind,
+    /** Nuvio's id for the show or movie (IMDb "tt…" when known). */
+    val contentId: String,
+    /** "series" or "movie". */
+    val type: String,
+    val title: String,
+    val poster: String?,
+    val background: String?,
+    val addonBaseUrl: String? = null,
+    val season: Int? = null,
+    val episode: Int? = null,
+    /** The last episode when several come out together (a whole season at once). */
+    val lastEpisode: Int? = null,
+    val episodeTitle: String? = null,
+    val episodeImage: String? = null,
+    /** When it airs (null: only the day is known). */
+    val airMs: Long? = null,
+    /** The day it airs in your time zone. */
+    val day: LocalDate,
+    /** The network or streaming service. */
+    val network: String? = null,
+    /** On a streaming service (no air time). */
+    val streaming: Boolean = false,
+    val tags: List<CalendarTag> = emptyList(),
+    /** Movies: the other release ("In theaters Oct 2"). */
+    val note: String? = null,
+    val reasons: Set<CalendarReason> = emptySet(),
+    /** You've watched it. */
+    val watched: Boolean = false,
+    /** You haven't reached it yet: its title and picture are hidden. */
+    val spoiler: Boolean = false,
+    val runtimeMin: Int? = null,
+    val guide: CalendarGuideHit? = null
+) {
+    val episodeCode: String?
+        get() = if (season == null || episode == null) null else buildString {
+            append("S$season · E$episode")
+            if (lastEpisode != null && lastEpisode > episode) append("–E$lastEpisode")
+        }
+
+    /** Nuvio's id for this episode ("tt123:2:5"). */
+    val videoId: String?
+        get() = if (season != null && episode != null && contentId.startsWith("tt")) "$contentId:$season:$episode" else null
+
+    val followed: Boolean get() = CalendarReason.BELL in reasons
+}
+
+/** What the Calendar shows. */
+@Immutable
+data class CalendarState(
+    val entries: List<CalendarEntry> = emptyList(),
+    /** Still looking up shows. */
+    val loading: Boolean = false,
+    /** Shows looked up so far / in all (while loading). */
+    val progress: Pair<Int, Int>? = null,
+    val updatedAt: Long = 0L,
+    /** Shows on the Calendar (bells, Library and what you're watching). */
+    val showCount: Int = 0,
+    val problem: String? = null
+)
+
+/** One show's next episode, for its details page. */
+@Immutable
+data class CalendarShowInfo(
+    val next: CalendarEntry?,
+    /** "Ended", "Returning series"… (when there's no next episode). */
+    val status: String?,
+    /** All upcoming episodes by (season, episode) -> when, for the episode list. */
+    val upcoming: Map<Pair<Int, Int>, Long> = emptyMap()
+)
+
+/** The side menu's pages that can be moved or taken off (Settings → Menu & Features). */
+object SideMenuPages {
+    const val HOME = "home"
+    const val SEARCH = "search"
+    const val LIBRARY = "library"
+    const val CALENDAR = "calendar"
+    const val LIVE_TV = "livetv"
+    const val SPORTS = "sports"
+    const val ON_DEMAND = "ondemand"
+    const val DISCOVER = "discover"
+
+    val DEFAULT_ORDER = listOf(HOME, DISCOVER, SEARCH, LIBRARY, CALENDAR, LIVE_TV, SPORTS, ON_DEMAND)
+
+    val NAMES = mapOf(
+        HOME to "Home", SEARCH to "Search", LIBRARY to "Library", CALENDAR to "Calendar", LIVE_TV to "Live TV",
+        SPORTS to "Sports", ON_DEMAND to "On Demand", DISCOVER to "Discover"
+    )
+
+    /** The order as saved, with any page it doesn't mention in its usual place. */
+    fun order(saved: String): List<String> {
+        val mine = saved.split(',').map { it.trim() }.filter { it in DEFAULT_ORDER }.distinct()
+        if (mine.isEmpty()) return DEFAULT_ORDER
+        val out = mine.toMutableList()
+        DEFAULT_ORDER.forEachIndexed { i, id ->
+            if (id !in out) {
+                // After the page that comes before it usually.
+                val before = DEFAULT_ORDER.take(i).lastOrNull { it in out }
+                out.add(if (before == null) 0 else out.indexOf(before) + 1, id)
+            }
+        }
+        return out
+    }
+
+    fun hidden(saved: String): Set<String> = saved.split(',').map { it.trim() }.filter { it.isNotEmpty() }.toSet()
+
+    /** Live TV's own pages (a thin line goes above the first of them). */
+    val LIVE_FAMILY = setOf(LIVE_TV, SPORTS, ON_DEMAND)
+}

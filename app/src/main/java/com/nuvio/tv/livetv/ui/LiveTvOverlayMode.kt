@@ -463,8 +463,15 @@ private val PanelMid = Color(0x99141416)
  */
 @Composable
 private fun keepVisible(state: LazyListState, index: Int) {
+    // When the last move was a moment ago (holding the button, quick presses), the list moves
+    // at once instead of sliding: a slide that's cut short by the next press never finished, so
+    // the highlight could run off the bottom of the panel faster than the list followed.
+    val lastMove = remember { longArrayOf(0L) }
     LaunchedEffect(index) {
         if (index < 0) return@LaunchedEffect
+        val nowMs = android.os.SystemClock.uptimeMillis()
+        val quick = nowMs - lastMove[0] < 400
+        lastMove[0] = nowMs
         val info = state.layoutInfo
         val visible = info.visibleItemsInfo
         if (visible.isEmpty()) {
@@ -482,8 +489,12 @@ private fun keepVisible(state: LazyListState, index: Int) {
             index == first && first == 0 -> Unit
             index == last && last == lastItem -> Unit
             index > last + rows || index < first - rows -> state.scrollToItem((index - 3).coerceAtLeast(0))
-            index >= last -> state.animateScrollToItem((index - rows + 2).coerceIn(0, maxOf(0, lastItem - rows + 1)))
-            else -> state.animateScrollToItem((index - 1).coerceAtLeast(0))
+            index >= last -> (index - rows + 2).coerceIn(0, maxOf(0, lastItem - rows + 1)).let {
+                if (quick) state.scrollToItem(it) else state.animateScrollToItem(it)
+            }
+            else -> (index - 1).coerceAtLeast(0).let {
+                if (quick) state.scrollToItem(it) else state.animateScrollToItem(it)
+            }
         }
     }
 }

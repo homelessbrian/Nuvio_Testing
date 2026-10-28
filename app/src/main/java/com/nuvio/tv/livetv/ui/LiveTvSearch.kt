@@ -519,5 +519,8 @@ fun rememberSearchScope(): SearchScope {
         LiveTvSearchBridge.ON_DEMAND -> SearchScope(s.onDemandSearchLive, s.onDemandSearchCatalog, s.onDemandSearchOnDemand)
         else -> SearchScope(live = true, catalog = true, onDemand = true)
     }.let { if (!it.live && !it.catalog && !it.onDemand) SearchScope(true, true, true) else it }
+        // Live TV or On Demand switched off (Settings → Menu & Features): none of their results.
+        .let { it.copy(live = it.live && s.showInSidebar, onDemand = it.onDemand && s.onDemandInSidebar) }
+        .let { if (!it.live && !it.catalog && !it.onDemand) it.copy(catalog = true) else it }
         .copy(order = parseSearchOrder(s.searchOrder))
 }

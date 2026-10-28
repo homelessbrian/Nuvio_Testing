@@ -308,6 +308,17 @@ internal fun LiveTvSettingsContent(
             title = page.title,
             subtitle = if (status.loading && !flat) (status.message ?: "Updating…") else page.subtitle
         )
+        // Live TV switched off (Settings → Menu & Features): say so, with a way to turn it back on.
+        if (!s.showInSidebar) {
+            SettingsGroupCard {
+                SettingsActionRow(
+                    title = "Live TV Is Turned Off",
+                    subtitle = "The guide, its row on Home and everything else of Live TV's is off. It's switched on and off in Settings → Menu & Features.",
+                    value = "Turn On",
+                    onClick = { update { it.copy(showInSidebar = true) } }
+                )
+            }
+        }
         if (hub) LiveTabRow(selected = tab, first = initialFocusRequester, onSelect = { tab = it })
         androidx.compose.runtime.key(page) {
         androidx.compose.runtime.CompositionLocalProvider(LocalLiveFlat provides flat) {
@@ -619,13 +630,6 @@ internal fun LiveTvSettingsContent(
                             { viewModel.savePlaylist(pl.copy(importVod = !pl.importVod)) }
                         )
                     }
-                    SubHeading("In Nuvio")
-                    SettingsToggleRow(
-                        "Show On Demand in the Side Menu",
-                        "Its own page in Nuvio's menu, once a provider's movies or series are imported",
-                        s.onDemandInSidebar,
-                        { update { it.copy(onDemandInSidebar = !it.onDemandInSidebar) } }
-                    )
                     SubHeading("Browsing")
                     var pickingSort by remember { mutableStateOf(false) }
                     val defaultSort = com.nuvio.tv.livetv.ondemand.VodSort.parse(s.vodDefaultSort)?.first
@@ -833,6 +837,12 @@ internal fun LiveTvSettingsContent(
                         "The logo in front of each channel name",
                         s.showChannelLogos,
                         { update { it.copy(showChannelLogos = !it.showChannelLogos) } }
+                    )
+                    SettingsToggleRow(
+                        "Outline the Playing Channel",
+                        "A red outline around the channel you're watching",
+                        s.markPlayingChannel,
+                        { update { it.copy(markPlayingChannel = !it.markPlayingChannel) } }
                     )
                     var pickingGuideSize by remember { mutableStateOf(false) }
                     val guideSizes = listOf(
@@ -1117,10 +1127,10 @@ internal fun LiveTvSettingsContent(
                     SubHeading("Connection")
                     SettingsActionRow(
                         title = "Buffer Size",
-                        subtitle = "Larger rides out a slow connection or provider (fewer pauses); smaller changes channels a little faster",
-                        value = when (s.bufferSize) { "small" -> "Small"; "large" -> "Large"; "xlarge" -> "Extra large"; else -> "Normal" },
+                        subtitle = "Larger rides out a slow connection or provider (fewer pauses); smaller changes channels a little faster. None: the closest to live and the quickest channel changes, but any hiccup shows as a pause",
+                        value = when (s.bufferSize) { "none" -> "None"; "small" -> "Small"; "large" -> "Large"; "xlarge" -> "Extra large"; else -> "Normal" },
                         onClick = {
-                            update { st -> st.copy(bufferSize = when (st.bufferSize) { "small" -> "normal"; "normal" -> "large"; "large" -> "xlarge"; else -> "small" }) }
+                            update { st -> st.copy(bufferSize = when (st.bufferSize) { "none" -> "small"; "small" -> "normal"; "normal" -> "large"; "large" -> "xlarge"; else -> "none" }) }
                         }
                     )
                     SettingsToggleRow(
@@ -1198,13 +1208,6 @@ internal fun LiveTvSettingsContent(
                         ).profileManager()
                     }.activeProfileId.collectAsStateWithLifecycle()
                     val homeRowOn = homeProfileId !in s.homeRowHiddenProfiles
-                    SubHeading("When the App Starts")
-                    SettingsActionRow(
-                        title = "Open the App On",
-                        subtitle = "The page the app starts on. It opens straight on that page; Back opens the menu as usual. Takes effect the next time the app starts.",
-                        value = openOnLabel(s.openOn),
-                        onClick = { dialog = LiveDialog.StartPage }
-                    )
                     SubHeading("Rows on Your TV's Home Screen")
                     SettingsActionRow(
                         title = "Card Shape",
@@ -1287,13 +1290,6 @@ internal fun LiveTvSettingsContent(
                             { update { it.copy(homeRowCompact = !it.homeRowCompact) } }
                         )
                     }
-                    SubHeading("Menu")
-                    SettingsToggleRow(
-                        "Show Live TV in the Side Menu",
-                        "Off: Live TV leaves Nuvio's main menu. You can still reach it from Settings.",
-                        s.showInSidebar,
-                        { update { it.copy(showInSidebar = !it.showInSidebar) } }
-                    )
                 }
             }
 
@@ -1458,12 +1454,6 @@ internal fun LiveTvSettingsContent(
                     open = "recordings" in open,
                     onToggle = { toggle("recordings") }
                 ) {
-                    SettingsToggleRow(
-                        "Show Recordings in the Side Menu",
-                        "Once anything is recorded or set to record",
-                        s.recordingsInSidebar,
-                        { update { it.copy(recordingsInSidebar = !it.recordingsInSidebar) } }
-                    )
                     SettingsActionRow(
                         title = "Save Recordings To",
                         subtitle = if (chosen == null && s.recordingStorage.isNotEmpty())

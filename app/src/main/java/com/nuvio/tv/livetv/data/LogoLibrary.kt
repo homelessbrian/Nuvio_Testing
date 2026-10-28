@@ -52,13 +52,13 @@ object LogoLibrary {
 
     private fun dir(context: Context) = File(context.cacheDir, "logo_lists").apply { mkdirs() }
 
-    /** Both libraries' lists (fetched if needed). A library that can't be reached is just left out. */
-    suspend fun entries(context: Context): List<Entry> = lock.withLock {
+    /** Both libraries' lists (fetched if needed). A library that can't be reached, or is in [skip] ("tv-logos", "iptv-org"), is left out. */
+    suspend fun entries(context: Context, skip: Set<String> = emptySet()): List<Entry> = lock.withLock {
         withContext(Dispatchers.IO) {
-            val a = tvLogos ?: runCatching { loadTvLogos(context) }
+            val a = if ("tv-logos" in skip) null else tvLogos ?: runCatching { loadTvLogos(context) }
                 .onFailure { LiveTvLoadReport.add("Change Logo: tv-logos list couldn't be read (${it.javaClass.simpleName} ${it.message})") }
                 .getOrNull()?.also { tvLogos = it }
-            val b = iptvOrg ?: runCatching { loadIptvOrg(context) }
+            val b = if ("iptv-org" in skip) null else iptvOrg ?: runCatching { loadIptvOrg(context) }
                 .onFailure { LiveTvLoadReport.add("Change Logo: iptv-org list couldn't be read (${it.javaClass.simpleName} ${it.message})") }
                 .getOrNull()?.also { iptvOrg = it }
             a.orEmpty() + b.orEmpty()
@@ -226,4 +226,36 @@ object TmdbLogos {
             c.disconnect()
         }
     }.getOrNull()
+}
+
+
+/**
+ * A channel's name without what providers dress it up with, for finding its logo (and its
+ * guide): tiny raised or small-capital letters ("ESPN ᴿᴬᵂ", "Sky ʜᴅ"), fancy letters
+ * ("𝐄𝐒𝐏𝐍"), country and provider tags in front ("US: ", "UK | ", "[VIP] "), brackets, emoji and
+ * quality words (HD, FHD, 4K, RAW, BACKUP…).
+ */
+object ChannelNameCleaner {
+    /** Raised (superscript) and small-capital letters: always a tag, never part of the name. */
+    private val TINY = Regex("[\\u02B0-\\u02FF\\u1D00-\\u1DBF\\u2070-\\u209F\\uA730-\\uA7FF\\u0262\\u026A\\u0274\\u0280\\u028F\\u0299\\u029C\\u029F]+")
+    private val SYMBOLS = Regex("[\\p{So}\\p{Sk}\\p{Cs}\\u200B-\\u200F\\uFE0F]+")
+    private val BRACKETS = Regex("""[\[({][^\])}]*[\])}]""")
+    private val PIPES = Regex("""\|[^|]{0,12}\|""")
+    private val FRONT_TAG = Regex("""^\s*(?:[A-Za-z]{2,3}\d?\s*[:|]\s*|[A-Za-z]{2,3}\s+-\s+)+""")
+    private val QUALITY = Regex("""(?i)\b(FHD|UHD|HD|SD|HQ|4K|8K|HEVC|H\.?26[45]|RAW|BACKUP|VIP|MULTI|\d{2,3}\s?FPS|1080[pi]?|720p|2160p)\b""")
+    private val SPACES = Regex("""\s+""")
+
+    fun clean(name: String): String {
+        // Plain names (most of them) skip the work.
+        if (name.all { it.code < 128 && it != '|' && it != ':' && it != '[' && it != '(' && it != '{' } && !QUALITY.containsMatchIn(name)) return name.trim()
+        var s = TINY.replace(name, " ")
+        s = java.text.Normalizer.normalize(s, java.text.Normalizer.Form.NFKC)
+        s = SYMBOLS.replace(s, " ")
+        s = BRACKETS.replace(s, " ")
+        s = PIPES.replace(s, " ")
+        s = FRONT_TAG.replace(s, "")
+        s = QUALITY.replace(s, " ")
+        s = SPACES.replace(s, " ").trim().trim('-', '|', ':', '.', ' ')
+        return s.ifBlank { name.trim() }
+    }
 }

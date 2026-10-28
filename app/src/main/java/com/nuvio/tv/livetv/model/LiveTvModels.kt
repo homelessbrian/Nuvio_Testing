@@ -222,6 +222,8 @@ data class LiveTvSettings(
     val showInSidebar: Boolean = true,
     val showChannelNames: Boolean = true,
     val showChannelNumbers: Boolean = true,
+    /** A red outline around the channel you're watching, in the guide's channel list. */
+    val markPlayingChannel: Boolean = true,
     val showChannelLogos: Boolean = true,
     val showPreview: Boolean = true,
     val showProgramDetails: Boolean = true,
@@ -290,6 +292,8 @@ data class LiveTvSettings(
     val openOn: String = "HOME",
     /** The shape of the cards in the launcher's home-screen rows: WIDE, TALL or SQUARE. */
     val launcherCardShape: String = "WIDE",
+    /** Change Logo's sources turned off, by key ("playlists", "guides", "tv-logos", "iptv-org", "tmdb"), comma-separated. */
+    val logoSourcesOff: String = "",
     /** Xtream catch-up: ask for HLS (.m3u8) first, which gives replays a length for seeking. */
     val catchupPreferHls: Boolean = true,
     /**
@@ -315,6 +319,27 @@ data class LiveTvSettings(
     val onDemandInSidebar: Boolean = true,
     /** Recordings in the side menu (once anything is recorded or set to record). */
     val recordingsInSidebar: Boolean = true,
+    /**
+     * The side menu's order (Settings → Menu & Features): page ids, comma separated ("search,library,
+     * calendar,livetv,sports,ondemand,discover"). Home stays first and Settings last. Empty = the usual order.
+     */
+    val sideMenuOrder: String = "",
+    /** Pages taken off the side menu (ids as above; Live TV, Sports and On Demand use their own switches). */
+    val sideMenuHidden: String = "",
+    /** Calendar in the side menu even before any show's bell is rung. */
+    val calendarInMenu: Boolean = false,
+    /** Calendar: your shows' next episodes in Home's Upcoming row. */
+    val calendarUpcomingRow: Boolean = true,
+    /** Calendar: a "new episode" card in Continue Watching for shows you rang the bell on. */
+    val calendarNewEpisodeCards: Boolean = true,
+    /** Calendar: hide titles and pictures of episodes you haven't reached yet. */
+    val calendarHideSpoilers: Boolean = true,
+    /** Calendar: the country for Airing Today and movie release dates (two letters). */
+    val calendarCountry: String = "US",
+    /** Calendar: Airing Today leaves out news, talk and sports shows. */
+    val calendarSkipNewsTalk: Boolean = true,
+    /** Calendar: opens in "LIST" or "MONTH" view. */
+    val calendarView: String = "LIST",
     /** Offer "Watch On Demand" in Nuvio's stream list for movies and episodes. */
     val onDemandInStreams: Boolean = true,
     /** Where the On Demand tab sits in the stream list: FIRST, AFTER_FIRST (the first addon) or LAST. */
@@ -377,7 +402,7 @@ data class LiveTvSettings(
     val homeRowShowNext: Boolean = false,
     /** Compact cards: logo and show name only. */
     val homeRowCompact: Boolean = false,
-    /** Live TV buffer: "small" (fastest channel changes), "normal", "large", "xlarge". */
+    /** Live TV buffer: "none" (the least the player can run on), "small" (fast channel changes), "normal", "large", "xlarge". */
     val bufferSize: String = "normal",
     /** Group list order: "custom" (yours, from Reorder groups), "playlist" or "name" (A–Z). */
     val groupSort: String = "custom",
@@ -599,13 +624,39 @@ object ChannelNameEditor {
         return list
     }
 
-    fun clean(name: String, terms: List<String>): String {
+    /**
+     * Terms a playlist uses as a prefix with just a space after it ("USA ESPN", "USA CNN"): five
+     * or more of its channels start that way. Then the space alone counts as the separator.
+     * Otherwise it doesn't, so a lone "USA Network" keeps its name.
+     */
+    fun spacePrefixes(names: Collection<String>, terms: List<String>): Set<String> {
+        val words = terms.filter { t -> t.all { it.isLetter() } }.map { it.lowercase() }
+        if (words.isEmpty()) return emptySet()
+        val counts = HashMap<String, Int>()
+        for (n in names) {
+            val l = n.trimStart { !it.isLetterOrDigit() }.lowercase()
+            for (w in words) if (l.startsWith("$w ") && l.length > w.length + 1) counts[w] = (counts[w] ?: 0) + 1
+        }
+        return counts.filterValues { it >= 5 }.keys
+    }
+
+    fun clean(name: String, terms: List<String>, spacePrefixes: Set<String> = emptySet()): String {
         if (terms.isEmpty()) return name
+        var start = name.trim()
+        // A playlist-wide "USA " prefix: off once ("USA USA Network" keeps "USA Network").
+        if (spacePrefixes.isNotEmpty()) {
+            val body = start.trimStart { !it.isLetterOrDigit() }
+            val l = body.lowercase()
+            spacePrefixes.firstOrNull { l.startsWith("$it ") }?.let { w ->
+                val rest = body.substring(w.length).trim()
+                if (rest.isNotBlank()) start = rest
+            }
+        }
         // Fast path: most names have none of the terms at either end, so skip the patterns.
         val lowerTerms = lowered(terms)
-        if (!atEdge(name.lowercase(), lowerTerms)) return name.trim()
+        if (!atEdge(start.lowercase(), lowerTerms)) return start
         val patterns = compile(terms)
-        var out = name.trim()
+        var out = start
         var changed = true
         var guard = 0
         while (changed && guard++ < 6) {
@@ -645,7 +696,7 @@ object DeveloperTools {
  */
 object LiveTvLoadReport {
     /** Which Live TV kit this app was built from: changed with every kit, so a report shows the exact build. */
-    const val KIT_STAMP = "2026-10-27 10:00"
+    const val KIT_STAMP = "2026-10-28 04:05"
 
     /** The first line of every report: kit and app version, so it's clear which build wrote it. */
     val buildLine: String

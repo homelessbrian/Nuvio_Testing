@@ -79,6 +79,16 @@ fun SportsSettingsContent(
             contentPadding = PaddingValues(bottom = 18.dp),
             verticalArrangement = Arrangement.spacedBy(NuvioTheme.spacing.md)
         ) {
+            if (!s.showInSidebar) item(key = "off") {
+                SettingsGroupCard {
+                    SettingsActionRow(
+                        title = "Sports Is Turned Off",
+                        subtitle = "The Sports page, game reminders and scores on the info bar are off. It's switched on and off in Settings → Menu & Features.",
+                        value = "Turn On",
+                        onClick = { update { it.copy(showInSidebar = true) } }
+                    )
+                }
+            }
             item(key = "teams") {
                 SettingsGroupCard(title = "Your Teams") {
                     val names = (f.teams.map { it.name } + f.pins.mapNotNull { SportsCatalog.league(it)?.name } + f.words.map { "\"$it\"" })
@@ -103,12 +113,6 @@ fun SportsSettingsContent(
                         value = SportsCatalog.regionName(region) + if (s.region.isBlank()) " (this TV)" else "",
                         leadingIcon = Icons.Default.Public,
                         onClick = { dialog = "region" }
-                    )
-                    SettingsToggleRow(
-                        "Show Sports in the Side Menu",
-                        "Off: the Sports page, reminders and scores on the info bar are all switched off",
-                        s.showInSidebar,
-                        { update { it.copy(showInSidebar = !it.showInSidebar) } }
                     )
                 }
             }
