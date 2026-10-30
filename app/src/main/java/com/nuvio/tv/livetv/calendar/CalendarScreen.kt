@@ -93,7 +93,18 @@ private enum class CalKind { ALL, SHOWS, MOVIES, SPORTS, ON_TV }
 private enum class AirFilter { ALL, PRIME, STREAMING, FOLLOWING }
 
 private val CARD_W = 208.dp
-private const val HERO_H = 236
+private const val HERO_H = 212
+
+/** Nuvio's card focus: the theme's focus ring, 2 dp, and a 1.02 scale (same as ContentCard). */
+private const val FOCUS_SCALE = 1.02f
+private val RING_W = 2.dp
+
+/** The theme's focus ring around [shape], only while [focused]. */
+@Composable
+private fun Modifier.focusRing(focused: Boolean, shape: androidx.compose.ui.graphics.Shape): Modifier {
+    val ring = NuvioTheme.focusRing.border(RING_W)
+    return if (focused) this.border(ring, shape) else this
+}
 
 /** Called when the card Back returns to (the first one, or today) gets the focus. */
 private val LocalAtHome = staticCompositionLocalOf<() -> Unit> { {} }
@@ -279,7 +290,6 @@ fun CalendarScreen(
                     st = st,
                     now = now,
                     use24h = use24h,
-                    followed = hero?.let { isFollowed(it) } == true,
                     channelCount = hero?.let { channels(it).size } ?: 0,
                     canWait = hero?.let { viewModel.repo.canWaitForGuide(it) } == true,
                     loading = (state.loading && state.entries.isEmpty()) || (tab == CalTab.AIRING && airing.loading && airing.entries.isEmpty()),
@@ -288,9 +298,8 @@ fun CalendarScreen(
                     label = { viewModel.repo.channelLabel(it) },
                     onWait = { hero?.let { viewModel.toggleWait(it, CalendarPlan.RECORD) } },
                     onWatch = { hero?.let { act(it, record = false) } },
-                    onLiveOptions = { liveCard = hero },
                     onOpen = { hero?.let(::page) },
-                    onBell = { hero?.let { viewModel.toggleFollow(it) } }
+                    onOptions = { hero?.let { options = it } }
                 )
             } else {
                 Spacer(Modifier.height(24.dp))
@@ -312,56 +321,66 @@ fun CalendarScreen(
                 }
                 Spacer(Modifier.height(12.dp))
             }
-            // ---------------------------------------------------------------- tabs and filters
+            // ---------------------------------------------------------------- where you are: tabs, view, refresh
             Row(
-                Modifier.padding(start = 64.dp, end = 32.dp, bottom = 10.dp),
+                Modifier.padding(start = 56.dp, end = 32.dp, bottom = 2.dp),
                 verticalAlignment = Alignment.CenterVertically,
-                horizontalArrangement = Arrangement.spacedBy(6.dp)
+                horizontalArrangement = Arrangement.spacedBy(4.dp)
             ) {
                 fun tabMod(on: Boolean) = if (on) Modifier.focusRequester(tabFocus) else Modifier
                 if (grid) {
                     val mine = tab == CalTab.UPCOMING || tab == CalTab.RECENT
-                    Pill("My calendar", mine, tabMod(mine)) { tab = CalTab.UPCOMING }
+                    TabPill("My calendar", mine, tabMod(mine)) { tab = CalTab.UPCOMING }
                 } else {
-                    Pill("Upcoming", tab == CalTab.UPCOMING, tabMod(tab == CalTab.UPCOMING)) { tab = CalTab.UPCOMING; heroKey = null }
-                    Pill("Recently aired", tab == CalTab.RECENT, tabMod(tab == CalTab.RECENT)) { tab = CalTab.RECENT; heroKey = null }
+                    TabPill("Upcoming", tab == CalTab.UPCOMING, tabMod(tab == CalTab.UPCOMING)) { tab = CalTab.UPCOMING; heroKey = null }
+                    TabPill("Recently aired", tab == CalTab.RECENT, tabMod(tab == CalTab.RECENT)) { tab = CalTab.RECENT; heroKey = null }
                 }
-                Pill("Airing today", tab == CalTab.AIRING, tabMod(tab == CalTab.AIRING)) { tab = CalTab.AIRING; heroKey = null }
-                Pill("Following", tab == CalTab.FOLLOWING, tabMod(tab == CalTab.FOLLOWING)) { tab = CalTab.FOLLOWING }
-                if (hidden.isNotEmpty() || tab == CalTab.HIDDEN) Pill("Hidden", tab == CalTab.HIDDEN, tabMod(tab == CalTab.HIDDEN)) { tab = CalTab.HIDDEN }
-                Divider()
-                when (tab) {
-                    CalTab.UPCOMING, CalTab.RECENT -> {
-                        Pill("All", kind == CalKind.ALL) { kind = CalKind.ALL; heroKey = null }
-                        Pill("Shows", kind == CalKind.SHOWS) { kind = CalKind.SHOWS; heroKey = null }
-                        Pill("Movies", kind == CalKind.MOVIES) { kind = CalKind.MOVIES; heroKey = null }
-                        if (kind == CalKind.SPORTS || all.any { it.kind == CalendarKind.GAME }) Pill("Sports", kind == CalKind.SPORTS) { kind = CalKind.SPORTS; heroKey = null }
-                        Pill("On my TV", kind == CalKind.ON_TV) { kind = CalKind.ON_TV; heroKey = null }
-                        if (tab == CalTab.RECENT && !grid) {
-                            Divider()
-                            SwitchPill("Unwatched only", settings.calendarHideWatched) { viewModel.setHideWatched(!settings.calendarHideWatched); heroKey = null }
-                        }
-                    }
-                    CalTab.AIRING -> {
-                        Pill("All", airFilter == AirFilter.ALL) { airFilter = AirFilter.ALL; heroKey = null }
-                        Pill("Prime time", airFilter == AirFilter.PRIME) { airFilter = AirFilter.PRIME; heroKey = null }
-                        Pill("Streaming", airFilter == AirFilter.STREAMING) { airFilter = AirFilter.STREAMING; heroKey = null }
-                        Pill("Following", airFilter == AirFilter.FOLLOWING) { airFilter = AirFilter.FOLLOWING; heroKey = null }
-                        Divider()
-                        // A switch, not a filter: news and talk shows in the list, or left out.
-                        SwitchPill("News & talk shows", !settings.calendarSkipNewsTalk) { viewModel.setSkipNewsTalk(!settings.calendarSkipNewsTalk) }
-                    }
-                    else -> Unit
-                }
+                TabPill("Airing today", tab == CalTab.AIRING, tabMod(tab == CalTab.AIRING)) { tab = CalTab.AIRING; heroKey = null }
+                TabPill("Following", tab == CalTab.FOLLOWING, tabMod(tab == CalTab.FOLLOWING)) { tab = CalTab.FOLLOWING }
+                if (hidden.isNotEmpty() || tab == CalTab.HIDDEN) TabPill("Hidden", tab == CalTab.HIDDEN, tabMod(tab == CalTab.HIDDEN)) { tab = CalTab.HIDDEN }
                 Spacer(Modifier.weight(1f))
                 if (tab == CalTab.UPCOMING || tab == CalTab.RECENT) {
                     Segmented(listOf("LIST" to "List", "WEEK" to "Week", "MONTH" to "Month"), view) { v ->
                         viewModel.setView(v); heroKey = null
                         if (v != "LIST") tab = CalTab.UPCOMING
                     }
-                    Spacer(Modifier.width(4.dp))
+                    Spacer(Modifier.width(6.dp))
                 }
                 IconPill { if (tab == CalTab.AIRING) viewModel.loadAiring(force = true) else viewModel.refresh() }
+            }
+            // ---------------------------------------------------------------- what you see: filters (quieter)
+            if (tab == CalTab.UPCOMING || tab == CalTab.RECENT || tab == CalTab.AIRING) {
+                Row(
+                    Modifier.padding(start = 64.dp, end = 32.dp, bottom = 8.dp),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    when (tab) {
+                        CalTab.UPCOMING, CalTab.RECENT -> {
+                            Pill("All", kind == CalKind.ALL, quiet = true) { kind = CalKind.ALL; heroKey = null }
+                            Pill("Shows", kind == CalKind.SHOWS, quiet = true) { kind = CalKind.SHOWS; heroKey = null }
+                            Pill("Movies", kind == CalKind.MOVIES, quiet = true) { kind = CalKind.MOVIES; heroKey = null }
+                            if (kind == CalKind.SPORTS || all.any { it.kind == CalendarKind.GAME }) Pill("Sports", kind == CalKind.SPORTS, quiet = true) { kind = CalKind.SPORTS; heroKey = null }
+                            Pill("On my TV", kind == CalKind.ON_TV, quiet = true) { kind = CalKind.ON_TV; heroKey = null }
+                            if (tab == CalTab.RECENT && !grid) {
+                                Divider()
+                                SwitchPill("Unwatched only", settings.calendarHideWatched) { viewModel.setHideWatched(!settings.calendarHideWatched); heroKey = null }
+                            }
+                        }
+                        CalTab.AIRING -> {
+                            Pill("All", airFilter == AirFilter.ALL, quiet = true) { airFilter = AirFilter.ALL; heroKey = null }
+                            Pill("Prime time", airFilter == AirFilter.PRIME, quiet = true) { airFilter = AirFilter.PRIME; heroKey = null }
+                            Pill("Streaming", airFilter == AirFilter.STREAMING, quiet = true) { airFilter = AirFilter.STREAMING; heroKey = null }
+                            Pill("Following", airFilter == AirFilter.FOLLOWING, quiet = true) { airFilter = AirFilter.FOLLOWING; heroKey = null }
+                            Divider()
+                            // A switch, not a filter: news and talk shows in the list, or left out.
+                            SwitchPill("News & talk shows", !settings.calendarSkipNewsTalk) { viewModel.setSkipNewsTalk(!settings.calendarSkipNewsTalk) }
+                        }
+                        else -> Unit
+                    }
+                }
+            } else {
+                Spacer(Modifier.height(8.dp))
             }
             // ---------------------------------------------------------------- what's on
             Box(
@@ -390,8 +409,13 @@ fun CalendarScreen(
                             entries = filtered, use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey,
                             status = status, onOpen = ::open, onOptions = { options = it }
                         )
-                        pool.isEmpty() -> EmptyNote(
-                            when {
+                        pool.isEmpty() && state.problem != null && state.entries.isEmpty() -> EmptyNote(
+                            text = "Check your connection and try again.",
+                            headline = "Couldn't load the calendar",
+                            action = "Retry", actionFocus = firstItem, onAction = { viewModel.refresh() }
+                        )
+                        pool.isEmpty() -> {
+                            val text = when {
                                 state.loading && state.entries.isEmpty() -> "Looking up your shows…"
                                 state.showCount == 0 -> "Nothing here yet. Shows you watch, your Library and shows you ring the bell on show up here with their new episodes."
                                 kind == CalKind.ON_TV -> "None of your shows are in your Live TV guide right now. Your guide usually covers the next few days."
@@ -399,7 +423,10 @@ fun CalendarScreen(
                                 settings.calendarHideWatched -> "You're all caught up."
                                 else -> "Nothing aired in the last month."
                             }
-                        )
+                            val loadingNow = state.loading && state.entries.isEmpty()
+                            if (loadingNow || tab == CalTab.RECENT) EmptyNote(text)
+                            else EmptyNote(text, action = "See what's airing today", actionFocus = firstItem, onAction = { tab = CalTab.AIRING; heroKey = null })
+                        }
                         else -> DayRows(
                             entries = pool,
                             newestFirst = tab == CalTab.RECENT,
@@ -409,8 +436,13 @@ fun CalendarScreen(
                         )
                     }
                     CalTab.AIRING -> when {
-                        airing.problem != null && airing.entries.isEmpty() -> EmptyNote(airing.problem!!)
-                        airing.entries.isEmpty() -> EmptyNote(if (airing.loading) "Getting today's shows…" else "No new episodes found for today.")
+                        airing.problem != null && airing.entries.isEmpty() -> EmptyNote(
+                            text = airing.problem!!, headline = "Couldn't load today's shows",
+                            action = "Retry", actionFocus = firstItem, onAction = { viewModel.loadAiring(force = true) }
+                        )
+                        airing.entries.isEmpty() ->
+                            if (airing.loading) EmptyNote("Getting today's shows…")
+                            else EmptyNote("No new episodes found for today.", action = "Refresh", actionFocus = firstItem, onAction = { viewModel.loadAiring(force = true) })
                         airingShown.isEmpty() -> EmptyNote("Nothing here with this filter.")
                         else -> PosterGrid(
                             entries = airingShown, use24h = use24h, firstFocus = firstItem, reset = resetKey,
@@ -419,7 +451,11 @@ fun CalendarScreen(
                         )
                     }
                     CalTab.FOLLOWING -> {
-                        if (follows.isEmpty()) EmptyNote("No bells rung yet. Ring the bell on a show's page, in Live TV or in Search (hold OK) to follow it.")
+                        if (follows.isEmpty()) EmptyNote(
+                            "Ring the bell on a show's page, in Live TV or in Search (hold OK) to follow it.",
+                            headline = "No bells rung yet",
+                            action = "See what's airing today", actionFocus = firstItem, onAction = { tab = CalTab.AIRING; heroKey = null }
+                        )
                         else FollowingGrid(
                             follows = follows.distinctBy { it.id }, entries = all, now = now, use24h = use24h, firstFocus = firstItem, reset = resetKey,
                             seriesOn = { f -> viewModel.plans.value.any { it.kind == CalendarPlan.SERIES && (it.contentId == f.id || it.contentId == f.imdbId) } },
@@ -642,7 +678,6 @@ private fun Hero(
     st: CalendarLiveStatus,
     now: Long,
     use24h: Boolean,
-    followed: Boolean,
     channelCount: Int,
     canWait: Boolean,
     loading: Boolean,
@@ -652,9 +687,9 @@ private fun Hero(
     label: (CalendarGuideHit) -> String,
     onWait: () -> Unit,
     onWatch: () -> Unit,
-    onLiveOptions: () -> Unit,
     onOpen: () -> Unit,
-    onBell: () -> Unit
+    /** The menu OK-and-hold opens: Live TV options, bell, hide and the rest. */
+    onOptions: () -> Unit
 ) {
     Column(
         Modifier.fillMaxWidth().height(HERO_H.dp).padding(start = 64.dp, top = 26.dp, end = 40.dp),
@@ -675,7 +710,7 @@ private fun Hero(
             if (e.watched) LiveTag("✓ WATCHED", Color.White.copy(alpha = 0.16f), Color.White)
             LiveBadges(st)
         }
-        LiveText(e.title.uppercase(), size = 30.sp, weight = FontWeight.ExtraBold, shadow = true, modifier = Modifier.width(560.dp))
+        LiveText(e.title.uppercase(), size = 28.sp, weight = FontWeight.ExtraBold, shadow = true, modifier = Modifier.width(560.dp))
         val line = when (e.kind) {
             CalendarKind.GAME -> listOfNotNull(e.league, e.score).joinToString(" · ")
             CalendarKind.MOVIE -> e.note ?: if (CalendarTag.AT_HOME in e.tags) "Out to watch at home" else ""
@@ -696,23 +731,25 @@ private fun Hero(
             size = 13.sp, color = NuvioTheme.colors.TextSecondary, shadow = true
         )
         val about = e.description?.takeIf { !e.spoiler && it.isNotBlank() }
-        if (about != null) LiveText(about, size = 13.sp, color = NuvioTheme.colors.TextSecondary, maxLines = 2, modifier = Modifier.width(480.dp))
+        if (about != null) LiveText(about, size = 13.sp, color = NuvioTheme.colors.TextSecondary, maxLines = 1, modifier = Modifier.width(560.dp))
         Spacer(Modifier.weight(1f))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
             val g = e.guide
             val more = if (channelCount > 1) " +${channelCount - 1}" else ""
-            if (g != null && now in g.startMs until g.stopMs) HeroButton("Watch live on ${label(g)}$more", dot = false, onClick = onWatch, onLongClick = { onChoose(false) })
+            // At most three: the one Live TV action that fits right now, the page, and the options.
             when {
-                g != null && g.stopMs > now -> HeroButton(if (st.recording) "Recording · cancel" else "Record on ${label(g)}$more", dot = true, onClick = onRecord, onLongClick = { onChoose(true) })
-                st.waitRecord -> HeroButton("Records when it's in your guide · cancel", dot = true, onClick = onWait)
-                canWait -> HeroButton("Record when it's in my guide", dot = true, onClick = onWait)
+                g != null && now in g.startMs until g.stopMs ->
+                    HeroButton("Watch live on ${label(g)}$more", dot = false, primary = true, onClick = onWatch, onLongClick = { onChoose(false) })
+                g != null && g.stopMs > now ->
+                    HeroButton(if (st.recording) "Recording · cancel" else "Record on ${label(g)}$more", dot = true, primary = true, onClick = onRecord, onLongClick = { onChoose(true) })
+                st.waitRecord -> HeroButton("Records when it's in your guide · cancel", dot = true, primary = true, onClick = onWait)
+                canWait -> HeroButton("Record when it's in my guide", dot = true, primary = true, onClick = onWait)
             }
-            if (e.kind != CalendarKind.GAME) HeroButton("Live TV options", dot = false, onClick = onLiveOptions)
             HeroButton(
                 when (e.kind) { CalendarKind.GAME -> "Open in Sports"; CalendarKind.MOVIE -> "Movie page"; else -> "Show page" },
                 dot = false, onClick = onOpen
             )
-            if (e.kind == CalendarKind.EPISODE) HeroBell(on = followed, onClick = onBell)
+            HeroButton("Options", dot = false, onClick = onOptions)
         }
         Spacer(Modifier.height(4.dp))
     }
@@ -720,14 +757,16 @@ private fun Hero(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HeroButton(text: String, dot: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null) {
+private fun HeroButton(text: String, dot: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, primary: Boolean = false) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
+    val colors = NuvioTheme.colors
     Row(
         Modifier
             .clip(shape)
-            .background(if (focused) Color.White else Color(0xE62A2A30))
-            .border(1.dp, if (focused) Color.Transparent else Color.White.copy(alpha = 0.32f), shape)
+            .background(if (primary) colors.Secondary else if (focused) colors.FocusBackground else colors.BackgroundElevated.copy(alpha = 0.92f))
+            .border(1.dp, if (focused || primary) Color.Transparent else colors.Border, shape)
+            .focusRing(focused, shape)
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick, onLongClick = onLongClick)
             .padding(horizontal = 14.dp, vertical = 7.dp),
@@ -737,32 +776,7 @@ private fun HeroButton(text: String, dot: Boolean, onClick: () -> Unit, onLongCl
             Box(Modifier.size(9.dp).clip(RoundedCornerShape(50)).background(LIVE_RED))
             Spacer(Modifier.width(7.dp))
         }
-        LiveText(text, size = 13.sp, weight = FontWeight.SemiBold, color = if (focused) Color(0xFF111111) else Color.White)
-    }
-}
-
-@OptIn(ExperimentalFoundationApi::class)
-@Composable
-private fun HeroBell(on: Boolean, onClick: () -> Unit) {
-    var focused by remember { mutableStateOf(false) }
-    val shape = RoundedCornerShape(50)
-    val light = focused || on
-    Box(
-        Modifier
-            .size(34.dp)
-            .clip(shape)
-            .background(if (light) Color.White else Color(0xE62A2A30))
-            .border(if (focused) 3.dp else 1.dp, if (focused) LIVE_RED else if (on) Color.Transparent else Color.White.copy(alpha = 0.32f), shape)
-            .onFocusChanged { focused = it.isFocused }
-            .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick),
-        contentAlignment = Alignment.Center
-    ) {
-        androidx.tv.material3.Icon(
-            if (on) Icons.Default.NotificationsActive else Icons.Default.NotificationsNone,
-            contentDescription = if (on) "Turn off the bell" else "Ring the bell",
-            tint = if (light) Color(0xFF111111) else Color.White,
-            modifier = Modifier.size(17.dp)
-        )
+        LiveText(text, size = 13.sp, weight = FontWeight.SemiBold, color = if (primary) colors.OnSecondary else colors.TextPrimary)
     }
 }
 
@@ -849,6 +863,8 @@ private fun WideCard(
     st: CalendarLiveStatus,
     modifier: Modifier = Modifier,
     width: Dp = CARD_W,
+    /** One line under the card (the month's strip is short on room). */
+    compactCaption: Boolean = false,
     onFocus: () -> Unit,
     onClick: () -> Unit,
     onLongClick: () -> Unit
@@ -862,11 +878,11 @@ private fun WideCard(
     Column(Modifier.width(width), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Box(
             modifier
-                .graphicsLayer { val s = if (focused) 1.05f else 1f; scaleX = s; scaleY = s }
+                .graphicsLayer { val s = if (focused) FOCUS_SCALE else 1f; scaleX = s; scaleY = s }
                 .size(width, height)
                 .clip(shape)
-                .background(Color(0xFF1C1E26))
-                .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, shape)
+                .background(NuvioTheme.colors.BackgroundCard)
+                .focusRing(focused, shape)
                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick, onLongClick = onLongClick)
         ) {
@@ -913,9 +929,19 @@ private fun WideCard(
                 }
             }
         }
+        if (game && !compactCaption) {
+            // Under a game: who plays, then the league and where to watch.
+            LiveText(
+                e.teams.joinToString(" vs ") { it.name },
+                size = 13.sp, weight = FontWeight.Bold, color = NuvioTheme.colors.TextPrimary,
+                modifier = Modifier.padding(horizontal = 2.dp), marquee = focused
+            )
+        }
         LiveText(
             when (e.kind) {
-                CalendarKind.GAME -> listOfNotNull(e.league, e.guide?.channelName ?: e.network).joinToString(" · ")
+                CalendarKind.GAME ->
+                    if (compactCaption) listOfNotNull(e.teams.takeIf { it.size == 2 }?.joinToString(" vs ") { it.abbr ?: it.name }, e.league).joinToString(" · ")
+                    else listOfNotNull(e.league, e.guide?.channelName ?: e.network).joinToString(" · ")
                 CalendarKind.MOVIE -> e.note ?: "Movie"
                 else -> listOfNotNull(e.episodeCode, seasonDrop(e), if (e.spoiler) null else e.episodeTitle).joinToString(" · ")
             },
@@ -936,68 +962,109 @@ private fun seasonDrop(e: CalendarEntry): String? {
 // -------------------------------------------------------------------- games
 
 /**
- * A game, drawn like the Sports page draws it: each team's colour on its half, both logos big,
- * and the score (or the start time) between them.
+ * A game: a dark card in the app's theme, each team's colour as a soft glow from its own edge and a
+ * stripe along the bottom, both logos, and the score (or "vs") between them. The winner of a
+ * finished game stays bright and the other team is dimmed.
+ *
+ * [standalone]: nothing else on the card says when it starts or that it is live (the month's day
+ * cells and the big picture behind the hero), so the middle says so itself.
  */
 @Composable
-private fun GameArt(e: CalendarEntry, big: Boolean, modifier: Modifier) {
+private fun GameArt(e: CalendarEntry, big: Boolean, modifier: Modifier, standalone: Boolean = big) {
     val a = e.teams.getOrNull(0)
     val b = e.teams.getOrNull(1)
-    val ca = a?.color?.let { Color(it) } ?: Color(0xFF2B3442)
-    val cb = b?.color?.let { Color(it) } ?: Color(0xFF3A2B42)
-    val base = Color(0xFF0E1015)
-    Box(
-        modifier.background(
-            Brush.horizontalGradient(
-                0f to lerpColor(ca, base, 0.35f), 0.46f to lerpColor(ca, base, 0.62f),
-                0.54f to lerpColor(cb, base, 0.62f), 1f to lerpColor(cb, base, 0.35f)
+    val theme = NuvioTheme.colors
+    val ca = a?.color?.let { Color(it).copy(alpha = 1f) } ?: theme.Secondary
+    val cb = b?.color?.let { Color(it).copy(alpha = 1f) } ?: theme.Secondary
+    val sa = a?.score?.toIntOrNull()
+    val sb = b?.score?.toIntOrNull()
+    val hasScore = a?.score != null && b?.score != null
+    val finished = hasScore && !e.live
+    androidx.compose.foundation.layout.BoxWithConstraints(modifier.background(theme.BackgroundCard)) {
+        val compact = !big && maxHeight < 80.dp
+        val logo = when {
+            big -> 120.dp
+            else -> (maxHeight * 0.44f).coerceIn(26.dp, 56.dp)
+        }
+        // Each team's colour glows in from its own edge and fades out before the middle.
+        Box(
+            Modifier.fillMaxSize().background(
+                Brush.horizontalGradient(
+                    0f to ca.copy(alpha = 0.40f), 0.45f to ca.copy(alpha = 0f),
+                    0.55f to cb.copy(alpha = 0f), 1f to cb.copy(alpha = 0.40f)
+                )
             )
         )
-    ) {
-        val logo = if (big) 120.dp else 44.dp
+        Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().height(if (big) 6.dp else 3.dp)) {
+            Box(Modifier.weight(1f).fillMaxHeight().background(ca))
+            Box(Modifier.weight(1f).fillMaxHeight().background(cb))
+        }
         Row(
-            Modifier.fillMaxSize().padding(horizontal = if (big) 48.dp else 12.dp),
+            Modifier.fillMaxSize().padding(
+                start = if (big) 48.dp else if (compact) 6.dp else 12.dp,
+                end = if (big) 48.dp else if (compact) 6.dp else 12.dp,
+                top = if (big) 0.dp else 16.dp, bottom = 3.dp
+            ),
             verticalAlignment = Alignment.CenterVertically,
             horizontalArrangement = Arrangement.SpaceBetween
         ) {
-            TeamMark(a, logo, big)
-            Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                val scores = if (a?.score != null && b?.score != null) "${a.score} – ${b.score}" else null
-                LiveText(
-                    scores ?: e.airMs?.let { formatClock(it, false) } ?: "vs",
-                    size = if (big) 34.sp else 15.sp, weight = FontWeight.ExtraBold, color = Color.White, shadow = true
-                )
-                if (e.live) LiveTag("LIVE", LIVE_RED, Color.White)
-                else if (scores != null) LiveText("Final", size = if (big) 14.sp else 10.sp, color = Color.White.copy(alpha = 0.8f), shadow = true)
+            TeamMark(a, logo, big, compact, dim = finished && sa != null && sb != null && sa < sb)
+            Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                when {
+                    hasScore -> LiveText(
+                        "${a?.score} – ${b?.score}",
+                        size = if (big) 40.sp else if (compact) 13.sp else 22.sp, weight = FontWeight.ExtraBold,
+                        color = theme.TextPrimary, shadow = true
+                    )
+                    standalone -> LiveText(
+                        e.airMs?.let { formatClock(it, false) } ?: "vs",
+                        size = if (big) 34.sp else if (compact) 12.sp else 16.sp, weight = FontWeight.ExtraBold,
+                        color = theme.TextPrimary, shadow = true
+                    )
+                    else -> LiveText("vs", size = if (compact) 11.sp else 14.sp, weight = FontWeight.SemiBold, color = theme.TextSecondary)
+                }
+                when {
+                    e.live && standalone -> LiveTag("LIVE", LIVE_RED, Color.White)
+                    finished && !compact -> LiveText("FINAL", size = if (big) 14.sp else 10.sp, weight = FontWeight.Bold, color = theme.TextSecondary)
+                    else -> Unit
+                }
             }
-            TeamMark(b, logo, big)
+            TeamMark(b, logo, big, compact, dim = finished && sa != null && sb != null && sb < sa)
         }
     }
 }
 
 @Composable
-private fun TeamMark(t: CalendarTeam?, size: Dp, big: Boolean) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+private fun TeamMark(t: CalendarTeam?, size: Dp, big: Boolean, compact: Boolean, dim: Boolean) {
+    val theme = NuvioTheme.colors
+    Column(
+        Modifier.graphicsLayer { alpha = if (dim) 0.55f else 1f },
+        horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.spacedBy(3.dp)
+    ) {
         Box(Modifier.size(size), contentAlignment = Alignment.Center) {
             if (t?.logo != null) {
                 coil3.compose.AsyncImage(model = t.logo, contentDescription = t.name, contentScale = ContentScale.Fit, modifier = Modifier.fillMaxSize())
             } else {
-                LiveText(t?.abbr ?: t?.name?.take(3)?.uppercase() ?: "", size = if (big) 30.sp else 14.sp, weight = FontWeight.ExtraBold, color = Color.White)
+                // No logo: the team's colour with its letters.
+                Box(
+                    Modifier.fillMaxSize().clip(RoundedCornerShape(50)).background(t?.color?.let { Color(it).copy(alpha = 1f) } ?: theme.BackgroundElevated),
+                    contentAlignment = Alignment.Center
+                ) {
+                    LiveText(
+                        t?.abbr ?: t?.name?.take(3)?.uppercase() ?: "",
+                        size = if (big) 30.sp else if (compact) 9.sp else 13.sp, weight = FontWeight.ExtraBold, color = Color.White
+                    )
+                }
             }
         }
-        LiveText(
-            (if (big) t?.name else t?.abbr ?: t?.name) ?: "",
-            size = if (big) 16.sp else 10.sp, weight = FontWeight.Bold, color = Color.White, shadow = true
-        )
+        if (!compact) {
+            LiveText(
+                (if (big) t?.name else t?.abbr ?: t?.name) ?: "",
+                size = if (big) 16.sp else 12.sp, weight = FontWeight.Bold, color = theme.TextPrimary, shadow = true
+            )
+        }
     }
 }
-
-private fun lerpColor(a: Color, b: Color, t: Float) = Color(
-    red = a.red + (b.red - a.red) * t,
-    green = a.green + (b.green - a.green) * t,
-    blue = a.blue + (b.blue - a.blue) * t,
-    alpha = 1f
-)
 
 // -------------------------------------------------------------------- the week
 
@@ -1025,6 +1092,7 @@ private fun WeekView(
         runCatching { firstFocus.requestFocus() }
     }
     val byDay = remember(entries) { entries.distinctBy { it.key }.groupBy { it.day } }
+    var focusedEntry by remember { mutableStateOf<CalendarEntry?>(null) }
     Column(Modifier.fillMaxSize().padding(start = 64.dp, end = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LiveText(
@@ -1046,7 +1114,7 @@ private fun WeekView(
             Pill("Week ›", false) { start = start.plusWeeks(1) }
         }
         Spacer(Modifier.height(8.dp))
-        Row(Modifier.fillMaxSize(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (d in 0 until 7) {
                 val day = start.plusDays(d.toLong())
                 val list = byDay[day].orEmpty().sortedWith(compareBy<CalendarEntry> { it.kind == CalendarKind.GAME }.thenBy { it.airMs ?: Long.MAX_VALUE })
@@ -1054,12 +1122,12 @@ private fun WeekView(
                 Column(
                     Modifier.weight(1f).fillMaxHeight()
                         .clip(RoundedCornerShape(10.dp))
-                        .background(if (isToday) Color.White.copy(alpha = 0.07f) else Color.Transparent)
+                        .background(if (isToday) NuvioTheme.colors.Secondary.copy(alpha = 0.12f) else Color.Transparent)
                 ) {
                     Row(Modifier.padding(horizontal = 6.dp, vertical = 6.dp), verticalAlignment = Alignment.Bottom) {
                         LiveText(
                             day.format(DateTimeFormatter.ofPattern("EEE")).uppercase(), size = 12.sp, weight = FontWeight.Bold,
-                            color = if (isToday) LIVE_RED else NuvioTheme.colors.TextSecondary
+                            color = if (isToday) NuvioTheme.colors.Secondary else NuvioTheme.colors.TextSecondary
                         )
                         Spacer(Modifier.width(5.dp))
                         LiveText(
@@ -1079,6 +1147,7 @@ private fun WeekView(
                                 MiniCard(
                                     e = e, use24h = use24h, now = now, st = status(e),
                                     modifier = if (i == 0 && (isToday || (start != thisWeek && d == 0))) Modifier.focusRequester(firstFocus).homeMark() else Modifier,
+                                    onFocus = { focusedEntry = e },
                                     onClick = { onOpen(e) }, onLongClick = { onOptions(e) }
                                 )
                             }
@@ -1086,6 +1155,60 @@ private fun WeekView(
                     }
                 }
             }
+        }
+        Spacer(Modifier.height(8.dp))
+        DetailBar(focusedEntry, focusedEntry?.let(status), use24h, now, Modifier.padding(bottom = 10.dp))
+    }
+}
+
+/**
+ * The bar under the week: what the highlighted entry is, when and where, and what OK does.
+ * (The columns stay short and readable; the details live here, not in tiny text on each card.)
+ */
+@Composable
+private fun DetailBar(e: CalendarEntry?, st: CalendarLiveStatus?, use24h: Boolean, now: Long, modifier: Modifier = Modifier) {
+    val theme = NuvioTheme.colors
+    Row(
+        modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(12.dp)).background(theme.BackgroundElevated).padding(horizontal = 14.dp),
+        verticalAlignment = Alignment.CenterVertically,
+        horizontalArrangement = Arrangement.spacedBy(14.dp)
+    ) {
+        if (e == null) {
+            LiveText("Highlight something to see its details here", size = 14.sp, color = theme.TextSecondary)
+            return@Row
+        }
+        val airMs = e.airMs
+        val onNow = e.live || (airMs != null && now in airMs until airMs + (e.runtimeMin ?: 30) * 60_000L)
+        Box(Modifier.size(width = 96.dp, height = 54.dp).clip(RoundedCornerShape(8.dp)).background(theme.BackgroundCard)) {
+            if (e.kind == CalendarKind.GAME && e.teams.size == 2) {
+                GameArt(e, big = false, standalone = false, modifier = Modifier.fillMaxSize())
+            } else {
+                val art = if (e.spoiler) e.background ?: e.poster else e.episodeImage ?: e.background ?: e.poster
+                if (art != null) coil3.compose.AsyncImage(model = art, contentDescription = null, contentScale = ContentScale.Crop, modifier = Modifier.fillMaxSize())
+            }
+        }
+        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                LiveText(e.title, size = 16.sp, weight = FontWeight.SemiBold, modifier = Modifier.weight(1f, fill = false))
+                if (onNow) LiveTag("LIVE", LIVE_RED, Color.White)
+                else e.tags.firstOrNull()?.let { TagChip(it) }
+                if (st != null && st != CalendarLiveStatus()) LiveBadges(st, compact = true)
+            }
+            LiveText(
+                listOfNotNull(entryLine(e, use24h), e.runtimeMin?.let { "$it min" }).joinToString(" · "),
+                size = 13.sp, color = theme.TextSecondary
+            )
+        }
+        Column(horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(3.dp)) {
+            LiveText(
+                when {
+                    e.kind == CalendarKind.GAME -> "OK  Open in Sports"
+                    e.guide != null -> "OK  Live TV options"
+                    else -> "OK  Show page"
+                },
+                size = 12.sp, color = theme.TextSecondary
+            )
+            LiveText("Hold OK  More options", size = 12.sp, color = theme.TextSecondary)
         }
     }
 }
@@ -1099,6 +1222,7 @@ private fun MiniCard(
     now: Long,
     st: CalendarLiveStatus,
     modifier: Modifier,
+    onFocus: () -> Unit = {},
     onClick: () -> Unit,
     onLongClick: () -> Unit
 ) {
@@ -1108,13 +1232,13 @@ private fun MiniCard(
     Column(verticalArrangement = Arrangement.spacedBy(3.dp)) {
         Box(
             modifier
-                .graphicsLayer { val s = if (focused) 1.04f else 1f; scaleX = s; scaleY = s }
+                .graphicsLayer { val s = if (focused) FOCUS_SCALE else 1f; scaleX = s; scaleY = s }
                 .fillMaxWidth()
                 .aspectRatio(16f / 9f)
                 .clip(shape)
-                .background(Color(0xFF1C1E26))
-                .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, shape)
-                .onFocusChanged { focused = it.isFocused }
+                .background(NuvioTheme.colors.BackgroundCard)
+                .focusRing(focused, shape)
+                .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick, onLongClick = onLongClick)
         ) {
             if (game) {
@@ -1133,7 +1257,7 @@ private fun MiniCard(
             }
         }
         LiveText(
-            if (game) e.teams.joinToString(" v ") { it.abbr ?: it.name } else e.title, size = 12.sp, weight = FontWeight.Bold,
+            if (game) e.teams.joinToString(" vs ") { it.abbr ?: it.name } else e.title, size = 13.sp, weight = FontWeight.Bold,
             color = NuvioTheme.colors.TextPrimary, marquee = focused
         )
         LiveText(
@@ -1142,7 +1266,7 @@ private fun MiniCard(
                 CalendarKind.MOVIE -> e.note ?: "Movie"
                 else -> listOfNotNull(e.episodeCode, e.guide?.channelName ?: e.network).joinToString(" · ")
             },
-            size = 10.sp, color = NuvioTheme.colors.TextSecondary
+            size = 11.sp, color = NuvioTheme.colors.TextSecondary
         )
     }
 }
@@ -1199,7 +1323,7 @@ private fun MonthView(
                 LazyRow(contentPadding = PaddingValues(start = 64.dp, end = 20.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     itemsIndexed(list, key = { _, e -> e.key }) { i, e ->
                         WideCard(
-                            e = e, use24h = use24h, now = now, st = status(e), width = CARD_W * 0.8f,
+                            e = e, use24h = use24h, now = now, st = status(e), width = CARD_W * 0.8f, compactCaption = true,
                             modifier = if (i == 0) Modifier.focusRequester(stripFocus) else Modifier,
                             onFocus = {}, onClick = { onOpen(e) }, onLongClick = { onOptions(e) }
                         )
@@ -1263,11 +1387,9 @@ private fun DayCell(
         modifier
             .graphicsLayer { alpha = if (inMonth) 1f else 0.45f }
             .clip(shape)
-            .background(Color.White.copy(alpha = 0.05f))
-            .border(
-                if (focused) 3.dp else if (today) 2.dp else 0.dp,
-                if (focused) Color.White else if (today) LIVE_RED else Color.Transparent, shape
-            )
+            .background(NuvioTheme.colors.BackgroundCard)
+            .border(if (today) 2.dp else 0.dp, if (today) NuvioTheme.colors.Secondary else Color.Transparent, shape)
+            .focusRing(focused, shape)
             .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
     ) {
@@ -1276,7 +1398,7 @@ private fun DayCell(
             Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.42f)))
         } else if (top != null && top.teams.size == 2) {
             // Only games that day: the game, in its teams' colours.
-            GameArt(top, big = false, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.85f })
+            GameArt(top, big = false, standalone = true, modifier = Modifier.fillMaxSize().graphicsLayer { alpha = 0.9f })
         }
         LiveText(
             if (day.dayOfMonth == 1) day.format(DateTimeFormatter.ofPattern("MMM d")) else day.dayOfMonth.toString(),
@@ -1296,7 +1418,7 @@ private fun DayCell(
         when {
             top == null -> Unit
             top.kind != CalendarKind.GAME || top.teams.size != 2 -> CellCaption(top.title, entries.size)
-            entries.size > 1 -> Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) { LiveTag("+${entries.size - 1}", Color.White, Color(0xFF111111)) }
+            entries.size > 1 -> Box(Modifier.align(Alignment.BottomEnd).padding(4.dp)) { LiveTag("+${entries.size - 1}", Color.Black.copy(alpha = 0.78f), Color.White) }
             else -> Unit
         }
     }
@@ -1306,7 +1428,7 @@ private fun DayCell(
 private fun BoxScope.CellCaption(title: String, count: Int) {
     Row(Modifier.align(Alignment.BottomStart).fillMaxWidth().padding(horizontal = 5.dp, vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
         LiveText(title, size = 10.sp, weight = FontWeight.Bold, color = Color.White, shadow = true, modifier = Modifier.weight(1f))
-        if (count > 1) LiveTag("+${count - 1}", Color.White, Color(0xFF111111))
+        if (count > 1) LiveTag("+${count - 1}", Color.Black.copy(alpha = 0.78f), Color.White)
     }
 }
 
@@ -1332,12 +1454,12 @@ private fun PosterCard(
     Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Box(
             modifier
-                .graphicsLayer { val s = if (focused) 1.05f else 1f; scaleX = s; scaleY = s }
+                .graphicsLayer { val s = if (focused) FOCUS_SCALE else 1f; scaleX = s; scaleY = s }
                 .fillMaxWidth()
                 .aspectRatio(2f / 3f)
                 .clip(shape)
-                .background(Color.White.copy(alpha = 0.08f))
-                .border(if (focused) 3.dp else 0.dp, if (focused) Color.White else Color.Transparent, shape)
+                .background(NuvioTheme.colors.BackgroundCard)
+                .focusRing(focused, shape)
                 .onFocusChanged { focused = it.isFocused; if (it.isFocused) onFocus() }
                 .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick, onLongClick = onLongClick)
         ) {
@@ -1346,8 +1468,8 @@ private fun PosterCard(
             Row(Modifier.align(Alignment.TopStart).fillMaxWidth().padding(6.dp), verticalAlignment = Alignment.CenterVertically) {
                 corner?.let { LiveTag(it, Color.Black.copy(alpha = 0.78f), Color.White) }
                 Spacer(Modifier.weight(1f))
-                if (bell) Box(Modifier.size(20.dp).clip(RoundedCornerShape(50)).background(Color.White), contentAlignment = Alignment.Center) {
-                    androidx.tv.material3.Icon(Icons.Default.Notifications, contentDescription = "Bell on", tint = Color(0xFF111111), modifier = Modifier.size(12.dp))
+                if (bell) Box(Modifier.size(20.dp).clip(RoundedCornerShape(50)).background(NuvioTheme.colors.Secondary), contentAlignment = Alignment.Center) {
+                    androidx.tv.material3.Icon(Icons.Default.Notifications, contentDescription = "Bell on", tint = NuvioTheme.colors.OnSecondary, modifier = Modifier.size(12.dp))
                 }
             }
             Column(Modifier.align(Alignment.BottomStart).padding(6.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
@@ -1450,23 +1572,51 @@ private fun FollowingGrid(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Pill(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+private fun Pill(text: String, selected: Boolean, modifier: Modifier = Modifier, quiet: Boolean = false, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val colors = liveCellColors(focused, if (selected) Color.White else Color.White.copy(alpha = 0.08f))
+    val theme = NuvioTheme.colors
+    val colors = liveCellColors(focused, if (selected) theme.Secondary else theme.BackgroundElevated)
     val shape = RoundedCornerShape(50)
     Box(
         modifier
             .clip(shape)
-            .background(colors.background)
+            .background(if (selected) (if (quiet) theme.Secondary.copy(alpha = 0.26f) else theme.Secondary) else colors.background)
             .border(if (focused) 2.dp else 0.dp, colors.border, shape)
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
-            .padding(horizontal = 13.dp, vertical = 6.dp)
+            .padding(horizontal = if (quiet) 11.dp else 13.dp, vertical = if (quiet) 4.dp else 6.dp)
     ) {
         LiveText(
             text, size = 12.sp, weight = if (selected) FontWeight.Bold else FontWeight.Medium,
-            color = if (selected && !focused) Color(0xFF111111) else colors.text
+            color = if (selected && !quiet) theme.OnSecondary else if (selected) theme.TextPrimary else colors.text
         )
+    }
+}
+
+/** A tab: text with an accent underline when it's the one you're on. */
+@OptIn(ExperimentalFoundationApi::class)
+@Composable
+private fun TabPill(text: String, selected: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
+    var focused by remember { mutableStateOf(false) }
+    val theme = NuvioTheme.colors
+    val shape = RoundedCornerShape(8.dp)
+    Box(
+        modifier
+            .clip(shape)
+            .background(if (focused) theme.FocusBackground else Color.Transparent)
+            .focusRing(focused, shape)
+            .onFocusChanged { focused = it.isFocused }
+            .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
+            .padding(horizontal = 12.dp, vertical = 5.dp)
+    ) {
+        Column(Modifier.width(androidx.compose.foundation.layout.IntrinsicSize.Max), horizontalAlignment = Alignment.CenterHorizontally) {
+            LiveText(
+                text, size = 15.sp, weight = if (selected) FontWeight.SemiBold else FontWeight.Medium,
+                color = if (selected || focused) theme.TextPrimary else theme.TextSecondary
+            )
+            Spacer(Modifier.height(3.dp))
+            Box(Modifier.fillMaxWidth().height(3.dp).clip(RoundedCornerShape(2.dp)).background(if (selected) theme.Secondary else Color.Transparent))
+        }
     }
 }
 
@@ -1481,7 +1631,7 @@ private fun SwitchPill(text: String, on: Boolean, onClick: () -> Unit) {
         Modifier
             .clip(shape)
             .background(colors.background)
-            .border(if (focused) 2.dp else 1.dp, if (focused) colors.border else Color.White.copy(alpha = 0.28f), shape)
+            .border(if (focused) 2.dp else 1.dp, if (focused) colors.border else NuvioTheme.colors.Border, shape)
             .onFocusChanged { focused = it.isFocused }
             .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onClick)
             .padding(start = 7.dp, end = 12.dp, top = 4.dp, bottom = 4.dp),
@@ -1498,17 +1648,18 @@ private fun SwitchPill(text: String, on: Boolean, onClick: () -> Unit) {
 @Composable
 private fun Segmented(options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(Color.White.copy(alpha = 0.08f)).padding(2.dp),
+        Modifier.clip(RoundedCornerShape(50)).background(NuvioTheme.colors.BackgroundElevated).padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         options.forEach { (id, label) ->
             var focused by remember { mutableStateOf(false) }
             val on = id == selected
-            val colors = liveCellColors(focused, if (on) Color.White.copy(alpha = 0.9f) else Color.Transparent)
+            val theme = NuvioTheme.colors
+            val colors = liveCellColors(focused, if (on) theme.Secondary else Color.Transparent)
             Box(
                 Modifier
                     .clip(RoundedCornerShape(50))
-                    .background(colors.background)
+                    .background(if (on) theme.Secondary else colors.background)
                     .border(if (focused) 2.dp else 0.dp, colors.border, RoundedCornerShape(50))
                     .onFocusChanged { focused = it.isFocused }
                     .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = { onPick(id) })
@@ -1516,7 +1667,7 @@ private fun Segmented(options: List<Pair<String, String>>, selected: String, onP
             ) {
                 LiveText(
                     label, size = 12.sp, weight = if (on) FontWeight.Bold else FontWeight.Medium,
-                    color = if (on && !focused) Color(0xFF111111) else colors.text
+                    color = if (on) theme.OnSecondary else colors.text
                 )
             }
         }
@@ -1525,14 +1676,14 @@ private fun Segmented(options: List<Pair<String, String>>, selected: String, onP
 
 @Composable
 private fun Divider() {
-    Box(Modifier.padding(horizontal = 4.dp).size(width = 1.dp, height = 18.dp).background(Color.White.copy(alpha = 0.18f)))
+    Box(Modifier.padding(horizontal = 4.dp).size(width = 1.dp, height = 18.dp).background(NuvioTheme.colors.Border))
 }
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
 private fun IconPill(onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
-    val colors = liveCellColors(focused, Color.White.copy(alpha = 0.08f))
+    val colors = liveCellColors(focused, NuvioTheme.colors.BackgroundElevated)
     val shape = RoundedCornerShape(50)
     Box(
         Modifier
@@ -1561,10 +1712,34 @@ private fun TagChip(tag: CalendarTag) {
     LiveTag(tag.label.uppercase(), bg, fg)
 }
 
+/** Nothing to show, or it couldn't load: one line of what's going on and, when there is one, the thing to do. */
+@OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun EmptyNote(text: String) {
-    Box(Modifier.fillMaxSize().padding(top = 30.dp, start = 64.dp, end = 40.dp), contentAlignment = Alignment.TopStart) {
-        LiveText(text, size = 16.sp, color = NuvioTheme.colors.TextSecondary, maxLines = 4, modifier = Modifier.width(600.dp))
+private fun EmptyNote(text: String, headline: String? = null, action: String? = null, actionFocus: FocusRequester? = null, onAction: () -> Unit = {}) {
+    val theme = NuvioTheme.colors
+    Box(Modifier.fillMaxSize().padding(top = 24.dp, start = 64.dp, end = 40.dp), contentAlignment = Alignment.TopStart) {
+        Column(
+            Modifier.clip(RoundedCornerShape(12.dp)).background(theme.BackgroundElevated).padding(horizontal = 20.dp, vertical = 16.dp).width(620.dp),
+            verticalArrangement = Arrangement.spacedBy(6.dp)
+        ) {
+            if (headline != null) LiveText(headline, size = 18.sp, weight = FontWeight.SemiBold)
+            LiveText(text, size = 15.sp, color = theme.TextSecondary, maxLines = 4)
+            if (action != null) {
+                Spacer(Modifier.height(6.dp))
+                var focused by remember { mutableStateOf(false) }
+                val shape = RoundedCornerShape(50)
+                Box(
+                    Modifier
+                        .then(if (actionFocus != null) Modifier.focusRequester(actionFocus) else Modifier)
+                        .clip(shape)
+                        .background(theme.Secondary)
+                        .focusRing(focused, shape)
+                        .onFocusChanged { focused = it.isFocused }
+                        .combinedClickable(interactionSource = remember { MutableInteractionSource() }, indication = null, onClick = onAction)
+                        .padding(horizontal = 16.dp, vertical = 7.dp)
+                ) { LiveText(action, size = 13.sp, weight = FontWeight.SemiBold, color = theme.OnSecondary) }
+            }
+        }
     }
 }
 
