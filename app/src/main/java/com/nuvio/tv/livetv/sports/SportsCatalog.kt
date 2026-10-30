@@ -504,10 +504,19 @@ object SportsCatalog {
     fun regionName(code: String): String = regions.firstOrNull { it.first == code }?.second ?: code
 
     /**
-     * In All Events: the region's leagues (anything you follow is added on top, see
-     * SportsRepository.activeLeagues).
+     * In All Events: the region's leagues, with your own choices from the Leagues dialog applied
+     * on top (anything you follow is added separately, see SportsRepository.activeLeagues).
+     * [SportsSettings.hiddenLeagues] holds a plain league id for one taken off that's normally
+     * shown in your region, and "+id" for one added from outside it.
      */
-    fun shown(league: League, s: SportsSettings): Boolean = regionOf(s) in league.regions
+    fun shown(league: League, s: SportsSettings): Boolean {
+        val inRegion = regionOf(s) in league.regions
+        return when {
+            inRegion && league.id in s.hiddenLeagues -> false
+            !inRegion && "+${league.id}" in s.hiddenLeagues -> true
+            else -> inRegion
+        }
+    }
 
     /** Leagues in the order the region cares about them. */
     fun ordered(s: SportsSettings): List<League> {

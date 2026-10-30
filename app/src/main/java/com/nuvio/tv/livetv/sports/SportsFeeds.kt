@@ -118,10 +118,34 @@ internal class SportsFeeds {
     /** A TheSportsDB game's goals, cards, stats and line-ups (the nuvio-data job writes them). */
     fun tsdbGameRaw(tsdbEventId: String): String = get(DATA_URL + "sportsdb/games/$tsdbEventId.json")
 
+    // ------------------------------------------------------------------ the shared ESPN schedule cache
+
+    /**
+     * One league's whole shared-cache file: a daily GitHub job asks ESPN so every TV doesn't have
+     * to. Null when the job hasn't reached this league yet, or nuvio-data can't be reached.
+     */
+    fun espnSharedRaw(leagueId: String): String? = runCatching { get(DATA_URL + "espn/" + safeFileId(leagueId) + ".json") }.getOrNull()
+
+    /**
+     * One day's ESPN scoreboard JSON out of a shared-cache file (as [espnSharedRaw] returns), if
+     * the shared job has reached that day and it isn't older than [maxAgeMs]. Null otherwise
+     * (the day isn't in the file yet, or it's gone stale) — the caller's cue to ask ESPN itself.
+     */
+    fun espnSharedDay(sharedRaw: String?, day: String, maxAgeMs: Long, now: Long): String? {
+        if (sharedRaw == null) return null
+        return runCatching {
+            val d = JSONObject(sharedRaw).optJSONObject("days")?.optJSONObject(day) ?: return null
+            if (now - d.optLong("fetchedAt", 0L) > maxAgeMs) null else d.optString("raw").ifBlank { null }
+        }.getOrNull()
+    }
+
     companion object {
         private const val ESPN = "https://site.api.espn.com/apis/site/v2/sports/"
         const val DATA_URL = "https://raw.githubusercontent.com/homelessbrian/nuvio-data/main/"
         const val WRESTLING_URL = DATA_URL + "wrestling.json"
+
+        /** A league id as the shared ESPN cache file is named ("football/nfl" -> "football_nfl"). */
+        fun safeFileId(id: String): String = id.replace(Regex("[^a-zA-Z0-9]+"), "_")
 
         /**
          * A league from the nuvio-data files, with its teams (for Pick Your Teams). [tsdbId] is

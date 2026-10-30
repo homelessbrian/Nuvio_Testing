@@ -253,11 +253,20 @@ class SportsRepository @Inject constructor(
 
     // ------------------------------------------------------------------ which leagues
 
-    /** Leagues on the Sports page, plus any league you follow a team or the whole league in. */
+    /**
+     * Leagues shown on the Sports page by default (your region), plus any league you follow a
+     * team or the whole league in, or have chosen to show from the Leagues dialog. This is a
+     * display scope, not a fetch one: every built-in league with live data is fetched for
+     * everyone (see [allEspnLeagues], [updateOnce]) so browsing to a league outside this list
+     * still works, just without the "your region" head start on the Hub's default view.
+     */
     fun activeLeagues(s: SportsSettings = settings.value, f: SportsFollows = follows.value): List<League> {
         val mine = followedLeagueIds(f)
         return SportsCatalog.ordered(s).filter { SportsCatalog.shown(it, s) || it.id in mine }
     }
+
+    /** Every built-in league ESPN has data for, region and follows aside: the fetch scope. */
+    fun allEspnLeagues(): List<League> = SportsCatalog.leagues.filter { it.espnPath != null }
 
     /**
      * Leagues you follow something in: your teams' leagues and the other competitions they play
@@ -309,21 +318,28 @@ class SportsRepository @Inject constructor(
         val playingLeagues = if (playingKey == null) emptySet() else _matches.value
             .filter { (_, list) -> list.any { it.channel.key == playingKey && it.sure } }
             .keys.mapNotNull { id -> events.value.firstOrNull { it.id == id && it.state == GameState.LIVE }?.leagueId }.toSet()
-        val due = activeLeagues(s, f).filter { l ->
-            if (l.espnPath == null) return@filter false
+        // A league counts as "fast" when it needs to be right-up-to-date: one you follow, one
+        // whose game is on screen, or one on the Hub's default view while you're looking at it.
+        // Fast leagues are asked directly, exactly as before. Every other league — including
+        // every one outside your region, which used never to be fetched at all — is kept warm
+        // through the shared cache in nuvio-data instead, so "every league, not just your
+        // region's" costs nothing extra against ESPN itself (see fetchViaSharedCache below).
+        fun fastLeague(l: League) = isMine(l, f) || l.id in playingLeagues || SportsCatalog.shown(l, s)
+        val due = allEspnLeagues().filter { l ->
             val d = data[l.id]
             val age = now - (d?.fetchedAt ?: 0L)
             val live = d?.events?.any { it.state == GameState.LIVE || (it.state == GameState.PRE && it.startMs in (now - 15 * MINUTE)..(now + 10 * MINUTE)) } == true
             val mine = isMine(l, f)
             when {
                 force -> age > 15_000
-                viewing -> age > (if (live) 30_000 else 5 * MINUTE)
+                viewing && fastLeague(l) -> age > (if (live) 30_000 else 5 * MINUTE)
                 l.id in playingLeagues && s.scoreOnInfoBar -> age > 60_000
                 mine && live -> age > (if (s.scoringAlerts) 45_000 else 90_000)
                 mine -> age > 30 * MINUTE
-                // Not looking and not yours: only so the page isn't empty when it opens.
-                d == null -> SportsCatalog.shown(l, s) && age > 6 * HOUR
-                else -> false
+                // Nobody's watching it and it isn't yours: a slow trickle through the shared
+                // cache keeps it from staying empty forever once someone does browse to it.
+                d == null -> age > 6 * HOUR
+                else -> age > 45 * MINUTE
             }
         }
         if (due.isEmpty()) return
@@ -336,7 +352,8 @@ class SportsRepository @Inject constructor(
             val reasons = LinkedHashSet<String>()
             coroutineScopeFetch(due) { l ->
                 gate.withPermit {
-                    val r = runCatching { fetchScoreboard(l, from, to, days) }
+                    val useDirect = isMine(l, f) || l.id in playingLeagues || (viewing && SportsCatalog.shown(l, s))
+                    val r = runCatching { if (useDirect) fetchScoreboard(l, from, to, days) else fetchViaSharedCache(l, days, now) }
                     r.onSuccess { raws ->
                         val parsed = raws.flatMap { raw -> runCatching { SportsFeeds.parseScoreboard(l, raw) }.getOrElse { emptyList() } }
                             .distinctBy { it.id }
@@ -375,27 +392,29 @@ class SportsRepository @Inject constructor(
         val s = settings.value
         val f = follows.value
         val viewing = viewers.value > 0
-        val due = activeLeagues(s, f).filter { l ->
-            if (l.espnPath == null) return@filter false
+        // Same split as updateOnce: a league you follow, or shown on the Hub's default view
+        // while you're looking, is asked directly; every other league — region or not — is kept
+        // warm through the shared cache instead (see fetchWeekViaSharedCache below).
+        val due = allEspnLeagues().filter { l ->
             val age = now - (weekData.value[l.id]?.fetchedAt ?: 0L)
             when {
                 force -> age > 30 * MINUTE
-                viewing -> age > 3 * HOUR
+                viewing && (isMine(l, f) || SportsCatalog.shown(l, s)) -> age > 3 * HOUR
                 isMine(l, f) -> age > 6 * HOUR
-                else -> false
+                else -> age > 5 * HOUR
             }
         }
         if (due.isEmpty()) return
         val fmt = SimpleDateFormat("yyyyMMdd", Locale.US).apply { timeZone = TimeZone.getTimeZone("America/New_York") }
-        val from = fmt.format(java.util.Date(now + 2 * DAY))
-        val to = fmt.format(java.util.Date(now + DAYS_AHEAD * DAY))
         val singleDays = (2..DAYS_AHEAD).map { d -> fmt.format(java.util.Date(now + d * DAY)) }
         val gate = Semaphore(3)
         coroutineScopeFetch(due) { l ->
             gate.withPermit {
+                val useDirect = isMine(l, f) || (viewing && SportsCatalog.shown(l, s))
                 // One request for the whole week; a feed that won't take a range of days: a day at a time.
                 // A day at a time (ESPN turns down a range of days).
-                val raws: List<String> = singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
+                val raws: List<String> = if (useDirect) singleDays.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() }
+                    else fetchWeekViaSharedCache(l, singleDays, now)
                 val at = System.currentTimeMillis()
                 if (raws.isEmpty()) {
                     // Try again in an hour, not straight away.
@@ -571,9 +590,11 @@ class SportsRepository @Inject constructor(
                 }
             } ?: run { tsdbIndexAt = now - 11 * HOUR }
         }
-        // What you follow, plus the ones shown in your region (rugby league and cricket in the UK…).
-        // These are nuvio-data's own files, not TheSportsDB itself.
-        val wanted = (followedLeagueIds(f) + activeLeagues(settings.value, f).map { it.id }).distinct().filter { fromTsdb(it) }
+        // Every one of these (non-league football, rugby league and cricket outside the big
+        // competitions...), not just your region's: they're nuvio-data's own files, already
+        // fetched once a day by its shared job, so reading one more of them costs nothing extra
+        // against TheSportsDB itself — the region gate here was only ever about tidiness.
+        val wanted = (followedLeagueIds(f) + SportsCatalog.all.map { it.id }).distinct().filter { fromTsdb(it) }
         for (id in wanted) {
             val l = SportsCatalog.league(id) ?: continue
             val cur = tsdbData.value[id]
@@ -629,6 +650,50 @@ class SportsRepository @Inject constructor(
         throw firstError ?: java.io.IOException("no answer")
     }
 
+    /**
+     * [l]'s scoreboard for [days], from the shared cache nuvio-data's own job keeps (one GitHub
+     * file, read by every TV, instead of every TV asking ESPN itself): yesterday, today and
+     * tomorrow for every built-in league that isn't being followed, played, or shown right now.
+     * Falls back to asking ESPN directly only for a day the cache hasn't reached yet, and only
+     * once this league's own data has gone properly stale — so a brand-new league, or the shared
+     * job being a few minutes behind, doesn't turn into a direct ESPN call for every one of the
+     * ~150 leagues this covers, every few minutes.
+     */
+    private fun fetchViaSharedCache(l: League, days: List<String>, now: Long): List<String> {
+        val shared = feeds.espnSharedRaw(l.id)
+        val byDay = days.mapIndexed { i, d ->
+            // days = [yesterday, today, tomorrow]; today can go a little longer between shared
+            // refreshes than the app would ask for it itself, edge days much longer still.
+            val maxAge = if (i == 1) 20 * MINUTE else 90 * MINUTE
+            d to feeds.espnSharedDay(shared, d, maxAge, now)
+        }
+        val have = byDay.mapNotNull { it.second }
+        val missing = byDay.filter { it.second == null }.map { it.first }
+        if (missing.isEmpty()) return have
+        val longStale = now - (leagueData.value[l.id]?.fetchedAt ?: 0L) > 90 * MINUTE
+        val direct = if (longStale || have.isEmpty()) missing.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() } else emptyList()
+        val all = have + direct
+        if (all.isEmpty()) throw java.io.IOException("not in the shared cache yet, and no answer from ESPN")
+        return all
+    }
+
+    /**
+     * The same idea as [fetchViaSharedCache], for the day-after-tomorrow-to-a-week-ahead window:
+     * the shared cache's own week-ahead days are allowed to go longer between refreshes (they're
+     * a schedule, not a live score), falling back to a direct day-at-a-time ESPN call only for a
+     * day the cache hasn't reached yet, once this league's own week data has gone stale.
+     */
+    private fun fetchWeekViaSharedCache(l: League, singleDays: List<String>, now: Long): List<String> {
+        val shared = feeds.espnSharedRaw(l.id)
+        val byDay = singleDays.map { d -> d to feeds.espnSharedDay(shared, d, 6 * HOUR, now) }
+        val have = byDay.mapNotNull { it.second }
+        val missing = byDay.filter { it.second == null }.map { it.first }
+        if (missing.isEmpty()) return have
+        val longStale = now - (weekData.value[l.id]?.fetchedAt ?: 0L) > 8 * HOUR
+        val direct = if (longStale || have.isEmpty()) missing.mapNotNull { d -> runCatching { feeds.scoreboardDayRaw(l, d) }.getOrNull() } else emptyList()
+        return have + direct
+    }
+
     private fun describe(e: Throwable): String = when (e) {
         is java.net.UnknownHostException -> "no internet or the address can't be found"
         is java.net.SocketTimeoutException -> "timed out"
@@ -641,9 +706,10 @@ class SportsRepository @Inject constructor(
     }
 
     private suspend fun updateFixtures() {
-        val s = settings.value
+        // Every one of these, not just your region's: one request per slug regardless of how
+        // many leagues or regions use it, so there's no traffic reason to hold any of them back.
         // (Leagues TheSportsDB's files fill, WWE or MotoGP, are read with those instead.)
-        val leagues = activeLeagues(s).filter { it.fixtureSlug != null && it.id !in tsdbAlias }
+        val leagues = SportsCatalog.all.filter { it.fixtureSlug != null && it.id !in tsdbAlias }
         for (l in leagues) {
             val slug = l.fixtureSlug ?: continue
             val file = File(dir, "fx_$slug.json")
@@ -653,8 +719,8 @@ class SportsRepository @Inject constructor(
             fixtureData.update { it + (l.id to LeagueData(list, System.currentTimeMillis(), null)) }
         }
         // Wrestling's schedule (from TheSportsDB, through a file a GitHub job keeps up to date).
-        // (Boxing's fight cards come in the same file.)
-        val wrestling = activeLeagues(s).filter { (it.sport == Sport.WRESTLING || it.id == "guide/boxing") && it.id !in tsdbAlias }.map { it.id }.toSet()
+        // (Boxing's fight cards come in the same file.) One request total, whoever asks for it.
+        val wrestling = SportsCatalog.all.filter { (it.sport == Sport.WRESTLING || it.id == "guide/boxing") && it.id !in tsdbAlias }.map { it.id }.toSet()
         if (wrestling.isNotEmpty()) {
             val file = File(dir, "fx_wrestling.json")
             val raw = runCatching { feeds.wrestlingRaw() }.onSuccess { runCatching { file.writeText(it) } }.getOrNull()
@@ -878,8 +944,10 @@ class SportsRepository @Inject constructor(
             val shift = live.epgOffsetMinutes * MINUTE
             val s = settings.value
             val f = follows.value
-            // Sports ESPN doesn't cover, and names you follow, from the guide: yesterday to tomorrow.
-            val guideLeagues = activeLeagues(s, f).filter { it.guideOnly }
+            // Sports ESPN doesn't cover, from the guide: yesterday to tomorrow, every one of
+            // them, not just your region's (this is a local guide search, not an API call, so
+            // there's no traffic reason to leave any of them out) — plus names you follow.
+            val guideLeagues = SportsCatalog.all.filter { it.guideOnly }
             val keys = channels.associateBy { it.key }
             val days = HashMap<Long, List<SportsEvent>>()
             for (offset in -1..1) {
