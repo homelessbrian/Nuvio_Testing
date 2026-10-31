@@ -1791,7 +1791,8 @@ private fun LegacySidebarScaffold(
                                             .clickable {
                                                 onSwitchProfile()
                                                 drawerState.setValue(DrawerValue.Closed)
-                                            },
+                                            }
+                                            .semantics { role = Role.Button },
                                         verticalAlignment = Alignment.CenterVertically
                                     ) {
                                         Spacer(modifier = Modifier.width(profileLeadingInset))
