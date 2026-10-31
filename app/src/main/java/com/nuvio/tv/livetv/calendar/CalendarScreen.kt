@@ -52,7 +52,10 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.BlendMode
@@ -117,6 +120,35 @@ private fun Modifier.homeMark(): Modifier {
 }
 
 /**
+ * The card the highlight is on, so coming back to the Calendar (from a game, a show page, the
+ * player) puts it back on that card instead of the first one.
+ */
+private class CardFocus(val requester: (String) -> FocusRequester, val onFocused: (String) -> Unit)
+private val LocalCardFocus = staticCompositionLocalOf<CardFocus?> { null }
+
+/** Marks a card (or a day in the month) by [key], so the highlight can come back to it. */
+@Composable
+private fun Modifier.cardFocus(key: String): Modifier {
+    val cf = LocalCardFocus.current ?: return this
+    return this.focusRequester(cf.requester(key)).onFocusChanged { if (it.isFocused) cf.onFocused(key) }
+}
+
+/**
+ * Focus can't leave this row ([right]) or column ([down]) that way: at the end of a row, Right
+ * stays put instead of jumping to a card in another row (or up to the buttons).
+ */
+private fun Modifier.keepFocusIn(right: Boolean = false, down: Boolean = false): Modifier =
+    this.focusProperties {
+        onExit = {
+            val d = requestedFocusDirection
+            if ((right && d == FocusDirection.Right) || (down && d == FocusDirection.Down)) cancelFocusChange()
+        }
+    }.focusGroup()
+
+/** Calendar card keys for a day in the month view. */
+private fun dayKey(day: LocalDate) = "day|$day"
+
+/**
  * The Calendar: your shows' and movies' release dates as rows of big cards by day (or a week,
  * or a month), what's airing today, and the shows you follow. The highlighted entry fills the
  * top, like Nuvio's Home. Live TV comes first: OK on an episode in your guide opens its Live TV
@@ -155,7 +187,25 @@ fun CalendarScreen(
     var airFilter by rememberSaveable { mutableStateOf(AirFilter.ALL) }
     val view = settings.calendarView.takeIf { it == "WEEK" || it == "MONTH" } ?: "LIST"
     val grid = view != "LIST"
-    var heroKey by remember { mutableStateOf<String?>(null) }
+    // Kept when you leave (a game, a show page) so the same entry is up top when you come back.
+    var heroKey by rememberSaveable { mutableStateOf<String?>(null) }
+    // The card (or month day) the highlight was last on: coming back puts it there again.
+    var lastCard by rememberSaveable { mutableStateOf<String?>(null) }
+    val cardRequesters = remember { HashMap<String, FocusRequester>() }
+    val focusedCard = remember { arrayOfNulls<String>(1) }
+    val cardFocuses = remember {
+        CardFocus(
+            requester = { k -> cardRequesters.getOrPut(k) { FocusRequester() } },
+            onFocused = { k -> lastCard = k; focusedCard[0] = k }
+        )
+    }
+    // The header's buttons: Right at the end of the filters goes to List / Week / Month (or
+    // Refresh), and Down from those comes back to the end of the filters.
+    val viewFocus = remember { FocusRequester() }
+    val refreshFocus = remember { FocusRequester() }
+    val filterEnd = remember { FocusRequester() }
+    // What the highlight was on when this screen opened (null: a fresh start).
+    val restoreKey = remember { lastCard }
     var options by remember { mutableStateOf<CalendarEntry?>(null) }
     var liveCard by remember { mutableStateOf<CalendarEntry?>(null) }
     var followOptions by remember { mutableStateOf<CalendarFollow?>(null) }
@@ -168,8 +218,11 @@ fun CalendarScreen(
     var resetKey by remember { mutableStateOf(0) }
     var atHome by remember { mutableStateOf(true) }
     var inContent by remember { mutableStateOf(false) }
+    // Anything on this page has the highlight (false: it was lost, e.g. its card went away).
+    var screenFocused by remember { mutableStateOf(false) }
     val openSidebar = com.nuvio.tv.LocalOpenSidebar.current
     val sidebarOpen = com.nuvio.tv.LocalSidebarExpanded.current
+    val sidebarOpenNow by androidx.compose.runtime.rememberUpdatedState(sidebarOpen)
     BackHandler(enabled = !sidebarOpen) {
         if (inContent && !atHome) { resetKey++; atHome = true } else openSidebar()
     }
@@ -243,6 +296,32 @@ fun CalendarScreen(
             else if (viewModel.watchLive(direct)) onOpenLive()
         }
     }
+    /**
+     * The highlighted card is about to go away (hidden, taken off, bell off): once it's gone, the
+     * highlight goes to the card next to it (else the first card, else the tabs) instead of being
+     * lost, which left the remote doing nothing until a press picked something at random.
+     */
+    fun focusAfterRemoving(neighbour: String?) {
+        scope.launch {
+            // Saving the change can take a moment: wait (up to a couple of seconds) for the card to
+            // go. Only when nothing on the page has the highlight any more.
+            repeat(12) {
+                delay(150)
+                if (sidebarOpenNow) return@launch
+                if (screenFocused) return@repeat
+                if (neighbour != null && runCatching { cardFocuses.requester(neighbour).requestFocus() }.isSuccess) return@launch
+                if (runCatching { firstItem.requestFocus() }.isFailure) runCatching { tabFocus.requestFocus() }
+                return@launch
+            }
+        }
+    }
+    /** The card next to [e] that stays when its whole show goes (the next one, else the one before). */
+    fun neighbourOf(e: CalendarEntry): String? {
+        val list = (if (grid || tab == CalTab.AIRING) (if (tab == CalTab.AIRING) airingShown else filtered) else pool).distinctBy { it.key }
+        val i = list.indexOfFirst { it.key == e.key }
+        if (i < 0) return null
+        return (list.drop(i + 1) + list.take(i).reversed()).firstOrNull { it.contentId != e.contentId }?.key
+    }
     fun playRecording(e: CalendarEntry, id: String) {
         val (url, title) = viewModel.recordingToPlay(id) ?: run { LiveTvNotice.show("That recording isn't there any more"); return }
         onPlayRecording(url, title, e.poster, id)
@@ -274,7 +353,7 @@ fun CalendarScreen(
         viewModel.repo.canWaitForGuide(e), handlers(e, close)
     )
 
-    Box(Modifier.fillMaxSize().guideBackdrop(settings.guideBackdrop)) {
+    Box(Modifier.fillMaxSize().guideBackdrop(settings.guideBackdrop).onFocusChanged { screenFocused = it.hasFocus }) {
         val showHero = when (tab) {
             CalTab.UPCOMING, CalTab.RECENT -> !grid
             CalTab.AIRING -> true
@@ -339,14 +418,25 @@ fun CalendarScreen(
                 TabPill("Following", tab == CalTab.FOLLOWING, tabMod(tab == CalTab.FOLLOWING)) { tab = CalTab.FOLLOWING }
                 if (hidden.isNotEmpty() || tab == CalTab.HIDDEN) TabPill("Hidden", tab == CalTab.HIDDEN, tabMod(tab == CalTab.HIDDEN)) { tab = CalTab.HIDDEN }
                 Spacer(Modifier.weight(1f))
+                val hasFilters = tab == CalTab.UPCOMING || tab == CalTab.RECENT || tab == CalTab.AIRING
+                // Down from the buttons on the right: the end of the filter row under them (not
+                // straight into the cards, past the filters).
+                val downToFilters = if (hasFilters) Modifier.focusProperties { down = filterEnd } else Modifier
                 if (tab == CalTab.UPCOMING || tab == CalTab.RECENT) {
-                    Segmented(listOf("LIST" to "List", "WEEK" to "Week", "MONTH" to "Month"), view) { v ->
+                    Segmented(
+                        listOf("LIST" to "List", "WEEK" to "Week", "MONTH" to "Month"), view,
+                        selectedModifier = Modifier.focusRequester(viewFocus),
+                        modifier = downToFilters
+                    ) { v ->
                         viewModel.setView(v); heroKey = null
                         if (v != "LIST") tab = CalTab.UPCOMING
                     }
                     Spacer(Modifier.width(6.dp))
                 }
-                IconPill { if (tab == CalTab.AIRING) viewModel.loadAiring(force = true) else viewModel.refresh() }
+                // The last button on the row: Right stays here.
+                IconPill(Modifier.focusRequester(refreshFocus).then(downToFilters).focusProperties { right = FocusRequester.Cancel }) {
+                    if (tab == CalTab.AIRING) viewModel.loadAiring(force = true) else viewModel.refresh()
+                }
             }
             // ---------------------------------------------------------------- what you see: filters (quieter)
             if (tab == CalTab.UPCOMING || tab == CalTab.RECENT || tab == CalTab.AIRING) {
@@ -355,16 +445,23 @@ fun CalendarScreen(
                     verticalAlignment = Alignment.CenterVertically,
                     horizontalArrangement = Arrangement.spacedBy(6.dp)
                 ) {
+                    // The last button on this row: Right goes across to List / Week / Month (the
+                    // buttons above on the right; Refresh on Airing today), never down into the
+                    // cards. Down from those buttons comes back here.
+                    val endMod = Modifier.focusRequester(filterEnd).focusProperties {
+                        right = if (tab == CalTab.AIRING) refreshFocus else viewFocus
+                    }
                     when (tab) {
                         CalTab.UPCOMING, CalTab.RECENT -> {
+                            val switchShown = tab == CalTab.RECENT && !grid
                             Pill("All", kind == CalKind.ALL, quiet = true) { kind = CalKind.ALL; heroKey = null }
                             Pill("Shows", kind == CalKind.SHOWS, quiet = true) { kind = CalKind.SHOWS; heroKey = null }
                             Pill("Movies", kind == CalKind.MOVIES, quiet = true) { kind = CalKind.MOVIES; heroKey = null }
                             if (kind == CalKind.SPORTS || all.any { it.kind == CalendarKind.GAME }) Pill("Sports", kind == CalKind.SPORTS, quiet = true) { kind = CalKind.SPORTS; heroKey = null }
-                            Pill("On my TV", kind == CalKind.ON_TV, quiet = true) { kind = CalKind.ON_TV; heroKey = null }
-                            if (tab == CalTab.RECENT && !grid) {
+                            Pill("On my TV", kind == CalKind.ON_TV, if (switchShown) Modifier else endMod, quiet = true) { kind = CalKind.ON_TV; heroKey = null }
+                            if (switchShown) {
                                 Divider()
-                                SwitchPill("Unwatched only", settings.calendarHideWatched) { viewModel.setHideWatched(!settings.calendarHideWatched); heroKey = null }
+                                SwitchPill("Unwatched only", settings.calendarHideWatched, endMod) { viewModel.setHideWatched(!settings.calendarHideWatched); heroKey = null }
                             }
                         }
                         CalTab.AIRING -> {
@@ -374,7 +471,7 @@ fun CalendarScreen(
                             Pill("Following", airFilter == AirFilter.FOLLOWING, quiet = true) { airFilter = AirFilter.FOLLOWING; heroKey = null }
                             Divider()
                             // A switch, not a filter: news and talk shows in the list, or left out.
-                            SwitchPill("News & talk shows", !settings.calendarSkipNewsTalk) { viewModel.setSkipNewsTalk(!settings.calendarSkipNewsTalk) }
+                            SwitchPill("News & talk shows", !settings.calendarSkipNewsTalk, endMod) { viewModel.setSkipNewsTalk(!settings.calendarSkipNewsTalk) }
                         }
                         else -> Unit
                     }
@@ -396,17 +493,17 @@ fun CalendarScreen(
                         }
                         false
                     }
-            ) { CompositionLocalProvider(LocalAtHome provides { atHome = true }) {
+            ) { CompositionLocalProvider(LocalAtHome provides { atHome = true }, LocalCardFocus provides cardFocuses) {
                 val onFocus: (CalendarEntry) -> Unit = { heroKey = it.key }
                 val status: (CalendarEntry) -> CalendarLiveStatus = { viewModel.status(it) }
                 when (tab) {
                     CalTab.UPCOMING, CalTab.RECENT -> when {
                         view == "MONTH" -> MonthView(
-                            entries = filtered, use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey,
+                            entries = filtered, use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey, restore = restoreKey,
                             status = status, onOpen = ::open, onOptions = { options = it }
                         )
                         view == "WEEK" -> WeekView(
-                            entries = filtered, use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey,
+                            entries = filtered, use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey, restore = restoreKey,
                             status = status, onOpen = ::open, onOptions = { options = it }
                         )
                         pool.isEmpty() && state.problem != null && state.entries.isEmpty() -> EmptyNote(
@@ -430,7 +527,7 @@ fun CalendarScreen(
                         else -> DayRows(
                             entries = pool,
                             newestFirst = tab == CalTab.RECENT,
-                            use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey,
+                            use24h = use24h, now = now, firstFocus = firstItem, reset = resetKey, restore = restoreKey,
                             status = status,
                             onFocus = onFocus, onOpen = ::open, onOptions = { options = it }
                         )
@@ -477,7 +574,7 @@ fun CalendarScreen(
                             items(list, key = { it.id }) { h ->
                                 LiveFocusRow(
                                     modifier = Modifier.fillMaxWidth().then(if (h == list.first()) Modifier.focusRequester(firstItem).homeMark() else Modifier),
-                                    onClick = { viewModel.unhide(h) }
+                                    onClick = { viewModel.unhide(h); focusAfterRemoving(null) }
                                 ) { focused ->
                                     LiveText(h.name.ifBlank { h.id }, size = 17.sp, weight = FontWeight.SemiBold, color = focusedTextColor(focused), modifier = Modifier.weight(1f))
                                     LiveText("OK: show it on the Calendar again", size = 12.sp, color = focusedTextColor(focused).copy(alpha = 0.7f))
@@ -489,9 +586,22 @@ fun CalendarScreen(
             } }
         }
 
-        // First open: straight onto the cards.
+        // Opening the Calendar: back on the card you were on (coming back from a game, a show page
+        // or the player), else straight onto the first card, else the tabs.
         LaunchedEffect(Unit) {
             delay(300)
+            val back = restoreKey
+            if (back != null) {
+                // Back isn't "at home" unless the card it lands on is the first one (it marks itself).
+                atHome = false
+                // The rows put that card on screen as they open; give them a moment if needed.
+                repeat(6) {
+                    runCatching { cardFocuses.requester(back).requestFocus() }
+                    delay(80)
+                    if (focusedCard[0] == back) return@LaunchedEffect
+                }
+                atHome = true
+            }
             if (runCatching { firstItem.requestFocus() }.isFailure) runCatching { tabFocus.requestFocus() }
         }
 
@@ -538,12 +648,12 @@ fun CalendarScreen(
                         if (followed) null else "Follow it: its new episodes on Home and here") { close(); viewModel.toggleFollow(e) })
                 }
                 when {
-                    airingFollow -> add(MenuAction("Take it off your Calendar") { close(); viewModel.toggleFollow(e) })
+                    airingFollow -> add(MenuAction("Take it off your Calendar") { val n = neighbourOf(e); close(); viewModel.toggleFollow(e); focusAfterRemoving(n) })
                     // Airing Today lists every show on today: nothing there is yours to take off.
                     fromAiringToday -> Unit
-                    e.kind == CalendarKind.MOVIE && followed -> add(MenuAction("Turn off the bell") { close(); viewModel.toggleFollow(e) })
+                    e.kind == CalendarKind.MOVIE && followed -> add(MenuAction("Turn off the bell") { val n = neighbourOf(e); close(); viewModel.toggleFollow(e); focusAfterRemoving(n) })
                     else -> add(MenuAction("Hide this ${if (e.kind == CalendarKind.MOVIE) "movie" else "show"} from the Calendar",
-                        "It comes back from Hidden") { close(); viewModel.hide(e) })
+                        "It comes back from Hidden") { val n = neighbourOf(e); close(); viewModel.hide(e); focusAfterRemoving(n) })
                 }
             }
             CalendarMenu(
@@ -564,7 +674,12 @@ fun CalendarScreen(
                         close()
                         if (f.isAiring) onOpenDetail(f.imdbId!!, "movie", null, null, null) else onOpenDetail(f.id, f.type, f.addonBaseUrl, null, null)
                     })
-                    add(MenuAction(if (f.isAiring) "Take it off your Calendar" else "Turn off the bell") { close(); viewModel.toggleFollow(f) })
+                    add(MenuAction(if (f.isAiring) "Take it off your Calendar" else "Turn off the bell") {
+                        val list = follows.distinctBy { it.id }
+                        val i = list.indexOfFirst { it.id == f.id }
+                        val n = (list.getOrNull(i + 1) ?: list.getOrNull(i - 1))?.let { "follow|" + it.id }
+                        close(); viewModel.toggleFollow(f); focusAfterRemoving(n)
+                    })
                 },
                 onDismiss = close
             )
@@ -749,7 +864,8 @@ private fun Hero(
                 when (e.kind) { CalendarKind.GAME -> "Open in Sports"; CalendarKind.MOVIE -> "Movie page"; else -> "Show page" },
                 dot = false, onClick = onOpen
             )
-            HeroButton("Options", dot = false, onClick = onOptions)
+            // The last button: Right stays here (it used to drop down to the buttons under the hero).
+            HeroButton("Options", dot = false, onClick = onOptions, modifier = Modifier.focusProperties { right = FocusRequester.Cancel })
         }
         Spacer(Modifier.height(4.dp))
     }
@@ -757,12 +873,12 @@ private fun Hero(
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun HeroButton(text: String, dot: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, primary: Boolean = false) {
+private fun HeroButton(text: String, dot: Boolean, onClick: () -> Unit, onLongClick: (() -> Unit)? = null, primary: Boolean = false, modifier: Modifier = Modifier) {
     var focused by remember { mutableStateOf(false) }
     val shape = RoundedCornerShape(50)
     val colors = NuvioTheme.colors
     Row(
-        Modifier
+        modifier
             .clip(shape)
             .background(if (primary) colors.Secondary else if (focused) colors.FocusBackground else colors.BackgroundElevated.copy(alpha = 0.92f))
             .border(1.dp, if (focused || primary) Color.Transparent else colors.Border, shape)
@@ -792,6 +908,8 @@ private fun DayRows(
     now: Long,
     firstFocus: FocusRequester,
     reset: Int,
+    /** The card to come back to (its row is put on screen, scrolled to it). */
+    restore: String? = null,
     status: (CalendarEntry) -> CalendarLiveStatus,
     onFocus: (CalendarEntry) -> Unit,
     onOpen: (CalendarEntry) -> Unit,
@@ -820,6 +938,18 @@ private fun DayRows(
             )
         }
     }
+    // Coming back: the card's row on screen and scrolled across to it, so it can take the highlight.
+    val restoreAt = remember {
+        restore?.let { k ->
+            rows.withIndex().firstNotNullOfOrNull { (ri, r) ->
+                r.list.indexOfFirst { it.key == k }.takeIf { it >= 0 }?.let { ci -> Triple(ri, r.day.toString() + if (r.games) "g" else "s", ci) }
+            }
+        }
+    }
+    LaunchedEffect(Unit) {
+        val (ri, _, _) = restoreAt ?: return@LaunchedEffect
+        if (listState.layoutInfo.visibleItemsInfo.none { it.index == ri }) runCatching { listState.scrollToItem(ri) }
+    }
     LazyColumn(state = listState, contentPadding = PaddingValues(bottom = 60.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
         itemsIndexed(rows, key = { _, r -> r.day.toString() + if (r.games) "g" else "s" }) { rowIndex, r ->
             Column {
@@ -837,14 +967,18 @@ private fun DayRows(
                 }
                 val rowKey = r.day.toString() + if (r.games) "g" else "s"
                 LazyRow(
-                    state = rowStates.getOrPut(rowKey) { LazyListState() },
+                    // Right at the end of a row stays there (no jumping to a card in the next row).
+                    modifier = Modifier.keepFocusIn(right = true),
+                    state = rowStates.getOrPut(rowKey) {
+                        LazyListState(restoreAt?.takeIf { it.second == rowKey }?.let { (it.third - 1).coerceAtLeast(0) } ?: 0)
+                    },
                     contentPadding = PaddingValues(start = 64.dp, end = 40.dp, top = 6.dp, bottom = 6.dp),
                     horizontalArrangement = Arrangement.spacedBy(16.dp)
                 ) {
                     itemsIndexed(r.list, key = { _, e -> e.key }) { i, e ->
                         WideCard(
                             e = e, use24h = use24h, now = now, st = status(e),
-                            modifier = if (rowIndex == 0 && i == 0) Modifier.focusRequester(firstFocus).homeMark() else Modifier,
+                            modifier = (if (rowIndex == 0 && i == 0) Modifier.focusRequester(firstFocus).homeMark() else Modifier).cardFocus(e.key),
                             onFocus = { onFocus(e) }, onClick = { onOpen(e) }, onLongClick = { onOptions(e) }
                         )
                     }
@@ -1075,14 +1209,27 @@ private fun WeekView(
     now: Long,
     firstFocus: FocusRequester,
     reset: Int,
+    /** The card to come back to: its week is shown, its day's column scrolled to it. */
+    restore: String? = null,
     status: (CalendarEntry) -> CalendarLiveStatus,
     onOpen: (CalendarEntry) -> Unit,
     onOptions: (CalendarEntry) -> Unit
 ) {
     val today = LocalDate.now()
     val thisWeek = today.minusDays((today.dayOfWeek.value % 7).toLong())
-    var start by remember { mutableStateOf(thisWeek) }
-    val columnStates = remember { List(7) { LazyListState() } }
+    fun weekOf(day: LocalDate) = day.minusDays((day.dayOfWeek.value % 7).toLong())
+    fun sortedDay(list: List<CalendarEntry>) = list.sortedWith(compareBy<CalendarEntry> { it.kind == CalendarKind.GAME }.thenBy { it.airMs ?: Long.MAX_VALUE })
+    val restored = remember { restore?.let { k -> entries.firstOrNull { it.key == k } } }
+    // The week you were looking at stays when you go to a game or a show and come back.
+    var start by rememberSaveable { mutableStateOf(restored?.let { weekOf(it.day) } ?: thisWeek) }
+    val columnStates = remember {
+        List(7) { d ->
+            val at = restored?.takeIf { weekOf(it.day) == start && (it.day.dayOfWeek.value % 7) == d }
+                ?.let { r -> sortedDay(entries.distinctBy { it.key }.filter { it.day == r.day }).indexOfFirst { it.key == r.key } }
+            LazyListState((at ?: 0).coerceAtLeast(0))
+        }
+    }
+    val prevWeekFocus = remember { FocusRequester() }
     // Back: this week, today.
     LaunchedEffect(reset) {
         if (reset == 0) return@LaunchedEffect
@@ -1092,7 +1239,7 @@ private fun WeekView(
         runCatching { firstFocus.requestFocus() }
     }
     val byDay = remember(entries) { entries.distinctBy { it.key }.groupBy { it.day } }
-    var focusedEntry by remember { mutableStateOf<CalendarEntry?>(null) }
+    var focusedEntry by remember { mutableStateOf(restored) }
     Column(Modifier.fillMaxSize().padding(start = 64.dp, end = 32.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             LiveText(
@@ -1105,10 +1252,12 @@ private fun WeekView(
                 size = 13.sp, color = NuvioTheme.colors.TextSecondary
             )
             Spacer(Modifier.weight(1f))
-            Pill("‹ Week", false) { start = start.minusWeeks(1) }
+            Pill("‹ Week", false, Modifier.focusRequester(prevWeekFocus)) { start = start.minusWeeks(1) }
             Spacer(Modifier.width(6.dp))
             if (start != thisWeek) {
-                Pill("This week", false) { start = thisWeek }
+                // This button goes away once you're on this week: the highlight moves to ‹ Week
+                // first instead of being lost.
+                Pill("This week", false) { runCatching { prevWeekFocus.requestFocus() }; start = thisWeek }
                 Spacer(Modifier.width(6.dp))
             }
             Pill("Week ›", false) { start = start.plusWeeks(1) }
@@ -1117,7 +1266,7 @@ private fun WeekView(
         Row(Modifier.weight(1f).fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             for (d in 0 until 7) {
                 val day = start.plusDays(d.toLong())
-                val list = byDay[day].orEmpty().sortedWith(compareBy<CalendarEntry> { it.kind == CalendarKind.GAME }.thenBy { it.airMs ?: Long.MAX_VALUE })
+                val list = sortedDay(byDay[day].orEmpty())
                 val isToday = day == today
                 Column(
                     Modifier.weight(1f).fillMaxHeight()
@@ -1139,6 +1288,8 @@ private fun WeekView(
                         LiveText("—", size = 13.sp, color = NuvioTheme.colors.TextSecondary.copy(alpha = 0.5f), modifier = Modifier.padding(horizontal = 8.dp))
                     } else {
                         LazyColumn(
+                            // Down at the bottom of a day stays there (no sliding into the next day).
+                            modifier = Modifier.keepFocusIn(down = true),
                             state = columnStates[d],
                             contentPadding = PaddingValues(start = 4.dp, end = 4.dp, top = 4.dp, bottom = 40.dp),
                             verticalArrangement = Arrangement.spacedBy(10.dp)
@@ -1146,7 +1297,7 @@ private fun WeekView(
                             itemsIndexed(list, key = { _, e -> e.key }) { i, e ->
                                 MiniCard(
                                     e = e, use24h = use24h, now = now, st = status(e),
-                                    modifier = if (i == 0 && (isToday || (start != thisWeek && d == 0))) Modifier.focusRequester(firstFocus).homeMark() else Modifier,
+                                    modifier = (if (i == 0 && (isToday || (start != thisWeek && d == 0))) Modifier.focusRequester(firstFocus).homeMark() else Modifier).cardFocus(e.key),
                                     onFocus = { focusedEntry = e },
                                     onClick = { onOpen(e) }, onLongClick = { onOptions(e) }
                                 )
@@ -1280,13 +1431,22 @@ private fun MonthView(
     now: Long,
     firstFocus: FocusRequester,
     reset: Int,
+    /** The card (or day) to come back to: its month and day are shown again. */
+    restore: String? = null,
     status: (CalendarEntry) -> CalendarLiveStatus,
     onOpen: (CalendarEntry) -> Unit,
     onOptions: (CalendarEntry) -> Unit
 ) {
     val today = LocalDate.now()
-    var shown by remember { mutableStateOf(YearMonth.now()) }
-    var selected by remember { mutableStateOf(today) }
+    val restoredDay = remember {
+        restore?.let { k ->
+            entries.firstOrNull { it.key == k }?.day
+                ?: k.takeIf { it.startsWith("day|") }?.let { runCatching { LocalDate.parse(it.removePrefix("day|")) }.getOrNull() }
+        }
+    }
+    // The month and day you were on stay when you go to a game or a show and come back.
+    var shown by rememberSaveable { mutableStateOf(restoredDay?.let { YearMonth.from(it) } ?: YearMonth.now()) }
+    var selected by rememberSaveable { mutableStateOf(restoredDay ?: today) }
     // Back: this month, today.
     LaunchedEffect(reset) {
         if (reset == 0) return@LaunchedEffect
@@ -1320,11 +1480,20 @@ private fun MonthView(
             if (list.isEmpty()) {
                 LiveText("Highlight a day with a picture to see what's out", size = 14.sp, color = NuvioTheme.colors.TextSecondary, modifier = Modifier.padding(start = 64.dp, top = 30.dp))
             } else {
-                LazyRow(contentPadding = PaddingValues(start = 64.dp, end = 20.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+                // Coming back to a card in the strip: scrolled across to it.
+                val stripState = remember(selected) {
+                    LazyListState(restore?.let { k -> list.indexOfFirst { it.key == k } }?.takeIf { it > 0 }?.minus(1) ?: 0)
+                }
+                LazyRow(
+                    // Right at the end of the strip stays there (it used to jump up to the month arrows).
+                    modifier = Modifier.keepFocusIn(right = true),
+                    state = stripState,
+                    contentPadding = PaddingValues(start = 64.dp, end = 20.dp, top = 4.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)
+                ) {
                     itemsIndexed(list, key = { _, e -> e.key }) { i, e ->
                         WideCard(
                             e = e, use24h = use24h, now = now, st = status(e), width = CARD_W * 0.8f, compactCaption = true,
-                            modifier = if (i == 0) Modifier.focusRequester(stripFocus) else Modifier,
+                            modifier = (if (i == 0) Modifier.focusRequester(stripFocus) else Modifier).cardFocus(e.key),
                             onFocus = {}, onClick = { onOpen(e) }, onLongClick = { onOptions(e) }
                         )
                     }
@@ -1352,7 +1521,8 @@ private fun MonthView(
                             today = day == today,
                             entries = byDay[day].orEmpty(),
                             modifier = Modifier.weight(1f).fillMaxHeight()
-                                .then(if (day == today && shown == YearMonth.now()) Modifier.focusRequester(firstFocus).homeMark() else Modifier),
+                                .then(if (day == today && shown == YearMonth.now()) Modifier.focusRequester(firstFocus).homeMark() else Modifier)
+                                .cardFocus(dayKey(day)),
                             onFocus = { selected = day },
                             onClick = { if (byDay[day].orEmpty().isNotEmpty()) runCatching { stripFocus.requestFocus() } }
                         )
@@ -1516,7 +1686,7 @@ private fun PosterGrid(
                 bell = e.followed || isFollowed(e),
                 tag = e.tags.firstOrNull { it != CalendarTag.NEW },
                 st = status(e),
-                modifier = if (i == 0) Modifier.focusRequester(firstFocus).homeMark() else Modifier,
+                modifier = (if (i == 0) Modifier.focusRequester(firstFocus).homeMark() else Modifier).cardFocus(e.key),
                 onFocus = { onFocus(e) },
                 onClick = { onOpen(e) },
                 onLongClick = { onOptions(e) }
@@ -1561,7 +1731,7 @@ private fun FollowingGrid(
             PosterCard(
                 poster = f.poster, title = f.name, caption = caption, corner = null, bell = true, tag = null,
                 st = if (seriesOn(f)) CalendarLiveStatus(series = true) else null,
-                modifier = if (i == 0) Modifier.focusRequester(firstFocus).homeMark() else Modifier,
+                modifier = (if (i == 0) Modifier.focusRequester(firstFocus).homeMark() else Modifier).cardFocus("follow|" + f.id),
                 onFocus = {}, onClick = { onOpen(f) }, onLongClick = { onOptions(f) }
             )
         }
@@ -1623,12 +1793,12 @@ private fun TabPill(text: String, selected: Boolean, modifier: Modifier = Modifi
 /** An on/off setting in the filter bar: an outline and a switch, so it doesn't read as one more filter. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun SwitchPill(text: String, on: Boolean, onClick: () -> Unit) {
+private fun SwitchPill(text: String, on: Boolean, modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val colors = liveCellColors(focused, Color.Transparent)
     val shape = RoundedCornerShape(50)
     Row(
-        Modifier
+        modifier
             .clip(shape)
             .background(colors.background)
             .border(if (focused) 2.dp else 1.dp, if (focused) colors.border else NuvioTheme.colors.Border, shape)
@@ -1646,9 +1816,16 @@ private fun SwitchPill(text: String, on: Boolean, onClick: () -> Unit) {
 /** List · Week · Month, side by side in one control. */
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun Segmented(options: List<Pair<String, String>>, selected: String, onPick: (String) -> Unit) {
+private fun Segmented(
+    options: List<Pair<String, String>>,
+    selected: String,
+    /** Added to the button that's on (what Right from the end of the filters lands on). */
+    selectedModifier: Modifier = Modifier,
+    modifier: Modifier = Modifier,
+    onPick: (String) -> Unit
+) {
     Row(
-        Modifier.clip(RoundedCornerShape(50)).background(NuvioTheme.colors.BackgroundElevated).padding(2.dp),
+        modifier.clip(RoundedCornerShape(50)).background(NuvioTheme.colors.BackgroundElevated).padding(2.dp),
         horizontalArrangement = Arrangement.spacedBy(2.dp)
     ) {
         options.forEach { (id, label) ->
@@ -1657,7 +1834,7 @@ private fun Segmented(options: List<Pair<String, String>>, selected: String, onP
             val theme = NuvioTheme.colors
             val colors = liveCellColors(focused, if (on) theme.Secondary else Color.Transparent)
             Box(
-                Modifier
+                (if (on) selectedModifier else Modifier)
                     .clip(RoundedCornerShape(50))
                     .background(if (on) theme.Secondary else colors.background)
                     .border(if (focused) 2.dp else 0.dp, colors.border, RoundedCornerShape(50))
@@ -1681,12 +1858,12 @@ private fun Divider() {
 
 @OptIn(ExperimentalFoundationApi::class)
 @Composable
-private fun IconPill(onClick: () -> Unit) {
+private fun IconPill(modifier: Modifier = Modifier, onClick: () -> Unit) {
     var focused by remember { mutableStateOf(false) }
     val colors = liveCellColors(focused, NuvioTheme.colors.BackgroundElevated)
     val shape = RoundedCornerShape(50)
     Box(
-        Modifier
+        modifier
             .size(30.dp)
             .clip(shape)
             .background(colors.background)

@@ -1473,7 +1473,11 @@ private fun PlaybackNavHost(
                     )
                 },
                 onOpenGame = { id ->
-                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(id)
+                    // Back on the game comes back here (the Calendar, where you were), not to the
+                    // Sports hub.
+                    com.nuvio.tv.livetv.sports.SportsLaunch.openEvent(
+                        id, com.nuvio.tv.livetv.sports.SportsLaunch.Origin(Screen.Calendar.route, "Calendar")
+                    )
                     // Like picking Sports in the menu: the Calendar keeps its own place, and picking
                     // Calendar in the menu afterwards opens the Calendar (not Sports again).
                     navController.navigate(Screen.Sports.route) {
@@ -1488,7 +1492,18 @@ private fun PlaybackNavHost(
         composable(Screen.Sports.route) {
             // Live TV fork: the Sports page (scores, schedules, which of your channels show each game).
             com.nuvio.tv.livetv.sports.SportsScreen(
-                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) }
+                onOpenLive = { com.nuvio.tv.livetv.sports.openLiveTvFullscreen(navController) },
+                // Back on a game opened from another page: that page again, as it was (like
+                // picking it in the side menu).
+                onReturnTo = { route ->
+                    runCatching {
+                        navController.navigate(route) {
+                            popUpTo(navController.graph.startDestinationId) { saveState = true }
+                            launchSingleTop = true
+                            restoreState = true
+                        }
+                    }
+                }
             )
         }
 

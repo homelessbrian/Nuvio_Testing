@@ -98,8 +98,13 @@ object SportsLaunch {
     fun openArrange() { openArrange = true; openPicker = true }
     fun takeOpenArrange(): Boolean = openArrange.also { openArrange = false }
     fun takeOpenPicker(): Boolean = openPicker.also { openPicker = false }
-    fun openEvent(id: String) { openEvent = id }
+    /** Where a game was opened from (a page's route and its name), for Back on the game page. */
+    data class Origin(val route: String, val label: String)
+    @Volatile private var openFrom: Origin? = null
+    /** Open a game. [from]: the page it was opened from; Back on the game goes back there. */
+    fun openEvent(id: String, from: Origin? = null) { openEvent = id; openFrom = from }
     fun takeOpenEvent(): String? = openEvent.also { openEvent = null }
+    fun takeOpenFrom(): Origin? = openFrom.also { openFrom = null }
 
     /** A replay from the start, for Live TV to start when it opens. */
     data class Catchup(val channelKey: String, val program: com.nuvio.tv.livetv.model.EpgProgram)
@@ -152,6 +157,8 @@ private val LIST_WIDTH = 470.dp
 fun SportsScreen(
     /** Live TV is playing the picked channel: open it full screen. */
     onOpenLive: () -> Unit,
+    /** Back on a game opened from another page (the Calendar): that page's route. */
+    onReturnTo: (route: String) -> Unit = {},
     viewModel: SportsViewModel = hiltViewModel()
 ) {
     val events by viewModel.events.collectAsStateWithLifecycle()
@@ -171,7 +178,25 @@ fun SportsScreen(
     var day by rememberSaveable { mutableIntStateOf(0) }
     var chip by rememberSaveable { mutableStateOf<String?>(null) }
     var openId by rememberSaveable { mutableStateOf<String?>(null) }
+    // The page the open game came from (the Calendar): Back goes back there, not to the hub.
+    var fromRoute by rememberSaveable { mutableStateOf<String?>(null) }
+    var fromLabel by rememberSaveable { mutableStateOf<String?>(null) }
+    // Set when Back took you back there: next time Sports opens, it opens on the hub.
+    var leftForOrigin by rememberSaveable { mutableStateOf(false) }
     var picker by rememberSaveable { mutableStateOf(false) }
+    // A game asked for (Calendar, a reminder, a launcher card) opens straight away, before the
+    // first frame (the hub used to flash first and grab the highlight).
+    remember {
+        val asked = SportsLaunch.takeOpenEvent()
+        val from = SportsLaunch.takeOpenFrom()
+        if (asked != null) {
+            openId = asked; fromRoute = from?.route; fromLabel = from?.label; leftForOrigin = false
+        } else if (leftForOrigin) {
+            // Last time Back went from a game to where it was opened: this visit starts on the hub.
+            openId = null; fromRoute = null; fromLabel = null; leftForOrigin = false
+        }
+        true
+    }
     var fixFor by remember { mutableStateOf<SportsEvent?>(null) }
     // A league's whole table, opened from a game page (Back goes back to the game).
     var tableReq by remember { mutableStateOf<TableRequest?>(null) }
@@ -209,7 +234,6 @@ fun SportsScreen(
     LaunchedEffect(Unit) {
         // Back from watching a game: the highlight goes back on it.
         SportsLaunch.takeFocusEvent()?.let { if (openId == null) { returnTo = it; rowsReturning = true } }
-        SportsLaunch.takeOpenEvent()?.let { openId = it }
         if (SportsLaunch.takeOpenPicker() || viewModel.isFirstVisit()) picker = true
     }
 
@@ -295,7 +319,7 @@ fun SportsScreen(
         // The same soft glow in the theme colour as the top of the guide.
         ThemeGlow(Modifier.fillMaxWidth().height(SPORTS_GLOW_HEIGHT))
         val opened = openId?.let { id -> known.firstOrNull { it.id == id } }
-        if (openId != null && opened == null && known.isNotEmpty()) openId = null
+        if (openId != null && opened == null && known.isNotEmpty()) { openId = null; fromRoute = null; fromLabel = null }
         when {
             picker -> SportsPicker(viewModel = viewModel, onClose = { picker = false; returnTo = null; rowsReturning = false; viewModel.repo.markSetUp() })
             tableReq != null -> {
@@ -340,7 +364,18 @@ fun SportsScreen(
                 onTable = { tableReq = TableRequest(opened.leagueId, opened.sides.map { it.team.id }.toSet()) },
                 onOpenGame = { ev -> openId = ev.id },
                 onQuickWatch = ::quickWatch,
-                onClose = { returnTo = opened.id; rowsReturning = true; openId = null }
+                backLabel = fromLabel ?: "Sports",
+                onClose = {
+                    val back = fromRoute
+                    if (back != null) {
+                        // Opened from the Calendar (or another page): back there, where you were.
+                        // The game stays on screen while that page comes in; the hub is next time.
+                        leftForOrigin = true
+                        onReturnTo(back)
+                    } else {
+                        returnTo = opened.id; rowsReturning = true; openId = null
+                    }
+                }
             )
             else -> SportsHub(
                 events = events,
@@ -372,7 +407,8 @@ fun SportsScreen(
                 onReturned = { returnTo = null; rowsReturning = false },
                 videoSlot = videoSlot,
                 viewModel = viewModel,
-                onOpen = { ev -> openId = ev.id },
+                // Opened here: Back comes back here.
+                onOpen = { ev -> fromRoute = null; fromLabel = null; openId = ev.id },
                 onQuickWatch = ::quickWatch,
                 onPick = { picker = true }
             )
@@ -1108,6 +1144,8 @@ private fun GamePage(
     /** A game picked on a team's card. */
     onOpenGame: (SportsEvent) -> Unit,
     onQuickWatch: (SportsEvent) -> Unit,
+    /** Where Back goes, shown at the top ("‹  Calendar"). */
+    backLabel: String = "Sports",
     onClose: () -> Unit
 ) {
     BackHandler(onBack = onClose)
@@ -1156,7 +1194,7 @@ private fun GamePage(
 
     val top: @Composable () -> Unit = {
         Row(verticalAlignment = Alignment.CenterVertically, modifier = Modifier.padding(bottom = 8.dp)) {
-            LiveText("‹  Sports", color = SportsLook.Dim, size = 12.sp, weight = FontWeight.Bold)
+            LiveText("‹  $backLabel", color = SportsLook.Dim, size = 12.sp, weight = FontWeight.Bold)
             Spacer(Modifier.width(10.dp))
             LiveText(listOfNotNull(league?.name, ev.subtitle?.takeIf { sides.size == 2 }).joinToString(" · "), color = SportsLook.Dim, size = 12.sp)
         }

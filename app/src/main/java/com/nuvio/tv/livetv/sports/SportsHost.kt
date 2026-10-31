@@ -179,7 +179,15 @@ fun SportsHost(navController: NavController) {
                 due = null
                 armed = null
                 repo.dropReminder(ev.id)
-                SportsLaunch.openEvent(ev.id)
+                // Back on the game: the page you were on when the reminder came up.
+                val from = when (navController.currentDestination?.route) {
+                    Screen.Calendar.route -> SportsLaunch.Origin(Screen.Calendar.route, "Calendar")
+                    Screen.Home.route -> SportsLaunch.Origin(Screen.Home.route, "Home")
+                    Screen.LiveTv.route -> SportsLaunch.Origin(Screen.LiveTv.route, "Live TV")
+                    Screen.OnDemand.route -> SportsLaunch.Origin(Screen.OnDemand.route, "On Demand")
+                    else -> null
+                }
+                SportsLaunch.openEvent(ev.id, from)
                 navController.navigate(Screen.Sports.route) {
                     popUpTo(navController.graph.startDestinationId) { saveState = true }
                     launchSingleTop = true
