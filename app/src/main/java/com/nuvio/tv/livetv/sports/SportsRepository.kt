@@ -195,8 +195,17 @@ class SportsRepository @Inject constructor(
     private fun dedupeKey(ev: SportsEvent): String = ev.espnId?.let { "e:$it" } ?: ev.id
 
     private val _matches = MutableStateFlow<Map<String, List<ChannelMatch>>>(emptyMap())
-    /** Event id -> the channels showing it, best first. */
-    val matches: StateFlow<Map<String, List<ChannelMatch>>> = _matches.asStateFlow()
+    /**
+     * Event id -> the channels showing it, best first, with your "Channels from" region's
+     * channels moved up. That's done here, on what's already matched, so changing the region
+     * never searches the guide again (with no region chosen this is the list as it was).
+     */
+    val matches: StateFlow<Map<String, List<ChannelMatch>>> = combine(
+        _matches,
+        settings.map { it.channelRegion }.distinctUntilChanged()
+    ) { m, region ->
+        if (region.isBlank()) m else m.mapValues { (_, list) -> ChannelRegions.regionFirst(list, region) }
+    }.stateIn(scope, SharingStarted.Eagerly, emptyMap())
 
     private val _loading = MutableStateFlow(false)
     val loading: StateFlow<Boolean> = _loading.asStateFlow()
@@ -1380,7 +1389,8 @@ class SportsRepository @Inject constructor(
     fun clearFixes() = updateSettings { it.copy(networkChannels = emptyMap(), eventChannels = emptyMap(), blocked = emptySet(), teamChannels = emptyMap(), leagueChannels = emptyMap()) }
 
     /** The channel to tune for a reminder or "watch now": the best match, if any. */
-    fun bestChannel(eventId: String): ChannelMatch? = _matches.value[eventId]?.firstOrNull()
+    fun bestChannel(eventId: String): ChannelMatch? =
+        _matches.value[eventId]?.let { ChannelRegions.regionFirst(it, settings.value.channelRegion) }?.firstOrNull()
 
     fun channelsForPicker(): List<LiveChannel> = channelStore.displayChannels.value
 

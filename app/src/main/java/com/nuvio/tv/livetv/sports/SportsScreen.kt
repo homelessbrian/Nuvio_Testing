@@ -1201,8 +1201,38 @@ private fun GamePage(
         ScoreboardStrip(ev, settings.hideScores, now, use24h, height = if (sides.size == 2) 124.dp else 100.dp, big = true, onTeam = { cardTeam = it.team },
             preGame = preGame, extras = extras.takeIf { !settings.hideScores })
     }
+    // "Channels from": the chosen region's channels only, the rest a click away. Worked out from
+    // this game's own dozen matches (no new guide search), so it's instant.
+    val regionChoice = settings.channelRegion
+    val regionCodes = remember(matches) { matches.map { SportsMatcher.channelRegionCode(it.channel) } }
+    var pickRegion by remember(ev.id) { mutableStateOf(false) }
+    var otherRegions by remember(ev.id, regionChoice) { mutableStateOf(false) }
+    val inRegion = if (regionChoice.isBlank()) matches else matches.filterIndexed { i, m ->
+        m.score >= 150 || (videoOn && playingKey == m.channel.key) || ChannelRegions.includes(regionCodes[i], regionChoice)
+    }
+    // None of them from that region: show them all (with a line saying so) rather than nothing.
+    val noneInRegion = regionChoice.isNotBlank() && matches.isNotEmpty() && inRegion.isEmpty()
+    val elsewhere = matches.size - inRegion.size
+    val shown = if (regionChoice.isBlank() || otherRegions || noneInRegion) matches else inRegion
+    // Only worth a button when this game's channels come from more than one place (or a region is set).
+    val regionButton = matches.isNotEmpty() && (regionChoice.isNotBlank() || regionCodes.toSet().size > 1)
+    if (pickRegion) {
+        RegionDialog(
+            codes = regionCodes,
+            current = regionChoice,
+            onPick = { code -> pickRegion = false; viewModel.repo.updateSettings { it.copy(channelRegion = code) } },
+            onDismiss = { pickRegion = false }
+        )
+    }
     val channels: @Composable () -> Unit = {
-        SectionHeader("WATCH ON YOUR CHANNELS")
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            SectionHeader("WATCH ON YOUR CHANNELS", modifier = Modifier.weight(1f))
+            if (regionButton) RegionButton(regionChoice, Modifier.padding(top = 6.dp, end = 6.dp)) { pickRegion = true }
+        }
+        if (noneInRegion) LiveText(
+            "None of your ${ChannelRegions.shortName(regionChoice)} channels list this game, so here are all of them.",
+            color = SportsLook.Dim, size = 11.sp, modifier = Modifier.padding(start = 6.dp, bottom = 4.dp)
+        )
         when {
             matches.isNotEmpty() -> LazyColumn(
                 // Two channels showing (the rest scroll), so the panels underneath stay on screen.
@@ -1210,7 +1240,7 @@ private fun GamePage(
                 verticalArrangement = Arrangement.spacedBy(7.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
             ) {
-                itemsIndexed(matches, key = { _, m -> m.channel.key }) { i, m ->
+                itemsIndexed(shown, key = { _, m -> m.channel.key }) { i, m ->
                     SportsChannelRow(
                         m = m,
                         finished = ev.state == GameState.POST,
@@ -1220,6 +1250,13 @@ private fun GamePage(
                         use24h = use24h,
                         modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
                         onClick = { onChoose(m) }
+                    )
+                }
+                if (regionChoice.isNotBlank() && !noneInRegion && elsewhere > 0) item(key = "other-regions") {
+                    SportsAction(
+                        if (otherRegions) "Only ${ChannelRegions.shortName(regionChoice)} channels"
+                        else "+ $elsewhere from other regions",
+                        onClick = { otherRegions = !otherRegions }
                     )
                 }
             }

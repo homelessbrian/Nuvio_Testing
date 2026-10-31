@@ -35,6 +35,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import com.nuvio.tv.livetv.record.LiveTvNotice
+import com.nuvio.tv.livetv.sports.ChannelRegions
 import com.nuvio.tv.livetv.sports.League
 import com.nuvio.tv.livetv.sports.SportsCatalog
 import com.nuvio.tv.livetv.sports.SportsSettings
@@ -188,6 +189,14 @@ fun SportsSettingsContent(
                         onClick = { viewModel.repo.refreshNow(); LiveTvNotice.show("Updating Sports…") }
                     )
                     SettingsActionRow(
+                        title = "Channels From",
+                        subtitle = "Each game lists only this region's (or language's) channels, with the others one click away. " +
+                            "Also on each game's page",
+                        value = ChannelRegions.shortName(s.channelRegion),
+                        leadingIcon = Icons.Default.Public,
+                        onClick = { dialog = "channelRegion" }
+                    )
+                    SettingsActionRow(
                         title = "Preferred Channel Groups",
                         subtitle = "Channels in these groups go to the top of every game's list (your UK sports channels, say). " +
                             "Without any, channels from your region come first",
@@ -226,6 +235,13 @@ fun SportsSettingsContent(
                 SportsCatalog.regions.map { SettingsPickerOption(it.first, it.second) },
             selectedValue = s.region,
             onOptionSelected = { v -> update { it.copy(region = v) }; close() },
+            onDismiss = close
+        )
+        "channelRegion" -> SettingsSingleChoiceDialog(
+            title = "Channels from",
+            options = ChannelRegions.all.map { SettingsPickerOption(it.first, it.second) },
+            selectedValue = s.channelRegion,
+            onOptionSelected = { v -> update { it.copy(channelRegion = v) }; close() },
             onDismiss = close
         )
         "remind" -> SettingsSingleChoiceDialog(

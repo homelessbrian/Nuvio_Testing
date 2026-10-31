@@ -1,0 +1,14 @@
+Nuvio + IPTV kit 2026-10-31 14:45 — Sports: "Channels from" (region / language filter for a game's channels)
+
+New
+- app/src/main/java/com/nuvio/tv/livetv/sports/SportsChannelRegion.kt — region/language rules, the "🌐 UK ▾" button and its pop-up
+
+Changed
+- livetv/sports/SportsMatcher.kt — reads a channel's region/language from its name or group; keeps up to 12 channels per game (was 8)
+- livetv/sports/SportsModels.kt — new saved setting channelRegion
+- livetv/sports/SportsRepository.kt — puts the chosen region's channels first for every game (no new guide search)
+- livetv/sports/SportsScreen.kt — game page: region button, filtered list, "+ N from other regions"
+- ui/screens/settings/SportsSettingsContent.kt — Sports settings > Channels > Channels From
+- livetv/model/LiveTvModels.kt — KIT_STAMP 2026-10-31 14:45
+
+No files to delete.

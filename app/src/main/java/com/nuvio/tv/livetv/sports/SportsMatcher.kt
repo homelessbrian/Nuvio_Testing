@@ -349,7 +349,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                     )
                 }
             if (list.isEmpty()) continue
-            out[eventId] = sortMatches(list, input.settings.bestChannelFirst, rank).take(8)
+            // A dozen, not just the top few: the game page's "Channels from" choice picks among
+            // these without searching the guide again.
+            out[eventId] = sortMatches(list, input.settings.bestChannelFirst, rank).take(12)
         }
         // Events that run for days (golf, race weekends): what was looked for and found, for the report.
         val multi = teamEvents.filter { it.id in noStart }.joinToString(" | ") { ev ->
@@ -772,7 +774,7 @@ internal class SportsMatcher(private val db: EpgDatabase) {
         }
 
         /** Your own region's words, as channel names and groups use them ("UK: TNT Sports 1", group "UK | Sports"). */
-        private val REGION_WORDS = mapOf(
+        internal val REGION_WORDS = mapOf(
             "UK" to listOf("uk", "gb", "united kingdom", "britain", "england", "scotland"),
             "IE" to listOf("ie", "ireland", "irish", "irl", "eir"),
             "US" to listOf("us", "usa", "united states"),
@@ -807,6 +809,22 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             val group = norm(ch.group.substringBefore('|').substringBefore(':'))
             return LANGUAGE_WORDS.entries.firstOrNull { (_, w) ->
                 w.any { hasWord(prefix, it) || hasWord(tags, it) || (it.length > 3 && hasWord(group, it)) }
+            }?.key
+        }
+
+        /**
+         * Where a channel says it's from: a language other than English ("lang:es", from its
+         * name or group: "ES: ESPN", "USA | Latino"), else a region ("UK", "US", "IE", "CA", "AU",
+         * from its group, the start of its name, or a tag like "[UK]"). Null when it doesn't say.
+         */
+        fun channelRegionCode(ch: LiveChannel): String? {
+            channelLanguage(ch)?.let { return "lang:$it" }
+            val prefix = if (ch.name.contains(':') || ch.name.contains('|'))
+                norm(ch.name.substringBefore(':').substringBefore('|').take(16)) else " "
+            val tags = norm(LANGUAGE_TAG.findAll(ch.name).joinToString(" ") { it.groupValues[1] })
+            val group = norm(ch.group)
+            return REGION_WORDS.entries.firstOrNull { (_, w) ->
+                w.any { hasWord(prefix, it) || hasWord(tags, it) || hasWord(group, it) }
             }?.key
         }
 
