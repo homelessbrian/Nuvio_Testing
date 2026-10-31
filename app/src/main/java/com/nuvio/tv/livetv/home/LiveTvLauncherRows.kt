@@ -148,7 +148,6 @@ object LiveTvLauncherRows {
         val sports = sportsEntry.sportsRepository()
         val known = sports.known.value
         val matches = sports.matches.value
-        val hideScores = sports.settings.value.hideScores
         val liveGames = known.filter { it.state == GameState.LIVE && matches[it.id]?.isNotEmpty() == true }
         val gameOnChannel = HashMap<String, SportsEvent>()
         liveGames.forEach { ev -> matches[ev.id].orEmpty().filter { it.sure }.forEach { m -> gameOnChannel.putIfAbsent(m.channel.key, ev) } }
@@ -159,24 +158,21 @@ object LiveTvLauncherRows {
             color = side.team.color?.let { (it or 0xFF000000L).toInt() },
             logo = side.team.logo
         )
-        fun statusLine(ev: SportsEvent): String? {
-            val league = SportsCatalog.league(ev.leagueId)?.name
-            return listOfNotNull(ev.status?.takeIf { it.isNotBlank() }, league).joinToString("  ·  ").ifBlank { null }
-        }
+        // No score, clock or lap: launchers refresh too rarely for those to stay right. Only what
+        // stays true for the whole game: the league and when it started.
+        fun started(ev: SportsEvent): String? =
+            if (ev.hasTime && ev.startMs <= now) "Started " + timeFmt.format(java.util.Date(ev.startMs)) else null
+        fun statusLine(ev: SportsEvent): String? =
+            listOfNotNull(SportsCatalog.league(ev.leagueId)?.name, started(ev)).joinToString("  ·  ").ifBlank { null }
         fun gameSpec(ev: SportsEvent, channelLogo: String?, channelName: String?): CardSpec {
             val away = ev.away
             val home = ev.home
             if (away == null || home == null) {
                 // A race, a tournament: the event's name on the channel's card.
                 return CardSpec.Show(channelLogo, channelName ?: ev.title, ev.title,
-                    listOfNotNull(ev.status, SportsCatalog.league(ev.leagueId)?.name), null, listOf(Tags.LIVE))
+                    listOfNotNull(SportsCatalog.league(ev.leagueId)?.name), started(ev), listOf(Tags.LIVE))
             }
-            val score = if (hideScores) null else {
-                val a = away.score
-                val h = home.score
-                if (!a.isNullOrBlank() && !h.isNullOrBlank()) a to h else null
-            }
-            return CardSpec.Game(channelLogo, channelName, team(away), team(home), score, statusLine(ev), listOf(Tags.LIVE))
+            return CardSpec.Game(channelName, team(away), team(home), statusLine(ev), listOf(Tags.LIVE))
         }
 
         fun channelItem(src: Src): Item {
@@ -221,7 +217,7 @@ object LiveTvLauncherRows {
                         store.edit().putLong("sports_at", now).apply()
                         liveGames.take(MAX_ITEMS).map { ev ->
                             val best = matches[ev.id]?.firstOrNull()?.channel
-                            Item(ev.title, listOfNotNull(best?.name, ev.status).joinToString("  ·  ").ifBlank { null },
+                            Item(ev.title, listOfNotNull(best?.name, SportsCatalog.league(ev.leagueId)?.name).joinToString("  ·  ").ifBlank { null },
                                 gameSpec(ev, best?.logo, best?.name), "nuvio://livetv/game/" + Uri.encode(ev.id), "g:" + ev.id)
                         }
                     }
@@ -240,7 +236,7 @@ object LiveTvLauncherRows {
         }
 
         // Next update: when a show in the rows changes (or in an hour), every few minutes while
-        // games are on (scores and clocks), never more than every two minutes.
+        // games are on (games starting and finishing), never more than every two minutes.
         var next = minOf(now + 60 * 60_000L, if (nextChange == Long.MAX_VALUE) Long.MAX_VALUE else nextChange + 20_000L)
         if (sportsLive) next = minOf(next, now + 5 * 60_000L)
         schedule(context, next.coerceAtLeast(now + 2 * 60_000L))

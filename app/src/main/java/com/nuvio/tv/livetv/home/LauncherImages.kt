@@ -19,7 +19,7 @@ import java.security.MessageDigest
  * http address, a server that turns them away, a format they don't read), which left blank "!"
  * tiles. So the cards are drawn here (see [LauncherCards]) and handed to the launcher from the
  * app's own storage. Logos are fetched once and kept, so redrawing a card (a new show, a new
- * score) never downloads them again.
+ * game) never downloads them again. Cards are PNG: sharp text, no blotches in the dark shading.
  */
 object LauncherImages {
     private const val DIR = "launcher_img"
@@ -41,11 +41,11 @@ object LauncherImages {
      * show the new one.
      */
     internal fun cardUri(context: Context, spec: CardSpec, shape: CardShape): Uri? = runCatching {
-        val file = File(dir(context), sha(LauncherCards.VERSION + "|" + shape.name + "|" + spec.signature()) + ".jpg")
+        val file = File(dir(context), sha(LauncherCards.VERSION + "|" + shape.name + "|" + spec.signature()) + ".png")
         if (!file.exists() || file.length() == 0L) {
             val bmp = LauncherCards.draw(spec, shape) { url -> logo(context, url) }
             val tmp = File(file.parentFile, file.name + ".tmp")
-            tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 90, it) }
+            tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.PNG, 100, it) }
             bmp.recycle()
             if (!tmp.renameTo(file)) { tmp.copyTo(file, overwrite = true); tmp.delete() }
         } else {

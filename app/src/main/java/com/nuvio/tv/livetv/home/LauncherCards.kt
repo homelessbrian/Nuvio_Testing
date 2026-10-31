@@ -5,9 +5,9 @@ import android.graphics.Canvas
 import android.graphics.Color
 import android.graphics.LinearGradient
 import android.graphics.Paint
-import android.graphics.Path
 import android.graphics.PorterDuff
 import android.graphics.PorterDuffXfermode
+import android.graphics.RadialGradient
 import android.graphics.RectF
 import android.graphics.Shader
 import android.graphics.Typeface
@@ -68,19 +68,20 @@ internal sealed class CardSpec {
         override fun signature() = listOf("ch", logo, channelName, tags.joinToString()).joinToString("\u0001")
     }
 
-    /** A game: both teams, the score and the clock, with the channel showing it. */
+    /**
+     * A game: both teams and the channel showing it. No score or clock: launchers refresh their
+     * rows too rarely for those to stay right, so the card only says what stays true all game.
+     */
     class Game(
-        val channelLogo: String?,
         val channelName: String?,
         val away: Team,
         val home: Team,
-        /** Null: scores hidden (or not started). */
-        val score: Pair<String, String>?,
+        /** "NFL · Started 1:00 PM". */
         val status: String?,
         override val tags: List<CardTag>
     ) : CardSpec() {
         override fun signature() = listOf(
-            "game", channelLogo, channelName, away.sig(), home.sig(), score?.toList()?.joinToString("-"), status, tags.joinToString()
+            "game", channelName, away.sig(), home.sig(), status, tags.joinToString()
         ).joinToString("\u0001")
     }
 
@@ -91,17 +92,22 @@ internal sealed class CardSpec {
 
 /**
  * Draws the launcher row cards. Everything that matters is in the picture itself (the show, the
- * time, the logo, the teams and score), so every launcher shows the same thing whatever text it
- * does or doesn't show. No rounded corners or borders: launchers add their own.
+ * time, the logo, the teams), so every launcher shows the same thing whatever text it does or
+ * doesn't show. No rounded corners or borders: launchers add their own, and some zoom or crop the
+ * card too, so everything is centred and kept inside a safe margin (10% each side) where no
+ * launcher's corners reach. Backgrounds are plain colour, drawn sharp at any size.
  */
 internal object LauncherCards {
     /** Goes up when the look changes, so every card is drawn again. */
-    const val VERSION = "c1"
+    const val VERSION = "c2"
 
     private val BOLD: Typeface = Typeface.create("sans-serif", Typeface.BOLD)
     private val MEDIUM: Typeface = Typeface.create("sans-serif-medium", Typeface.NORMAL)
     private val REGULAR: Typeface = Typeface.create("sans-serif", Typeface.NORMAL)
-    private const val BASE = 0xFF10131A.toInt()
+    private const val BASE = 0xFF0B0E14.toInt()
+
+    /** A logo is never drawn more than this many times its own size (beyond that it goes soft). */
+    private const val MAX_UPSCALE = 2f
 
     fun draw(spec: CardSpec, shape: CardShape, load: (String?) -> Bitmap?): Bitmap {
         val bmp = Bitmap.createBitmap(shape.w, shape.h, Bitmap.Config.ARGB_8888)
@@ -109,146 +115,187 @@ internal object LauncherCards {
         when (spec) {
             is CardSpec.Show -> drawShow(c, shape, spec, LogoArt.of(load(spec.logo)))
             is CardSpec.Channel -> drawChannel(c, shape, spec, LogoArt.of(load(spec.logo)))
-            is CardSpec.Game -> drawGame(c, shape, spec, LogoArt.of(load(spec.channelLogo)), load(spec.away.logo), load(spec.home.logo))
+            is CardSpec.Game -> drawGame(c, shape, spec, load(spec.away.logo), load(spec.home.logo))
         }
         return bmp
     }
 
-    // ------------------------------------------------------------------ shows
-
-    private fun drawShow(c: Canvas, shape: CardShape, s: CardSpec.Show, logo: LogoArt?) {
+    /** The card's size, its scale ([u]: one unit of a 225-pixel-high card) and its safe area. */
+    private class Frame(shape: CardShape, padY: Float) {
         val w = shape.w.toFloat()
         val h = shape.h.toFloat()
-        backdrop(c, w, h, logo, s.channelName)
-        val pad = when (shape) { CardShape.WIDE -> 46f; CardShape.TALL -> 40f; CardShape.SQUARE -> 42f }
-        val textW = (w - pad * 2).toInt()
-        val titleSize = when (shape) { CardShape.WIDE -> 68f; CardShape.TALL -> 60f; CardShape.SQUARE -> 64f }
-        val titleLines = if (shape == CardShape.TALL) 3 else 2
-        val detailSize = when (shape) { CardShape.WIDE -> 37f; CardShape.TALL -> 32f; CardShape.SQUARE -> 35f }
-        val timeSize = when (shape) { CardShape.WIDE -> 35f; CardShape.TALL -> 30f; CardShape.SQUARE -> 33f }
-
-        // The logo: top left (top centre on tall cards). Tags: top right (under the logo on tall).
-        val tile = if (shape == CardShape.TALL) {
-            logoTile(c, logo, s.channelName, centerX = w / 2f, left = null, top = pad, maxW = w * 0.72f, h = 150f)
-        } else {
-            logoTile(c, logo, s.channelName, centerX = null, left = pad, top = pad, maxW = w * 0.34f, h = if (shape == CardShape.WIDE) 120f else 118f)
-        }
-        if (shape == CardShape.TALL) drawTags(c, s.tags, left = pad, right = null, top = tile.bottom + 26f, h = 48f)
-        else drawTags(c, s.tags, left = null, right = w - pad, top = pad, h = 48f)
-
-        // From the bottom up: time, detail, title.
-        var y = h - pad
-        val timePaint = textPaint(timeSize, 0xFFB3BCCB.toInt(), REGULAR)
-        if (!s.time.isNullOrBlank()) {
-            val t = TextUtils.ellipsize(s.time, timePaint, textW.toFloat(), TextUtils.TruncateAt.END).toString()
-            c.drawText(t, pad, y - timePaint.descent(), timePaint)
-            y -= timePaint.fontSpacing + 4f
-        }
-        val detailPaint = textPaint(detailSize, 0xFFD3DAE5.toInt(), MEDIUM)
-        val detail = fitParts(s.detail, detailPaint, textW.toFloat())
-        if (detail != null) {
-            c.drawText(detail, pad, y - detailPaint.descent(), detailPaint)
-            y -= detailPaint.fontSpacing + 6f
-        }
-        val title = fitTitle(s.title, titleSize, textW, titleLines)
-        c.save()
-        c.translate(pad, y - title.height)
-        title.draw(c)
-        c.restore()
+        val u = minOf(w, h) / 225f
+        val left = w * 0.10f
+        val right = w - left
+        val top = h * padY
+        val bottom = h - top
+        val cx = w / 2f
+        val width = right - left
+        val tall = shape == CardShape.TALL
     }
 
-    /** A channel with no listings: its logo big in the middle, its name underneath. */
+    // ------------------------------------------------------------------ shows
+
+    /** Logo at the top, the show in the middle, tags and "until" at the bottom: all centred. */
+    private fun drawShow(c: Canvas, shape: CardShape, s: CardSpec.Show, logo: LogoArt?) {
+        val f = Frame(shape, 0.11f)
+        val u = f.u
+        backdrop(c, f.w, f.h, logo?.tint ?: hueColor(s.channelName))
+
+        val mark = planLogo(logo, s.channelName, maxW = f.width * (if (f.tall) 0.8f else 0.5f), h = 34f * u)
+        mark.draw(c, f.cx - mark.w / 2f, f.top)
+        val markBottom = f.top + mark.h
+
+        // The bottom: tags and the time, side by side (one above the other on tall cards).
+        val tagH = 18f * u
+        val timePaint = textPaint(11.5f * u, 0xFFB8C2D0.toInt(), REGULAR)
+        val time = s.time?.takeIf { it.isNotBlank() }
+        var bottomTop = f.bottom
+        if (f.tall) {
+            var y = f.bottom
+            if (time != null) {
+                timePaint.textAlign = Paint.Align.CENTER
+                c.drawText(TextUtils.ellipsize(time, timePaint, f.width, TextUtils.TruncateAt.END).toString(), f.cx, y - timePaint.descent(), timePaint)
+                y -= timePaint.fontSpacing + 6f * u
+            }
+            if (s.tags.isNotEmpty()) {
+                drawTags(c, s.tags, f.cx - tagsWidth(s.tags, tagH) / 2f, y - tagH, tagH)
+                y -= tagH + 6f * u
+            }
+            bottomTop = y
+        } else if (time != null || s.tags.isNotEmpty()) {
+            val gap = if (time != null && s.tags.isNotEmpty()) 8f * u else 0f
+            val tw = tagsWidth(s.tags, tagH)
+            val shown = time?.let { TextUtils.ellipsize(it, timePaint, f.width - tw - gap, TextUtils.TruncateAt.END).toString() }
+            val total = tw + gap + (shown?.let { timePaint.measureText(it) } ?: 0f)
+            val x = f.cx - total / 2f
+            val top = f.bottom - tagH
+            drawTags(c, s.tags, x, top, tagH)
+            shown?.let { c.drawText(it, x + tw + gap, top + tagH / 2f - (timePaint.descent() + timePaint.ascent()) / 2f, timePaint) }
+            bottomTop = top
+        }
+
+        // The middle: title and detail, centred between the logo and the bottom.
+        val title = fitTitle(s.title, 19f * u, f.width.toInt(), if (f.tall) 3 else 2)
+        val detailPaint = textPaint(12f * u, 0xFFD3DAE5.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
+        val detail = fitParts(s.detail, detailPaint, f.width)
+        val gap = 4f * u
+        val block = title.height + (if (detail != null) gap + detailPaint.fontSpacing else 0f)
+        val top = markBottom + ((bottomTop - markBottom) - block) / 2f
+        c.save()
+        c.translate(f.left, top)
+        title.draw(c)
+        c.restore()
+        detail?.let { c.drawText(it, f.cx, top + title.height + gap - detailPaint.ascent(), detailPaint) }
+    }
+
+    /** A channel with no listings: its logo big in the middle, its name underneath, tags below. */
     private fun drawChannel(c: Canvas, shape: CardShape, s: CardSpec.Channel, logo: LogoArt?) {
-        val w = shape.w.toFloat()
-        val h = shape.h.toFloat()
-        backdrop(c, w, h, logo, s.channelName)
-        val tileH = when (shape) { CardShape.WIDE -> 190f; CardShape.TALL -> 200f; CardShape.SQUARE -> 200f }
-        val tile = logoTile(c, logo, s.channelName, centerX = w / 2f, left = null, top = h * 0.42f - tileH / 2f, maxW = w * 0.62f, h = tileH)
-        val p = textPaint(if (shape == CardShape.WIDE) 34f else 32f, 0xFFD3DAE5.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
-        val name = TextUtils.ellipsize(s.channelName, p, w * 0.86f, TextUtils.TruncateAt.END).toString()
-        c.drawText(name, w / 2f, tile.bottom + 40f + p.textSize, p)
-        drawTags(c, s.tags, left = null, right = w - 40f, top = 40f, h = 44f)
+        val f = Frame(shape, 0.12f)
+        val u = f.u
+        backdrop(c, f.w, f.h, logo?.tint ?: hueColor(s.channelName))
+        val tagH = 18f * u
+        val limit = if (s.tags.isNotEmpty()) f.bottom - tagH - 8f * u else f.bottom
+        val mark = planLogo(logo, s.channelName, maxW = f.width * 0.8f, h = 60f * u)
+        val namePaint = textPaint(13f * u, 0xFFC3CCD8.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
+        val gap = 12f * u
+        val block = mark.h + gap + namePaint.fontSpacing
+        val top = f.top + ((limit - f.top) - block) / 2f
+        mark.draw(c, f.cx - mark.w / 2f, top)
+        val name = TextUtils.ellipsize(s.channelName, namePaint, f.width, TextUtils.TruncateAt.END).toString()
+        c.drawText(name, f.cx, top + mark.h + gap - namePaint.ascent(), namePaint)
+        if (s.tags.isNotEmpty()) drawTags(c, s.tags, f.cx - tagsWidth(s.tags, tagH) / 2f, f.bottom - tagH, tagH)
     }
 
     // ------------------------------------------------------------------ games
 
-    private fun drawGame(c: Canvas, shape: CardShape, s: CardSpec.Game, channel: LogoArt?, awayLogo: Bitmap?, homeLogo: Bitmap?) {
-        val w = shape.w.toFloat()
-        val h = shape.h.toFloat()
+    /** The two teams' colours side by side, LIVE and the channel on top, the badges with "vs". */
+    private fun drawGame(c: Canvas, shape: CardShape, s: CardSpec.Game, awayLogo: Bitmap?, homeLogo: Bitmap?) {
+        val f = Frame(shape, 0.10f)
+        val u = f.u
+        val w = f.w
+        val h = f.h
         val a = teamColor(s.away)
         val b = teamColor(s.home)
-        // The two teams' colours, split on a slant (darkened so white reads on any of them).
         c.drawColor(BASE)
-        val left = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(0f, 0f, w * 0.55f, h, darken(a, 0.30f), darken(a, 0.62f), Shader.TileMode.CLAMP) }
-        val right = Paint(Paint.ANTI_ALIAS_FLAG).apply { shader = LinearGradient(w, 0f, w * 0.45f, h, darken(b, 0.30f), darken(b, 0.62f), Shader.TileMode.CLAMP) }
-        if (shape == CardShape.TALL) {
-            val top = Path().apply { moveTo(0f, 0f); lineTo(w, 0f); lineTo(w, h * 0.46f); lineTo(0f, h * 0.54f); close() }
-            val bottom = Path().apply { moveTo(0f, h * 0.54f); lineTo(w, h * 0.46f); lineTo(w, h); lineTo(0f, h); close() }
-            c.drawPath(top, left)
-            c.drawPath(bottom, right)
+        if (f.tall) {
+            c.drawRect(0f, 0f, w, h / 2f, Paint().apply { isDither = true; shader = LinearGradient(0f, 0f, 0f, h / 2f, blend(a, 0.45f), blend(a, 0.60f), Shader.TileMode.CLAMP) })
+            c.drawRect(0f, h / 2f, w, h, Paint().apply { isDither = true; shader = LinearGradient(0f, h, 0f, h / 2f, blend(b, 0.45f), blend(b, 0.60f), Shader.TileMode.CLAMP) })
         } else {
-            val l = Path().apply { moveTo(0f, 0f); lineTo(w * 0.56f, 0f); lineTo(w * 0.44f, h); lineTo(0f, h); close() }
-            val r = Path().apply { moveTo(w * 0.56f, 0f); lineTo(w, 0f); lineTo(w, h); lineTo(w * 0.44f, h); close() }
-            c.drawPath(l, left)
-            c.drawPath(r, right)
+            c.drawRect(0f, 0f, w / 2f, h, Paint().apply { isDither = true; shader = LinearGradient(0f, 0f, w / 2f, 0f, blend(a, 0.45f), blend(a, 0.60f), Shader.TileMode.CLAMP) })
+            c.drawRect(w / 2f, 0f, w, h, Paint().apply { isDither = true; shader = LinearGradient(w, 0f, w / 2f, 0f, blend(b, 0.45f), blend(b, 0.60f), Shader.TileMode.CLAMP) })
         }
-        bottomShade(c, w, h, 0.55f)
+        // A soft shade in the middle, so the badges and text stand out.
+        c.drawRect(0f, 0f, w, h, Paint().apply {
+            isDither = true
+            shader = RadialGradient(w / 2f, h / 2f, maxOf(w, h) * 0.45f, 0x8C080A0E.toInt(), 0x00080A0E, Shader.TileMode.CLAMP)
+        })
 
-        val pad = 40f
-        val score = s.score?.let { "${it.first} – ${it.second}" }
-        val statusPaint = textPaint(if (shape == CardShape.WIDE) 35f else 32f, 0xFFE8EDF5.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
-        val status = s.status?.let { TextUtils.ellipsize(it, statusPaint, w - pad * 2, TextUtils.TruncateAt.END).toString() }
-        when (shape) {
-            CardShape.WIDE -> {
-                if (channel != null || s.channelName != null) logoTile(c, channel, s.channelName ?: "", centerX = null, left = pad, top = 34f, maxW = w * 0.28f, h = 88f)
-                drawTags(c, s.tags, left = null, right = w - pad, top = 38f, h = 44f)
-                val cy = h * 0.50f
-                val r = 92f
-                badge(c, s.away, awayLogo, a, w / 2f - 262f, cy, r)
-                badge(c, s.home, homeLogo, b, w / 2f + 262f, cy, r)
-                centreText(c, score ?: "vs", w / 2f, cy, if (score != null) 112f else 72f, BOLD)
-                val names = textPaint(32f, 0xFFDCE2EC.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
-                c.drawText(TextUtils.ellipsize(s.away.name, names, 270f, TextUtils.TruncateAt.END).toString(), w / 2f - 262f, cy + r + 44f, names)
-                c.drawText(TextUtils.ellipsize(s.home.name, names, 270f, TextUtils.TruncateAt.END).toString(), w / 2f + 262f, cy + r + 44f, names)
-                status?.let { c.drawText(it, w / 2f, h - 34f - statusPaint.descent(), statusPaint) }
+        // Top: LIVE and the channel.
+        val tagH = 18f * u
+        val chPaint = textPaint(11.5f * u, 0xFFE8EDF5.toInt(), MEDIUM)
+        val tw = tagsWidth(s.tags, tagH)
+        val chGap = if (s.tags.isNotEmpty() && !s.channelName.isNullOrBlank()) 7f * u else 0f
+        val ch = s.channelName?.takeIf { it.isNotBlank() }?.let { TextUtils.ellipsize(it, chPaint, f.width - tw - chGap, TextUtils.TruncateAt.END).toString() }
+        val topW = tw + chGap + (ch?.let { chPaint.measureText(it) } ?: 0f)
+        val topX = f.cx - topW / 2f
+        drawTags(c, s.tags, topX, f.top, tagH)
+        ch?.let { c.drawText(it, topX + tw + chGap, f.top + tagH / 2f - (chPaint.descent() + chPaint.ascent()) / 2f, chPaint) }
+        val regionTop = f.top + tagH + 8f * u
+
+        // Bottom: the league and when it started.
+        val statusPaint = textPaint(11.5f * u, 0xFFD7DEE8.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
+        var regionBottom = f.bottom
+        s.status?.takeIf { it.isNotBlank() }?.let {
+            c.drawText(TextUtils.ellipsize(it, statusPaint, f.width, TextUtils.TruncateAt.END).toString(), f.cx, f.bottom - statusPaint.descent(), statusPaint)
+            regionBottom = f.bottom - statusPaint.fontSpacing - 8f * u
+        }
+
+        val namePaint = textPaint(11.5f * u, 0xFFE3E8F0.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
+        val vsPaint = textPaint(20f * u, 0xFFE8EDF5.toInt(), MEDIUM).apply { textAlign = Paint.Align.CENTER }
+        if (f.tall) {
+            val r = 26f * u
+            val side = 2 * r + 5f * u + namePaint.fontSpacing
+            val vsH = vsPaint.fontSpacing + 20f * u
+            var y = regionTop + ((regionBottom - regionTop) - (side * 2 + vsH)) / 2f
+            fun team(t: CardSpec.Team, logo: Bitmap?, color: Int) {
+                badge(c, t, logo, color, f.cx, y + r, r)
+                c.drawText(TextUtils.ellipsize(t.name, namePaint, f.width, TextUtils.TruncateAt.END).toString(), f.cx, y + 2 * r + 5f * u - namePaint.ascent(), namePaint)
+                y += side
             }
-            CardShape.TALL -> {
-                if (channel != null || s.channelName != null) logoTile(c, channel, s.channelName ?: "", centerX = w / 2f, left = null, top = 34f, maxW = w * 0.6f, h = 96f)
-                drawTags(c, s.tags, left = 34f, right = null, top = 150f, h = 42f)
-                val r = 96f
-                badge(c, s.away, awayLogo, a, w / 2f, h * 0.36f, r)
-                centreText(c, score ?: "vs", w / 2f, h * 0.535f, if (score != null) 96f else 64f, BOLD)
-                badge(c, s.home, homeLogo, b, w / 2f, h * 0.71f, r)
-                status?.let { c.drawText(it, w / 2f, h - 34f - statusPaint.descent(), statusPaint) }
-            }
-            CardShape.SQUARE -> {
-                if (channel != null || s.channelName != null) logoTile(c, channel, s.channelName ?: "", centerX = w / 2f, left = null, top = 32f, maxW = w * 0.5f, h = 84f)
-                drawTags(c, s.tags, left = null, right = w - 32f, top = 36f, h = 42f)
-                val cy = h * 0.50f
-                val r = 92f
-                badge(c, s.away, awayLogo, a, w / 2f - 210f, cy, r)
-                badge(c, s.home, homeLogo, b, w / 2f + 210f, cy, r)
-                centreText(c, score ?: "vs", w / 2f, cy, if (score != null) 84f else 60f, BOLD)
-                status?.let { c.drawText(it, w / 2f, h - 34f - statusPaint.descent(), statusPaint) }
-            }
+            team(s.away, awayLogo, a)
+            c.drawText("vs", f.cx, y + vsH / 2f - (vsPaint.descent() + vsPaint.ascent()) / 2f, vsPaint)
+            y += vsH
+            team(s.home, homeLogo, b)
+        } else {
+            val r = 29f * u
+            val off = w * (if (shape == CardShape.WIDE) 0.22f else 0.25f)
+            val nameMax = 2f * (off - f.left)
+            val block = 2 * r + 5f * u + namePaint.fontSpacing
+            val top = regionTop + ((regionBottom - regionTop) - block) / 2f
+            val cy = top + r
+            badge(c, s.away, awayLogo, a, f.cx - off, cy, r)
+            badge(c, s.home, homeLogo, b, f.cx + off, cy, r)
+            val ny = top + 2 * r + 5f * u - namePaint.ascent()
+            c.drawText(TextUtils.ellipsize(s.away.name, namePaint, nameMax, TextUtils.TruncateAt.END).toString(), f.cx - off, ny, namePaint)
+            c.drawText(TextUtils.ellipsize(s.home.name, namePaint, nameMax, TextUtils.TruncateAt.END).toString(), f.cx + off, ny, namePaint)
+            c.drawText("vs", f.cx, cy - (vsPaint.descent() + vsPaint.ascent()) / 2f, vsPaint)
         }
     }
 
     private fun teamColor(t: CardSpec.Team): Int = t.color ?: hueColor(t.name)
 
-    /** A team's badge: its colour, a white ring, its logo (or its letters). */
+    /** A team's badge: its logo on a light disc (team logos are made for light backgrounds), or its letters on its colour. */
     private fun badge(c: Canvas, team: CardSpec.Team, logo: Bitmap?, color: Int, cx: Float, cy: Float, r: Float) {
+        val art = logo?.let { trim(it) }?.takeIf { it.width > 0 && it.height > 0 }
         val fill = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            this.color = darken(color, 0.12f)
-            setShadowLayer(18f, 0f, 6f, 0x80000000.toInt())
+            this.color = if (art != null) 0xFFF5F7FA.toInt() else darken(color, 0.12f)
+            setShadowLayer(r * 0.18f, 0f, r * 0.06f, 0x80000000.toInt())
         }
         c.drawCircle(cx, cy, r, fill)
-        val ring = Paint(Paint.ANTI_ALIAS_FLAG).apply { style = Paint.Style.STROKE; strokeWidth = r * 0.075f; this.color = 0xE6FFFFFF.toInt() }
-        c.drawCircle(cx, cy, r - ring.strokeWidth / 2f, ring)
-        val art = logo?.let { trim(it) }
-        if (art != null && art.width > 0 && art.height > 0) {
-            val box = r * 1.28f
-            val scale = minOf(box / art.width, box / art.height)
+        if (art != null) {
+            val box = r * 1.36f
+            val scale = minOf(box / art.width, box / art.height, MAX_UPSCALE)
             val bw = art.width * scale
             val bh = art.height * scale
             c.drawBitmap(art, null, RectF(cx - bw / 2f, cy - bh / 2f, cx + bw / 2f, cy + bh / 2f), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
@@ -260,103 +307,101 @@ internal object LauncherCards {
 
     // ------------------------------------------------------------------ pieces
 
-    /** A dark backdrop tinted with the logo's colour, with a soft, blurred copy of the logo in it. */
-    private fun backdrop(c: Canvas, w: Float, h: Float, logo: LogoArt?, name: String) {
+    /** A plain backdrop in the logo's colour, brightest just above the middle, fading to dark at the edges. */
+    private fun backdrop(c: Canvas, w: Float, h: Float, tint: Int) {
         c.drawColor(BASE)
-        val tint = logo?.tint ?: hueColor(name)
-        val g = Paint(Paint.ANTI_ALIAS_FLAG).apply {
-            shader = LinearGradient(
-                0f, 0f, w, h,
-                intArrayOf(darken(tint, 0.42f), darken(tint, 0.74f), BASE),
-                floatArrayOf(0f, 0.55f, 1f),
+        val p = Paint(Paint.ANTI_ALIAS_FLAG).apply {
+            isDither = true
+            shader = RadialGradient(
+                w / 2f, h * 0.40f, maxOf(w, h) * 0.8f,
+                intArrayOf(blend(tint, 0.35f), blend(tint, 0.72f), BASE),
+                floatArrayOf(0f, 0.62f, 1f),
                 Shader.TileMode.CLAMP
             )
         }
-        c.drawRect(0f, 0f, w, h, g)
-        // The logo again, large, soft and faint, towards the right: every channel gets its own look.
-        logo?.bitmap?.let { art ->
-            val small = Bitmap.createScaledBitmap(art, 24, maxOf(1, (24f * art.height / art.width).toInt()), true)
-            val bh = h * 1.15f
-            val bw = (bh * art.width / art.height).coerceAtMost(w * 1.2f)
-            val bhFit = bw * art.height / art.width
-            val left = w - bw * 0.78f
-            val top = (h - bhFit) / 2f
-            val p = Paint(Paint.FILTER_BITMAP_FLAG).apply { alpha = 34 }
-            c.drawBitmap(small, null, RectF(left, top, left + bw, top + bhFit), p)
-        }
-        bottomShade(c, w, h, 0.32f)
+        c.drawRect(0f, 0f, w, h, p)
     }
 
-    private fun bottomShade(c: Canvas, w: Float, h: Float, from: Float) {
-        val p = Paint().apply {
-            shader = LinearGradient(0f, h * from, 0f, h, 0x00000000, 0xCC000000.toInt(), Shader.TileMode.CLAMP)
-        }
-        c.drawRect(0f, h * from, w, h, p)
-    }
+    /** A logo ready to place: its size, and how to draw it at a top-left corner. */
+    private class LogoPlan(val w: Float, val h: Float, val draw: (Canvas, Float, Float) -> Unit)
 
     /**
-     * The channel's logo on a tile: white for most logos, dark for white ones (or the logo
-     * itself, corners rounded, when it has its own background). No logo: the channel's initials.
+     * How a channel's logo is shown, at most [h] high and [maxW] wide: light logos straight on the
+     * card, dark or coloured ones on a white tile, logos with their own background as they are
+     * (corners rounded). No logo: the channel's initials.
      */
-    private fun logoTile(c: Canvas, logo: LogoArt?, name: String, centerX: Float?, left: Float?, top: Float, maxW: Float, h: Float): RectF {
-        val radius = h * 0.2f
-        val shadow = Paint(Paint.ANTI_ALIAS_FLAG).apply { setShadowLayer(16f, 0f, 5f, 0x73000000) }
+    private fun planLogo(logo: LogoArt?, name: String, maxW: Float, h: Float): LogoPlan {
         if (logo == null) {
             val text = initials(name)
-            val tp = textPaint(h * 0.42f, Color.WHITE, BOLD)
-            val tw = (tp.measureText(text) + h * 0.7f).coerceIn(h * 1.2f, maxW)
-            val x = centerX?.let { it - tw / 2f } ?: left ?: 0f
-            val rect = RectF(x, top, x + tw, top + h)
-            shadow.color = darken(hueColor(name), 0.15f)
-            c.drawRoundRect(rect, radius, radius, shadow)
-            centreText(c, text, rect.centerX(), rect.centerY(), h * 0.42f, BOLD)
-            return rect
+            val p = textPaint(h * 0.72f, Color.WHITE, BOLD).apply { textAlign = Paint.Align.CENTER }
+            val tw = p.measureText(text).coerceAtMost(maxW)
+            return LogoPlan(tw, h) { c, l, t -> c.drawText(text, l + tw / 2f, t + h / 2f - (p.descent() + p.ascent()) / 2f, p) }
         }
         val art = logo.bitmap
         val aspect = art.width.toFloat() / art.height
-        if (logo.opaque) {
-            // Its own background: the logo is the tile.
-            var th = h
+        val bmpPaint = Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG)
+        fun fit(boxW: Float, boxH: Float): Pair<Float, Float> {
+            var th = boxH
             var tw = th * aspect
-            if (tw > maxW) { tw = maxW; th = tw / aspect }
-            val x = centerX?.let { it - tw / 2f } ?: left ?: 0f
-            val rect = RectF(x, top, x + tw, top + th)
-            shadow.color = Color.BLACK
-            c.drawRoundRect(rect, radius, radius, shadow)
-            val layer = c.saveLayer(rect, null)
-            c.drawRoundRect(rect, radius, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
-            c.drawBitmap(art, null, rect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN) })
-            c.restoreToCount(layer)
-            return rect
+            if (tw > boxW) { tw = boxW; th = tw / aspect }
+            val cap = art.height * MAX_UPSCALE
+            if (th > cap) { th = cap; tw = th * aspect }
+            return tw to th
         }
-        val inner = h * 0.16f
-        var ih = h - inner * 2
-        var iw = ih * aspect
-        val maxInner = maxW - inner * 2
-        if (iw > maxInner) { iw = maxInner; ih = iw / aspect }
-        val tw = maxOf(iw + inner * 2, h * 1.25f)
-        val x = centerX?.let { it - tw / 2f } ?: left ?: 0f
-        val rect = RectF(x, top, x + tw, top + h)
-        shadow.color = if (logo.light) 0xFF1C2230.toInt() else Color.WHITE
-        c.drawRoundRect(rect, radius, radius, shadow)
-        val lx = rect.centerX() - iw / 2f
-        val ly = rect.centerY() - ih / 2f
-        c.drawBitmap(art, null, RectF(lx, ly, lx + iw, ly + ih), Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG))
-        return rect
+        return when {
+            logo.opaque -> {
+                val (tw, th) = fit(maxW, h)
+                val radius = th * 0.14f
+                LogoPlan(tw, th) { c, l, t ->
+                    val rect = RectF(l, t, l + tw, t + th)
+                    c.drawRoundRect(rect, radius, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.BLACK; setShadowLayer(th * 0.1f, 0f, th * 0.03f, 0x73000000) })
+                    val layer = c.saveLayer(rect, null)
+                    c.drawRoundRect(rect, radius, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE })
+                    c.drawBitmap(art, null, rect, Paint(Paint.ANTI_ALIAS_FLAG or Paint.FILTER_BITMAP_FLAG).apply { xfermode = PorterDuffXfermode(PorterDuff.Mode.SRC_IN) })
+                    c.restoreToCount(layer)
+                }
+            }
+            logo.lum >= 0.55f -> {
+                val (tw, th) = fit(maxW, h)
+                LogoPlan(tw, th) { c, l, t -> c.drawBitmap(art, null, RectF(l, t, l + tw, t + th), bmpPaint) }
+            }
+            else -> {
+                val inner = h * 0.16f
+                val (iw, ih) = fit(maxW - inner * 2, h - inner * 2)
+                val pw = maxOf(iw + inner * 2, h * 1.25f).coerceAtMost(maxW)
+                val ph = ih + inner * 2
+                val radius = ph * 0.2f
+                LogoPlan(pw, ph) { c, l, t ->
+                    val rect = RectF(l, t, l + pw, t + ph)
+                    c.drawRoundRect(rect, radius, radius, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = Color.WHITE; setShadowLayer(ph * 0.1f, 0f, ph * 0.03f, 0x73000000) })
+                    val lx = rect.centerX() - iw / 2f
+                    val ly = rect.centerY() - ih / 2f
+                    c.drawBitmap(art, null, RectF(lx, ly, lx + iw, ly + ih), bmpPaint)
+                }
+            }
+        }
     }
 
-    /** Tags in a line, from the left or from the right. */
-    private fun drawTags(c: Canvas, tags: List<CardTag>, left: Float?, right: Float?, top: Float, h: Float) {
+    private fun tagWidths(tags: List<CardTag>, h: Float): List<Float> {
+        val tp = textPaint(h * 0.58f, Color.WHITE, BOLD).apply { letterSpacing = 0.06f }
+        return tags.map { t -> tp.measureText(t.text) + h * 0.78f + (if (t.dot != null) h * 0.42f else 0f) }
+    }
+
+    private fun tagsWidth(tags: List<CardTag>, h: Float): Float =
+        if (tags.isEmpty()) 0f else tagWidths(tags, h).sum() + h * 0.28f * (tags.size - 1)
+
+    /** Tags in a line, starting at [left]. */
+    private fun drawTags(c: Canvas, tags: List<CardTag>, left: Float, top: Float, h: Float) {
         if (tags.isEmpty()) return
-        val tp = textPaint(h * 0.5f, Color.WHITE, BOLD).apply { letterSpacing = 0.06f }
-        val widths = tags.map { t -> tp.measureText(t.text) + h * 0.62f + (if (t.dot != null) h * 0.42f else 0f) }
-        val gap = h * 0.25f
-        var x = left ?: ((right ?: 0f) - widths.sum() - gap * (tags.size - 1))
+        val tp = textPaint(h * 0.58f, Color.WHITE, BOLD).apply { letterSpacing = 0.06f; clearShadowLayer() }
+        val widths = tagWidths(tags, h)
+        val gap = h * 0.28f
+        var x = left
         tags.forEachIndexed { i, t ->
             val rect = RectF(x, top, x + widths[i], top + h)
-            val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = t.background; setShadowLayer(10f, 0f, 3f, 0x59000000) }
+            val bg = Paint(Paint.ANTI_ALIAS_FLAG).apply { color = t.background; setShadowLayer(h * 0.2f, 0f, h * 0.06f, 0x59000000) }
             c.drawRoundRect(rect, h * 0.22f, h * 0.22f, bg)
-            var tx = rect.left + h * 0.31f
+            var tx = rect.left + h * 0.39f
             t.dot?.let { d ->
                 c.drawCircle(tx + h * 0.15f, rect.centerY(), h * 0.15f, Paint(Paint.ANTI_ALIAS_FLAG).apply { color = d })
                 tx += h * 0.42f
@@ -376,23 +421,23 @@ internal object LauncherCards {
         textSize = size
         this.color = color
         typeface = face
-        setShadowLayer(8f, 0f, 2f, 0x8C000000.toInt())
+        setShadowLayer(size * 0.12f, 0f, size * 0.03f, 0x8C000000.toInt())
     }
 
     /**
-     * The title on up to [maxLines] lines: a size smaller if that makes it fit, otherwise cut at
-     * a whole word with "…" (never in the middle of a word).
+     * The title, centred, on up to [maxLines] lines: a size smaller if that makes it fit,
+     * otherwise cut at a whole word with "…" (never in the middle of a word).
      */
     private fun fitTitle(text: String, size: Float, width: Int, maxLines: Int): StaticLayout {
         var last: StaticLayout? = null
-        for (s in listOf(size, size * 0.86f, size * 0.76f)) {
+        for (s in listOf(size, size * 0.88f, size * 0.78f)) {
             val p = textPaint(s, Color.WHITE, BOLD)
             val l = layout(text, p, width, maxLines)
             last = l
             if (l.lineCount <= maxLines && l.getEllipsisCount(l.lineCount - 1) == 0) return l
         }
         val l = last!!
-        val p = textPaint(size * 0.76f, Color.WHITE, BOLD)
+        val p = textPaint(size * 0.78f, Color.WHITE, BOLD)
         val shown = text.substring(0, (l.getLineStart(l.lineCount - 1) + l.getEllipsisStart(l.lineCount - 1)).coerceIn(0, text.length))
         val cut = shown.substringBeforeLast(' ', shown).trimEnd(',', ':', ';', '-', '–', ' ')
         return layout("$cut…", p, width, maxLines)
@@ -400,10 +445,11 @@ internal object LauncherCards {
 
     private fun layout(text: String, p: TextPaint, width: Int, maxLines: Int): StaticLayout =
         StaticLayout.Builder.obtain(text, 0, text.length, p, width)
+            .setAlignment(Layout.Alignment.ALIGN_CENTER)
             .setMaxLines(maxLines)
             .setEllipsize(TextUtils.TruncateAt.END)
             .setIncludePad(false)
-            .setLineSpacing(0f, 0.98f)
+            .setLineSpacing(0f, 1.0f)
             .setBreakStrategy(Layout.BREAK_STRATEGY_HIGH_QUALITY)
             .build()
 
@@ -435,10 +481,20 @@ internal object LauncherCards {
         return Color.rgb((Color.red(color) * k).toInt(), (Color.green(color) * k).toInt(), (Color.blue(color) * k).toInt())
     }
 
+    /** [color] mixed [by] of the way towards the card's dark base. */
+    private fun blend(color: Int, by: Float): Int {
+        val k = 1f - by
+        return Color.rgb(
+            (Color.red(color) * k + Color.red(BASE) * by).toInt(),
+            (Color.green(color) * k + Color.green(BASE) * by).toInt(),
+            (Color.blue(color) * k + Color.blue(BASE) * by).toInt()
+        )
+    }
+
     // ------------------------------------------------------------------ logos
 
     /** A logo ready to draw: trimmed of empty edges, with what it's like (for the tile and the tint). */
-    private class LogoArt(val bitmap: Bitmap, val opaque: Boolean, val light: Boolean, val tint: Int?) {
+    private class LogoArt(val bitmap: Bitmap, val opaque: Boolean, val lum: Float, val tint: Int?) {
         companion object {
             fun of(raw: Bitmap?): LogoArt? {
                 if (raw == null || raw.width < 2 || raw.height < 2) return null
@@ -470,7 +526,7 @@ internal object LauncherCards {
                     }
                 }
                 val opaque = seeThrough < px.size / 40
-                val light = solid > 0 && lumSum / solid > 0.8
+                val lum = if (solid > 0) (lumSum / solid).toFloat() else 0f
                 val best = buckets.indices.maxByOrNull { buckets[it] } ?: 0
                 val tint = if (buckets[best] > px.size * 0.02) {
                     val k = buckets[best]
@@ -478,7 +534,7 @@ internal object LauncherCards {
                     Color.colorToHSV(c, hsv)
                     Color.HSVToColor(floatArrayOf(hsv[0], hsv[1].coerceAtMost(0.8f), 0.7f))
                 } else null
-                return LogoArt(art, opaque, light, tint)
+                return LogoArt(art, opaque, lum, tint)
             }
         }
     }
