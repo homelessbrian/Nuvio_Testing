@@ -1095,6 +1095,20 @@ class LiveTvPreferences @Inject constructor(
         }
     }
 
+    /**
+     * Pick favorites (several at once): of [inList], exactly [chosen] are favorites afterwards.
+     * One save; favorites outside [inList] keep their place, new ones go at the end in list order.
+     */
+    suspend fun setFavoritesIn(inList: List<String>, chosen: Set<String>) {
+        store.edit { p ->
+            val cur = decodeStringList(p[my(Keys.favorites)])
+            val inSet = inList.toHashSet()
+            val kept = cur.filter { it !in inSet || it in chosen }
+            val keptSet = kept.toHashSet()
+            p[my(Keys.favorites)] = encodeStringList(kept + inList.filter { it in chosen && it !in keptSet }.distinct())
+        }
+    }
+
     suspend fun moveFavorite(key: String, delta: Int) {
         store.edit { p ->
             val cur = decodeStringList(p[my(Keys.favorites)]).toMutableList()

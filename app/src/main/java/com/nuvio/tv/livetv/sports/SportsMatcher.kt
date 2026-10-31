@@ -316,7 +316,9 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                             compareByDescending<Triple<LiveChannel, Int, EpgProgram?>> { rank(it.first) }
                                 .thenByDescending { qualityRank(input.quality[it.first.key] ?: nameQuality(it.first.name)) }
                         )
-                        .take(if (national) 4 else 6)
+                        // More than the top few: their FHD/HD/SD copies (one row on the game page)
+                        // and the same network from other providers, as backups if one freezes.
+                        .take(if (national) 8 else 12)
                         .forEach { (ch, score, p) -> add(ev.id, ch.key, score, "$b listed by ESPN", p); byNetwork++ }
                 }
             }
@@ -349,9 +351,10 @@ internal class SportsMatcher(private val db: EpgDatabase) {
                     )
                 }
             if (list.isEmpty()) continue
-            // A dozen, not just the top few: the game page's "Channels from" choice picks among
-            // these without searching the guide again.
-            out[eventId] = sortMatches(list, input.settings.bestChannelFirst, rank).take(12)
+            // Every channel the guide has for it (FHD/HD/SD copies are folded into one row on the
+            // game page, other regions under "+ N from other regions"), so nothing the guide shows
+            // is left out. 40 is only a guard against a runaway list; it costs no extra searching.
+            out[eventId] = sortMatches(list, input.settings.bestChannelFirst, rank).take(40)
         }
         // Events that run for days (golf, race weekends): what was looked for and found, for the report.
         val multi = teamEvents.filter { it.id in noStart }.joinToString(" | ") { ev ->
@@ -826,6 +829,29 @@ internal class SportsMatcher(private val db: EpgDatabase) {
             return REGION_WORDS.entries.firstOrNull { (_, w) ->
                 w.any { hasWord(prefix, it) || hasWord(tags, it) || hasWord(group, it) }
             }?.key
+        }
+
+        /** Words that only say which copy of a channel it is (its quality, a backup feed). */
+        private val COPY_WORDS = setOf(
+            "4k", "uhd", "2160", "2160p", "fhd", "1080", "1080p", "1080i", "hd", "720", "720p", "sd", "480", "576",
+            "hevc", "h265", "h264", "50fps", "60fps", "fps", "backup", "alt"
+        )
+
+        /** The same channel's copies (ESPN FHD, ESPN HD, ESPN SD) share this; other regions' don't. */
+        fun copyKey(ch: LiveChannel): String =
+            norm(ch.name.replace("+", " plus ")).split(' ').filter { it.isNotEmpty() && it !in COPY_WORDS }.joinToString(" ")
+
+        /**
+         * [list] (in order) with each channel's copies together: one entry per channel, the first
+         * copy in the list leading (or [playingKey]'s, while it plays).
+         */
+        fun groupCopies(list: List<ChannelMatch>, playingKey: String? = null): List<List<ChannelMatch>> {
+            val groups = LinkedHashMap<String, MutableList<ChannelMatch>>()
+            list.forEach { m -> groups.getOrPut(copyKey(m.channel).ifBlank { m.channel.key }) { ArrayList() } += m }
+            return groups.values.map { g ->
+                val i = g.indexOfFirst { it.channel.key == playingKey }
+                if (i > 0) listOf(g[i]) + g.filterIndexed { j, _ -> j != i } else g
+            }
         }
 
         fun preferenceRank(settings: SportsSettings): (LiveChannel) -> Int {

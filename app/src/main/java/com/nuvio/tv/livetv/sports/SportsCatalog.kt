@@ -16,14 +16,15 @@ object SportsCatalog {
 
     val leagues: List<League> = listOf(
         // ---- American football
+        // NFL and NBA: on by default in the US and Canada only (elsewhere, add them in Leagues or follow a team).
         League("football/nfl", Sport.AMERICAN_FOOTBALL, "NFL", "NFL", "football/nfl", guideWords = listOf("NFL"),
-            regions = EVERYWHERE, minutes = 195, color = 0xFF013369),
+            regions = NA, minutes = 195, color = 0xFF013369),
         League("football/college-football", Sport.AMERICAN_FOOTBALL, "College Football", "NCAAF", "football/college-football",
             guideWords = listOf("College Football", "NCAA Football", "NCAAF", "CFB"), regions = NA, minutes = 210,
             schoolNames = true, espnQuery = "&groups=80", color = 0xFF1E3A5F),
         // ---- Basketball
         League("basketball/nba", Sport.BASKETBALL, "NBA", "NBA", "basketball/nba", guideWords = listOf("NBA"),
-            regions = EVERYWHERE, minutes = 150, color = 0xFF1D428A),
+            regions = NA, minutes = 150, color = 0xFF1D428A),
         League("basketball/wnba", Sport.BASKETBALL, "WNBA", "WNBA", "basketball/wnba", guideWords = listOf("WNBA"),
             regions = NA, minutes = 120, color = 0xFFC8102E),
         League("basketball/mens-college-basketball", Sport.BASKETBALL, "Men's College Basketball", "NCAAM",
@@ -228,6 +229,7 @@ object SportsCatalog {
         soc("chi.copa_chi", "Copa Chile", "COPA CHI", listOf("Copa Chile"), color = 0xFFD52B1E),
         soc("per.1", "Liga 1 (Peru)", "PER", listOf("Liga 1 Peru", "Liga1"), color = 0xFFD91023),
         soc("par.1", "Paraguayan Primera", "PAR", listOf("Primera División Paraguay"), color = 0xFFD52B1E),
+        soc("par.1.supercopa", "Supercopa Paraguay", "SUPERCOPA", listOf("Supercopa Paraguay"), color = 0xFFD52B1E),
         soc("uru.1", "Liga AUF (Uruguay)", "URU", listOf("Liga AUF", "Uruguayan Primera"), color = 0xFF0038A8),
         soc("ecu.1", "LigaPro (Ecuador)", "ECU", listOf("LigaPro", "Liga Pro Ecuador"), color = 0xFFFFD100),
         soc("bol.1", "Bolivian Primera", "BOL", listOf("Liga Profesional Boliviana"), color = 0xFF007934),
@@ -237,7 +239,8 @@ object SportsCatalog {
         soc("hon.1", "Liga Nacional (Honduras)", "HON", listOf("Liga Nacional Honduras"), color = 0xFF0073CF),
         soc("crc.1", "Primera División (Costa Rica)", "CRC", listOf("Liga Promérica", "Costa Rica Primera"), color = 0xFF002B7F),
         soc("slv.1", "Primera División (El Salvador)", "SLV", listOf("Primera División El Salvador"), color = 0xFF0047AB),
-        soc("concacaf.central.american.cup", "Central American Cup", "CAC", listOf("Central American Cup", "Copa Centroamericana"), color = 0xFF0B2545),
+        // On by default in the US and "Somewhere else" (Central America); named as Concacaf does, so searching "Concacaf" finds it.
+        soc("concacaf.central.american.cup", "Concacaf Central American Cup", "CAC", listOf("Central American Cup", "Copa Centroamericana"), setOf("US", "OTHER"), color = 0xFF0B2545),
         soc("ksa.kings.cup", "King's Cup (Saudi)", "KINGS", listOf("King's Cup"), color = 0xFF006C35),
         soc("ind.2", "I-League", "I-LEAGUE", listOf("I-League"), color = 0xFFFF9933),
         soc("afc.cup", "AFC Champions League Two", "ACL2", listOf("AFC Champions League Two", "ACL Two"), color = 0xFF1A3C6E),
@@ -432,7 +435,7 @@ object SportsCatalog {
         "soccer/col.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana", "soccer/col.copa"),
         "soccer/chi.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana", "soccer/chi.copa_chi"),
         "soccer/per.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
-        "soccer/par.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
+        "soccer/par.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana", "soccer/par.1.supercopa"),
         "soccer/uru.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
         "soccer/ecu.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),
         "soccer/bol.1" to listOf("soccer/conmebol.libertadores", "soccer/conmebol.sudamericana"),

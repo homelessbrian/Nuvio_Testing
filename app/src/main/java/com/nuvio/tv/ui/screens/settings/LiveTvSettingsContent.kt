@@ -1141,7 +1141,8 @@ internal fun LiveTvSettingsContent(
                     )
                     SettingsToggleRow(
                         "Switch to a Backup Channel",
-                        "If a channel won't play, switch to another channel with the same name from another group or playlist (like \"ESPN\" and \"ESPN Backup\")",
+                        "If a channel won't play, switch to another channel with the same name from another group or playlist (like \"ESPN\" and \"ESPN Backup\"). " +
+                            "During a live game, also when it keeps freezing, moving on to the next channel showing the game",
                         s.autoBackupChannel,
                         { update { it.copy(autoBackupChannel = !it.autoBackupChannel) } }
                     )

@@ -349,6 +349,10 @@ fun LiveTvGuideScreen(
     var savedMovedKey by remember { mutableStateOf<String?>(null) }
     var visibilityChannels by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
     var pendingHidden by remember { mutableStateOf<Set<String>>(emptySet()) }
+    // Pick favorites (several at once, TiviMate style): a group's channels, ★ on the ones picked.
+    var favoritesMode by remember { mutableStateOf(false) }
+    var favoritesChannels by remember { mutableStateOf<List<LiveChannel>>(emptyList()) }
+    var pendingFavorites by remember { mutableStateOf<Set<String>>(emptySet()) }
     // A channel to move the cursor to once it's in the list (after a group switch, etc).
     var highlightKey by remember { mutableStateOf<String?>(null) }
     val groupsListState = rememberLazyListState()
@@ -381,6 +385,7 @@ fun LiveTvGuideScreen(
     var epgUnassignedOnly by remember { mutableStateOf(false) }
     val channels = when {
         visibilityMode -> visibilityChannels
+        favoritesMode -> favoritesChannels
         reorderActive -> reorderList
         savedOrder != null -> savedOrder!!
         epgUnassignedOnly -> ui.channels.filter { programs[it.key].isNullOrEmpty() }
@@ -1293,6 +1298,39 @@ fun LiveTvGuideScreen(
                                     }
                                     return@onPreviewKeyEvent true
                                 }
+                                if (favoritesMode) {
+                                    // OK: add or remove · Left: none · Right: all · Back: save and return
+                                    val down = event.type == KeyEventType.KeyDown
+                                    when {
+                                        isOk && event.type == KeyEventType.KeyUp -> {
+                                            channels.getOrNull(row)?.let { ch ->
+                                                pendingFavorites = if (ch.key in pendingFavorites) pendingFavorites - ch.key else pendingFavorites + ch.key
+                                            }
+                                        }
+                                        !down -> Unit
+                                        event.key == Key.DirectionUp -> moveRow(-1)
+                                        event.key == Key.DirectionDown -> moveRow(1)
+                                        event.key == Key.PageUp || event.key == Key.ChannelUp -> moveRow(-8)
+                                        event.key == Key.PageDown || event.key == Key.ChannelDown -> moveRow(8)
+                                        event.key == Key.DirectionLeft -> pendingFavorites = pendingFavorites - channels.map { it.key }.toSet()
+                                        event.key == Key.DirectionRight -> pendingFavorites = pendingFavorites + channels.map { it.key }
+                                        event.key == Key.Back -> {
+                                            val all = favoritesChannels
+                                            val before = all.count { it.key in user.favorites }
+                                            val after = all.count { it.key in pendingFavorites }
+                                            viewModel.saveFavorites(all, pendingFavorites)
+                                            favoritesMode = false
+                                            com.nuvio.tv.livetv.record.LiveTvNotice.show(
+                                                when {
+                                                    after == before -> "$after ${if (after == 1) "favorite" else "favorites"} in this group"
+                                                    after > before -> "Added ${after - before} to Favorites"
+                                                    else -> "Removed ${before - after} from Favorites"
+                                                }
+                                            )
+                                        }
+                                    }
+                                    return@onPreviewKeyEvent true
+                                }
                                 // Change Logo open: Right goes into the panel for the highlighted channel.
                                 if (logoPickerFor != null && event.key == Key.DirectionRight) {
                                     if (event.type == KeyEventType.KeyDown) {
@@ -1484,7 +1522,7 @@ fun LiveTvGuideScreen(
                                             channelColWidth = channelColWidth,
                                             windowStart = windowStart,
                                             now = now,
-                                            isFavorite = ch.key in user.favorites,
+                                            isFavorite = if (favoritesMode) ch.key in pendingFavorites else ch.key in user.favorites,
                                             isPlaying = ch.key == playback.channelKey,
                                             focusColumn = if (index == row && (gridFocused || epgPickerFor != null || logoPickerFor != null) && !nameFocus && !reorderActive) column else null,
                                             focusedBlock = if (index == row) focusedBlock else null,
@@ -1728,6 +1766,23 @@ fun LiveTvGuideScreen(
                 LiveText("Back: save and finish", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
             }
         }
+        if (favoritesMode) {
+            Column(
+                modifier = Modifier
+                    .align(Alignment.BottomEnd)
+                    .padding(end = 36.dp, bottom = 24.dp)
+                    .glass(guideInfoGlass(settings.guideInfoBackground), RoundedCornerShape(10.dp))
+                    .padding(horizontal = 16.dp, vertical = 12.dp)
+            ) {
+                LiveText("Pick favorites", size = 15.sp, weight = FontWeight.Bold)
+                Spacer(Modifier.height(4.dp))
+                LiveText("${favoritesChannels.count { it.key in pendingFavorites }} of ${favoritesChannels.size} picked", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+                LiveText("OK: add or remove ★", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+                LiveText("Left: remove all", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+                LiveText("Right: add all", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+                LiveText("Back: save and return", color = NuvioTheme.colors.TextSecondary, size = 13.sp)
+            }
+        }
         if (visibilityMode) {
             Column(
                 modifier = Modifier
@@ -1909,6 +1964,14 @@ fun LiveTvGuideScreen(
                 onCopy = { menuTarget = null; copyPickerFor = target.channel },
                 isCopyHere = viewModel.isCopyIn(ui.selectedGroupId, target.channel),
                 onRemoveCopy = { viewModel.removeCopy(ui.selectedGroupId, target.channel); menuTarget = null },
+                onPickFavorites = {
+                    menuTarget = null
+                    favoritesChannels = channels
+                    pendingFavorites = user.favorites.toSet() intersect channels.map { it.key }.toSet()
+                    favoritesMode = true
+                    row = channels.indexOfFirst { it.key == target.channel.key }.coerceAtLeast(0)
+                    scope.launch { delay(60); runCatching { gridFocus.requestFocus() } }
+                },
                 onManageVisibility = {
                     menuTarget = null
                     val list = viewModel.channelsWithHidden()
@@ -2066,6 +2129,22 @@ fun LiveTvGuideScreen(
                             if (ui.selectedGroupId == g.id) viewModel.selectGroup(ui.defaultGroupId)
                         })
                     }
+                    if (g.id != ChannelGroup.FAVORITES && g.id != ChannelGroup.RECENT && g.id != ChannelGroup.SEARCH) add("Pick favorites…" to {
+                        groupMenu = null
+                        val list = viewModel.channelsInGroup(g.id)
+                        if (list.isEmpty()) {
+                            com.nuvio.tv.livetv.record.LiveTvNotice.show("No channels in ${g.title}")
+                        } else {
+                            if (ui.selectedGroupId != g.id) viewModel.selectGroup(g.id)
+                            favoritesChannels = list
+                            pendingFavorites = user.favorites.toSet() intersect list.map { it.key }.toSet()
+                            favoritesMode = true
+                            row = 0
+                            groupsOpen = false
+                            nameFocus = settings.browseByChannelName
+                            scope.launch { delay(80); listState.scrollToItem(0); runCatching { gridFocus.requestFocus() } }
+                        }
+                    })
                     add("Manage visibility" to {
                         groupMenu = null
                         val all = viewModel.groupsWithHidden()
@@ -3229,6 +3308,8 @@ private fun ChannelContextMenu(
     isCopyHere: Boolean,
     onRemoveCopy: () -> Unit,
     onManageVisibility: () -> Unit,
+    /** Pick favorites in this group (several at once). */
+    onPickFavorites: () -> Unit,
     onHideGroup: () -> Unit,
     onProgramInfo: () -> Unit,
     streamProgram: EpgProgram?,
@@ -3288,6 +3369,7 @@ private fun ChannelContextMenu(
             item { MenuItem("Schedule a recording…", onClick = onScheduleRecording) }
             item { MenuHeader("Favorites & groups") }
             item { MenuItem(if (isFavorite) "Remove from favorites" else "Add to favorites", onClick = onToggleFavorite) }
+            if (!inFavoritesGroup) item { MenuItem("Pick favorites in this group…", onClick = onPickFavorites) }
             if (isFavorite && inFavoritesGroup) {
                 item { MenuItem("Move up in favorites", onClick = { onMoveFavorite(-1) }) }
                 item { MenuItem("Move down in favorites", onClick = { onMoveFavorite(1) }) }

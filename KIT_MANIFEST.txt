@@ -1,14 +1,21 @@
-Nuvio + IPTV kit 2026-10-31 14:45 — Sports: "Channels from" (region / language filter for a game's channels)
+Nuvio + IPTV kit 2026-10-31 15:10 — Sports channels, favorites, leagues
+(Replaces the 15:05 kit; also includes the "Channels from" region kit.)
 
 New
-- app/src/main/java/com/nuvio/tv/livetv/sports/SportsChannelRegion.kt — region/language rules, the "🌐 UK ▾" button and its pop-up
+- livetv/sports/SportsChannelRegion.kt — "Channels from" region/language rules, button and pop-up
 
-Changed
-- livetv/sports/SportsMatcher.kt — reads a channel's region/language from its name or group; keeps up to 12 channels per game (was 8)
-- livetv/sports/SportsModels.kt — new saved setting channelRegion
-- livetv/sports/SportsRepository.kt — puts the chosen region's channels first for every game (no new guide search)
-- livetv/sports/SportsScreen.kt — game page: region button, filtered list, "+ N from other regions"
-- ui/screens/settings/SportsSettingsContent.kt — Sports settings > Channels > Channels From
-- livetv/model/LiveTvModels.kt — KIT_STAMP 2026-10-31 14:45
+Changed (all under app/src/main/java/com/nuvio/tv/)
+- livetv/sports/SportsCatalog.kt — "Concacaf Central American Cup" (on for US + Somewhere else); NFL and NBA on by default in US/Canada only; new Supercopa Paraguay (ESPN soccer/par.1.supercopa), related to the Paraguayan Primera
+- livetv/sports/SportsMatcher.kt — every channel the guide has for a game (up to 40); channel region; FHD/HD/SD copy grouping
+- livetv/sports/SportsModels.kt — saved setting channelRegion
+- livetv/sports/SportsRepository.kt — region order; next channel for a game that fails/freezes
+- livetv/sports/SportsScreen.kt — game page: region button, one row per channel, "+ N from other regions"
+- livetv/sports/SportsDesign.kt — channel row shows its other copies ("+ HD SD")
+- livetv/player/LiveTvPlaybackController.kt — live game: switch channel when one won't start, fails, or freezes twice in 3 min
+- livetv/ui/LiveTvGuideScreen.kt, livetv/ui/LiveTvViewModel.kt, livetv/data/LiveTvPreferences.kt — Pick favorites
+- ui/screens/settings/SportsSettingsContent.kt — Sports > Channels > Channels From
+- ui/screens/settings/LiveTvSettingsContent.kt — backup-channel setting text
+- livetv/model/LiveTvModels.kt — KIT_STAMP 2026-10-31 15:10
 
 No files to delete.
+(Polish Ekstraklasa and Copa Paraguay were added in the nuvio-data repo, not in this kit.)

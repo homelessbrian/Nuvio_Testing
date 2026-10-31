@@ -787,6 +787,15 @@ class LiveTvViewModel @Inject constructor(
 
     fun toggleFavorite(channel: LiveChannel) = viewModelScope.launch { prefs.toggleFavorite(channel.key) }
     fun moveFavorite(channel: LiveChannel, delta: Int) = viewModelScope.launch { prefs.moveFavorite(channel.key, delta) }
+
+    /** A group's channels as the guide shows them (for Pick favorites from the group menu). */
+    fun channelsInGroup(groupId: String): List<LiveChannel> =
+        buildUi(displayChannels.value, userState.value, settings.value, groupId, "", true, exactGroup = true).channels
+
+    /** Saves Pick favorites: of [inList], exactly [chosen] are favorites. */
+    fun saveFavorites(inList: List<LiveChannel>, chosen: Set<String>) = viewModelScope.launch {
+        prefs.setFavoritesIn(inList.map { it.key }, chosen)
+    }
     fun hideChannel(channel: LiveChannel) = viewModelScope.launch { prefs.setChannelHidden(channel.key, true) }
     fun hideGroup(groupId: String) = viewModelScope.launch {
         // Favorites, Recently watched and All channels are switched off in the settings rather

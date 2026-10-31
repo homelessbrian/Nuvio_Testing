@@ -1212,8 +1212,15 @@ private fun GamePage(
     }
     // None of them from that region: show them all (with a line saying so) rather than nothing.
     val noneInRegion = regionChoice.isNotBlank() && matches.isNotEmpty() && inRegion.isEmpty()
-    val elsewhere = matches.size - inRegion.size
     val shown = if (regionChoice.isBlank() || otherRegions || noneInRegion) matches else inRegion
+    // One row per channel: its FHD/HD/SD copies folded in (the one playing leads).
+    val shownRows = remember(shown, playingKey) { SportsMatcher.groupCopies(shown, playingKey) }
+    val elsewhere = remember(matches, inRegion) {
+        if (inRegion === matches) 0 else {
+            val keep = inRegion.mapTo(HashSet()) { it.channel.key }
+            SportsMatcher.groupCopies(matches.filter { it.channel.key !in keep }).size
+        }
+    }
     // Only worth a button when this game's channels come from more than one place (or a region is set).
     val regionButton = matches.isNotEmpty() && (regionChoice.isNotBlank() || regionCodes.toSet().size > 1)
     if (pickRegion) {
@@ -1240,7 +1247,8 @@ private fun GamePage(
                 verticalArrangement = Arrangement.spacedBy(7.dp),
                 contentPadding = PaddingValues(horizontal = 6.dp, vertical = 4.dp)
             ) {
-                itemsIndexed(shown, key = { _, m -> m.channel.key }) { i, m ->
+                itemsIndexed(shownRows, key = { _, g -> SportsMatcher.copyKey(g[0].channel).ifBlank { g[0].channel.key } }) { i, g ->
+                    val m = g[0]
                     SportsChannelRow(
                         m = m,
                         finished = ev.state == GameState.POST,
@@ -1248,6 +1256,7 @@ private fun GamePage(
                         now = now,
                         eventStartMs = ev.startMs,
                         use24h = use24h,
+                        copies = g.drop(1),
                         modifier = if (i == 0) Modifier.focusRequester(first) else Modifier,
                         onClick = { onChoose(m) }
                     )
